@@ -3,10 +3,9 @@
 use std::{cmp::Ordering, fmt::Display};
 
 use compact_str::CompactString;
-use either::Either;
 use fxhash::FxHashSet;
-use numeric::Numeric;
-use regex::AlRegex;
+pub use numeric::Numeric;
+pub use regex::AlRegex;
 
 mod numeric;
 mod regex;
@@ -455,6 +454,12 @@ impl Display for DeclareGuardExpr {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Hash)]
+pub enum DictKey {
+    Identifier(Identifier),
+    Expr(Expr),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Hash)]
 pub enum Expr {
     StrLiteral {
         pieces: Vec<StrLiteralPiece>,
@@ -483,7 +488,7 @@ pub enum Expr {
         elements: Vec<Expr>,
     },
     DictLiteral {
-        elements: Vec<(Either<Identifier, Expr>, Expr)>,
+        elements: Vec<(DictKey, Expr)>,
     },
     Index {
         expr: Box<Expr>,
