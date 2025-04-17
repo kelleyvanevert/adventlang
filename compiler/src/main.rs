@@ -4,19 +4,27 @@ use inkwell::{
     execution_engine::JitFunction,
     memory_buffer::MemoryBuffer,
     module::Module,
-    passes::{PassBuilderOptions, PassManager, PassManagerSubType},
-    targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine},
+    passes::PassBuilderOptions,
+    targets::{CodeModel, InitializationConfig, RelocMode, Target, TargetMachine},
 };
 
 type MainFn = unsafe extern "C" fn() -> i32;
+
+#[unsafe(no_mangle)]
+pub extern "C" fn my_mul2(arg: i32) -> i32 {
+    arg * 2
+}
 
 fn main() {
     let llvm_ir_code = "
 @variable = global i32 21
 
+declare i32 @my_mul2(i32)
+
 define i32 @main() {
     %1 = load i32, i32* @variable
-    ret i32 %1
+    %2 = call i32 @my_mul2(i32 %1)
+    ret i32 %2
 }
 ";
 
@@ -34,6 +42,8 @@ define i32 @main() {
     let execution_engine = module
         .create_jit_execution_engine(OptimizationLevel::Default)
         .expect("can create execution engine");
+
+    execution_engine.add_global_mapping(&module.get_function("my_mul2").unwrap(), my_mul2 as usize);
 
     let f: JitFunction<MainFn> =
         unsafe { execution_engine.get_function("main") }.expect("can get main fn");
