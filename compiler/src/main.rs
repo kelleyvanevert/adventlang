@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use inkwell::{
     OptimizationLevel,
     context::Context,
@@ -5,7 +7,7 @@ use inkwell::{
     memory_buffer::MemoryBuffer,
     module::Module,
     passes::PassBuilderOptions,
-    targets::{CodeModel, InitializationConfig, RelocMode, Target, TargetMachine},
+    targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine},
 };
 
 type MainFn = unsafe extern "C" fn() -> i32;
@@ -37,24 +39,39 @@ define i32 @main() {
         .create_module_from_ir(memory_buffer)
         .expect("can create module from IR");
 
-    run_passes_on(&module);
+    let target_machine = run_passes_on(&module);
 
-    let execution_engine = module
-        .create_jit_execution_engine(OptimizationLevel::Default)
-        .expect("can create execution engine");
+    // Run code in JIT-mode
+    {
+        let execution_engine = module
+            .create_jit_execution_engine(OptimizationLevel::Default)
+            .expect("can create execution engine");
 
-    execution_engine.add_global_mapping(&module.get_function("my_mul2").unwrap(), my_mul2 as usize);
+        execution_engine
+            .add_global_mapping(&module.get_function("my_mul2").unwrap(), my_mul2 as usize);
 
-    let f: JitFunction<MainFn> =
-        unsafe { execution_engine.get_function("main") }.expect("can get main fn");
+        let f: JitFunction<MainFn> =
+            unsafe { execution_engine.get_function("main") }.expect("can get main fn");
 
-    unsafe {
-        let result = f.call();
-        println!("Result: {result}");
+        unsafe {
+            let result = f.call();
+            println!("Result: {result}");
+        }
+    }
+
+    // Compile to a binary
+    {
+        target_machine
+            .write_to_file(&module, FileType::Object, Path::new("output.o"))
+            .expect("can compile");
+
+        // Further TODO's:
+        // - compile rust runtime code
+        // - link together to create executable
     }
 }
 
-fn run_passes_on(module: &Module) {
+fn run_passes_on(module: &Module) -> TargetMachine {
     Target::initialize_all(&InitializationConfig::default());
     let target_triple = TargetMachine::get_default_triple();
     let target = Target::from_triple(&target_triple).unwrap();
@@ -78,6 +95,8 @@ fn run_passes_on(module: &Module) {
         "mem2reg",
     ];
 
+    module.set_data_layout(&target_machine.get_target_data().get_data_layout());
+
     module
         .run_passes(
             passes.join(",").as_str(),
@@ -85,4 +104,6 @@ fn run_passes_on(module: &Module) {
             PassBuilderOptions::create(),
         )
         .unwrap();
+
+    target_machine
 }
