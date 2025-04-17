@@ -3,6 +3,8 @@ use inkwell::{
     context::Context,
     execution_engine::JitFunction,
     memory_buffer::MemoryBuffer,
+    module::Module,
+    passes::{PassBuilderOptions, PassManager, PassManagerSubType},
     targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine},
 };
 
@@ -27,8 +29,10 @@ define i32 @main() {
         .create_module_from_ir(memory_buffer)
         .expect("can create module from IR");
 
+    run_passes_on(&module);
+
     let execution_engine = module
-        .create_jit_execution_engine(OptimizationLevel::None)
+        .create_jit_execution_engine(OptimizationLevel::Default)
         .expect("can create execution engine");
 
     let f: JitFunction<MainFn> =
@@ -38,4 +42,37 @@ define i32 @main() {
         let result = f.call();
         println!("Result: {result}");
     }
+}
+
+fn run_passes_on(module: &Module) {
+    Target::initialize_all(&InitializationConfig::default());
+    let target_triple = TargetMachine::get_default_triple();
+    let target = Target::from_triple(&target_triple).unwrap();
+    let target_machine = target
+        .create_target_machine(
+            &target_triple,
+            "generic",
+            "",
+            OptimizationLevel::None,
+            RelocMode::PIC,
+            CodeModel::Default,
+        )
+        .unwrap();
+
+    let passes: &[&str] = &[
+        "instcombine",
+        "reassociate",
+        "gvn",
+        "simplifycfg",
+        // "basic-aa",
+        "mem2reg",
+    ];
+
+    module
+        .run_passes(
+            passes.join(",").as_str(),
+            &target_machine,
+            PassBuilderOptions::create(),
+        )
+        .unwrap();
 }
