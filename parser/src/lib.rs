@@ -340,9 +340,9 @@ fn integer(s: State) -> ParseResult<State, Numeric> {
 }
 
 // TODO
-fn double(s: State) -> ParseResult<State, Numeric> {
+fn float(s: State) -> ParseResult<State, Numeric> {
     map(regex(r"^-?[0-9]+\.[0-9]+"), |num| {
-        Numeric::Double(num.parse::<f64>().unwrap())
+        Numeric::Float(num.parse::<f64>().unwrap())
     })
     .parse(s)
 }
@@ -609,7 +609,7 @@ fn expr_leaf(s: State) -> ParseResult<State, Expr> {
         map(tag("nil"), |_| Expr::NilLiteral),
         raw_str_literal,
         str_literal,
-        map(double, Expr::Numeric),
+        map(float, Expr::Numeric),
         map(integer, Expr::Numeric),
         regex_literal,
         // control structures
@@ -1054,9 +1054,9 @@ fn type_leaf(s: State) -> ParseResult<State, Type> {
         map(tag("nil"), |_| Type::Nil),
         map(tag("bool"), |_| Type::Bool),
         map(tag("str"), |_| Type::Str),
-        map(tag("int"), |_| Type::Numeric),
-        map(tag("double"), |_| Type::Numeric),
-        map(tag("num"), |_| Type::Numeric),
+        map(tag("int"), |_| Type::Int),
+        map(tag("float"), |_| Type::Float),
+        map(tag("num"), |_| Type::Num),
         map(tag("regex"), |_| Type::Regex),
         map(tag("fn"), |_| Type::FnDef),
         // "dict" or "dict[K, V]"
@@ -1681,25 +1681,19 @@ mod tests {
 
         assert_eq!(
             parse_type("?bool | int"),
-            Type::Union(vec![
-                Type::Union(vec![Type::Nil, Type::Bool]),
-                Type::Numeric
-            ])
+            Type::Union(vec![Type::Union(vec![Type::Nil, Type::Bool]), Type::Int])
         );
 
         assert_eq!(
             parse_type("?(bool | int)"),
-            Type::Union(vec![
-                Type::Nil,
-                Type::Union(vec![Type::Bool, Type::Numeric]),
-            ])
+            Type::Union(vec![Type::Nil, Type::Union(vec![Type::Bool, Type::Int]),])
         );
 
         assert_eq!(
             parse_type("?(bool | int,)"),
             Type::Union(vec![
                 Type::Nil,
-                Type::Tuple(Some(vec![Type::Union(vec![Type::Bool, Type::Numeric])]))
+                Type::Tuple(Some(vec![Type::Union(vec![Type::Bool, Type::Int])]))
             ])
         );
 
@@ -1707,7 +1701,7 @@ mod tests {
             parse_type("?((bool | int),)"),
             Type::Union(vec![
                 Type::Nil,
-                Type::Tuple(Some(vec![Type::Union(vec![Type::Bool, Type::Numeric])]))
+                Type::Tuple(Some(vec![Type::Union(vec![Type::Bool, Type::Int])]))
             ])
         );
     }
@@ -2586,7 +2580,7 @@ let example_input = r"
                         Stmt::Declare {
                             pattern: DeclarePattern::Declare {
                                 guard: DeclareGuardExpr::Unguarded(id("h")),
-                                ty: Some(Type::Numeric)
+                                ty: Some(Type::Int)
                             },
                             expr: Expr::Numeric(Numeric::Int(7)).into()
                         },
