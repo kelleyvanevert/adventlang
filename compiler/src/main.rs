@@ -97,14 +97,14 @@ pub extern "C" fn my_mul_impl(arg: i32) -> i32 {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn mk_jit_fn_impl() -> extern "C" fn(i32) -> i32 {
+pub extern "C" fn mk_jit_fn_impl() -> *mut u8 {
     let fn_ptr = JIT_COMPILER.with(|compiler| {
         println!("i got the compiler!");
         let fn_ptr = compiler.borrow_mut().as_mut().unwrap().compile_fn(
             "kelley",
             "
 define i32 @kelley(i32 %arg) {
-    %2 = add i32 %arg 2
+    %2 = add i32 %arg, 2
     ret i32 %2
 }
 ",
@@ -113,7 +113,8 @@ define i32 @kelley(i32 %arg) {
         fn_ptr
     });
 
-    my_mul_impl
+    fn_ptr
+    // my_mul_impl as *mut u8
 }
 
 thread_local! {
@@ -136,10 +137,10 @@ declare i32 @my_mul(i32)
 declare i32(i32)* @mk_jit_fn()
 
 define i32 @main() {
-    %1 = load i32, i32* @variable
-    %2 = call i32 @my_mul(i32 %1)
+    %1 = load i32, i32* @variable       ;21
+    %2 = call i32 @my_mul(i32 %1)       ;42
     %fn = call i32(i32)* @mk_jit_fn()
-    %3 = call i32 %fn(i32 %2)
+    %3 = call i32 %fn(i32 %2)           ;44
     ret i32 %3
 }
 ";
