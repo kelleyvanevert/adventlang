@@ -1058,7 +1058,7 @@ fn type_leaf(s: State) -> ParseResult<State, Type> {
         map(tag("float"), |_| Type::Float),
         map(tag("num"), |_| Type::Num),
         map(tag("regex"), |_| Type::Regex),
-        map(tag("fn"), |_| Type::FnDef),
+        type_fn,
         // "dict" or "dict[K, V]"
         map(
             preceded(
@@ -1093,8 +1093,31 @@ fn type_leaf(s: State) -> ParseResult<State, Type> {
             delimited(seq((tag("["), ws0)), typespec, seq((ws0, tag("]")))),
             |t| Type::List(t.into()),
         ),
+        // recurse with parentheses
+        parenthesized_type,
     ))
     .parse(s)
+}
+
+fn type_fn(s: State) -> ParseResult<State, Type> {
+    map(
+        seq((
+            tag("fn"),
+            optional(preceded(ws0, listy("(", typespec, typespec, ")"))),
+            optional(preceded(seq((ws0, tag("->"), ws0)), typespec)),
+        )),
+        |(_, args, ret)| match (args, ret) {
+            (None, None) => Type::FnDef(None),
+            (Some((args, _)), None) => Type::FnDef(Some((args, Box::new(Type::Nil)))),
+            (None, Some(ret)) => Type::FnDef(Some((vec![], Box::new(ret)))),
+            (Some((args, _)), Some(ret)) => Type::FnDef(Some((args, Box::new(ret)))),
+        },
+    )
+    .parse(s)
+}
+
+fn parenthesized_type(s: State) -> ParseResult<State, Type> {
+    delimited(seq((char('('), ws0)), typespec, seq((ws0, char(')')))).parse(s)
 }
 
 fn type_nullable_stack(s: State) -> ParseResult<State, Type> {
@@ -1111,7 +1134,7 @@ fn type_nullable_stack(s: State) -> ParseResult<State, Type> {
     .parse(s)
 }
 
-fn typespec(s: State) -> ParseResult<State, Type> {
+fn type_union_stack(s: State) -> ParseResult<State, Type> {
     map(
         seq((
             type_nullable_stack,
@@ -1127,6 +1150,10 @@ fn typespec(s: State) -> ParseResult<State, Type> {
         },
     )
     .parse(s)
+}
+
+fn typespec(s: State) -> ParseResult<State, Type> {
+    type_union_stack.parse(s)
 }
 
 fn assign_pattern(s: State) -> ParseResult<State, AssignPattern> {
@@ -1702,6 +1729,44 @@ mod tests {
             Type::Union(vec![
                 Type::Nil,
                 Type::Tuple(Some(vec![Type::Union(vec![Type::Bool, Type::Int])]))
+            ])
+        );
+
+        assert_eq!(parse_type("fn"), Type::FnDef(None));
+
+        assert_eq!(
+            parse_type("fn -> int"),
+            Type::FnDef(Some((vec![], Box::new(Type::Int))))
+        );
+
+        assert_eq!(
+            parse_type("fn ( bool ) -> int"),
+            Type::FnDef(Some((vec![Type::Bool], Box::new(Type::Int))))
+        );
+
+        assert_eq!(
+            parse_type("fn(bool)->int"),
+            Type::FnDef(Some((vec![Type::Bool], Box::new(Type::Int))))
+        );
+
+        assert_eq!(
+            parse_type("fn(bool , int,)"),
+            Type::FnDef(Some((vec![Type::Bool, Type::Int], Box::new(Type::Nil))))
+        );
+
+        assert_eq!(
+            parse_type("fn(bool) -> int | any"),
+            Type::FnDef(Some((
+                vec![Type::Bool],
+                Box::new(Type::Union(vec![Type::Int, Type::Any]))
+            )))
+        );
+
+        assert_eq!(
+            parse_type("(fn(bool) -> int) | any"),
+            Type::Union(vec![
+                Type::FnDef(Some((vec![Type::Bool], Box::new(Type::Int)))),
+                Type::Any,
             ])
         );
     }

@@ -12,7 +12,7 @@ pub enum Type {
     Float,
     Num,
     Regex,
-    FnDef,
+    FnDef(Option<(Vec<Type>, Box<Type>)>),
     List(Box<Type>),
     Tuple(Option<Vec<Type>>),
     Dict(Option<(Box<Type>, Box<Type>)>),
@@ -61,6 +61,39 @@ impl Type {
                 Ordering::Greater => Some(other.clone()),
                 _ => Some(self.clone()),
             },
+        }
+    }
+}
+
+fn partial_cmp_tuple_elements(a: &Vec<Type>, b: &Vec<Type>) -> Option<Ordering> {
+    if a.len() != b.len() {
+        None
+    } else {
+        let mut a_gte_b = true;
+        let mut b_gte_a = true;
+        for (a, b) in a.iter().zip(b.iter()) {
+            if a_gte_b && !(a >= b) {
+                a_gte_b = false;
+                if !b_gte_a {
+                    return None;
+                }
+            }
+            if b_gte_a && !(b >= a) {
+                b_gte_a = false;
+                if !a_gte_b {
+                    return None;
+                }
+            }
+        }
+
+        if a_gte_b && b_gte_a {
+            Some(Ordering::Equal)
+        } else if a_gte_b {
+            Some(Ordering::Greater)
+        } else if b_gte_a {
+            Some(Ordering::Less)
+        } else {
+            None
         }
     }
 }
@@ -124,38 +157,7 @@ impl PartialOrd for Type {
             (Type::Tuple(None), Type::Tuple(None)) => Some(Ordering::Equal),
             (Type::Tuple(None), Type::Tuple(_)) => Some(Ordering::Greater),
             (Type::Tuple(_), Type::Tuple(None)) => Some(Ordering::Less),
-            (Type::Tuple(Some(a)), Type::Tuple(Some(b))) => {
-                if a.len() != b.len() {
-                    None
-                } else {
-                    let mut a_gte_b = true;
-                    let mut b_gte_a = true;
-                    for (a, b) in a.iter().zip(b.iter()) {
-                        if a_gte_b && !(a >= b) {
-                            a_gte_b = false;
-                            if !b_gte_a {
-                                return None;
-                            }
-                        }
-                        if b_gte_a && !(b >= a) {
-                            b_gte_a = false;
-                            if !a_gte_b {
-                                return None;
-                            }
-                        }
-                    }
-
-                    if a_gte_b && b_gte_a {
-                        Some(Ordering::Equal)
-                    } else if a_gte_b {
-                        Some(Ordering::Greater)
-                    } else if b_gte_a {
-                        Some(Ordering::Less)
-                    } else {
-                        None
-                    }
-                }
-            }
+            (Type::Tuple(Some(a)), Type::Tuple(Some(b))) => partial_cmp_tuple_elements(a, b),
 
             (Type::Dict(_), Type::Dict(_)) => {
                 // TODO
@@ -174,9 +176,25 @@ impl PartialOrd for Type {
             (Type::Dict(_), Type::Tuple(_)) => None,
             (Type::Tuple(_), Type::Dict(_)) => None,
 
-            // TODO make fn types comparable as well
-            (Type::FnDef, _) => None,
-            (_, Type::FnDef) => None,
+            (Type::FnDef(a), Type::FnDef(b)) => match (a, b) {
+                (None, None) => Some(Ordering::Equal),
+                (None, _) => Some(Ordering::Greater),
+                (_, None) => Some(Ordering::Less),
+                (Some((a_args, a_ret)), Some((b_args, b_ret))) => {
+                    if a_args.len() != b_args.len() {
+                        None
+                    } else {
+                        match a_ret.partial_cmp(b_ret) {
+                            None => None,
+                            Some(Ordering::Less) => Some(Ordering::Greater),
+                            Some(Ordering::Greater) => Some(Ordering::Less),
+                            Some(Ordering::Equal) => partial_cmp_tuple_elements(a_args, b_args),
+                        }
+                    }
+                }
+            },
+            (Type::FnDef(_), _) => None,
+            (_, Type::FnDef(_)) => None,
 
             (Type::Union(_), _) | (_, Type::Union(_)) => {
                 let a_types = a.flatten_unions();
@@ -238,7 +256,22 @@ impl Display for Type {
             Type::Float => write!(f, "float"),
             Type::Num => write!(f, "num"),
             Type::Regex => write!(f, "regex"),
-            Type::FnDef => write!(f, "fn"),
+            Type::FnDef(signature) => {
+                if let Some((args, ret)) = signature {
+                    write!(f, "fn(")?;
+                    let mut i = 0;
+                    for arg in args {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "{arg}")?;
+                        i += 1;
+                    }
+                    write!(f, ") -> {ret}")
+                } else {
+                    write!(f, "fn")
+                }
+            }
             Type::List(t) => write!(f, "[{t}]"),
             Type::Tuple(opt) => {
                 if let Some(ts) = opt {
@@ -252,6 +285,7 @@ impl Display for Type {
                         i += 1;
                     }
                     if ts.len() == 1 {
+                        // to make clear that it's a tuple, not just some extra parentheses
                         write!(f, ",")?;
                     }
                     write!(f, ")")
