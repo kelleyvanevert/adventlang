@@ -1,0 +1,178 @@
+
+
+fn +(a: str, b: int) {}
+
+
+#1{
+  a
+
+  #2{
+
+    #3{
+
+      fn bla(b) #4{
+        a + b
+      }
+    }
+  }
+}
+
+- scopes only live at compile-time
+
+
+- resolve_overload()
+  -? also only lives at compile-time?
+  -> no, because of dynamic typing
+  .. but I could pre-compile a decision tree
+
+
+- how complicated is SSA?
+  - while computing expressions -> easy, automatic
+  - ah, only actual variables are affected, of course
+    -> so then we'll turn every variable into an alloca
+
+
+- how can i make it compositional?
+
+
+
+Document = { body: Block }
+Block = { items: Item[], stmts: Stmt[] }
+Item =
+  | NamedFn { name: Identifier, params: Declarable[], body: Block }
+Declarable = { pattern: DeclarePattern, fallback?: Expr }
+DeclarePattern =
+  | Declare { guard: DeclareGuardExpr, ty?: Type }
+  | List { element: Declarable[], rest?: { id: Identifier, type?: Type } }
+  | Tuple { element: Declarable[], rest?: { id: Identifier, type?: Type } }
+AssignPattern =
+  | Id { id: Identifier }
+  | Index { pattern: AssignPattern, expr?: Expr }
+  | List { elements: AssignPattern[] } -- ..maybe later also add spread
+  | Tuple { elements: AssignPattern[] } -- ..maybe later also add spread
+Stmt =
+  | Break { expr?: Expr }
+  | Continue { label?: Identifier }
+  | Return { expr?: Expr }
+  | Declare { pattern: DeclarePattern, expr: Expr }
+  | Assign { pattern: AssignPattern, expr: Expr }
+  | Expr { expr: Expr }
+Expr =
+  | StrLiteral { pieces }
+  | NilLiteral
+  | ...
+
+
+
+let some_digit = 5
+
+fn solve(input: str) {
+  let digits = [2, 5, some_digit]
+
+  fn convert_base(hand: str) {
+    hand :chars :reverse :enumerate
+      :map |(i, d)| { digits[d] << (i * 4) }
+      :sum
+  }
+}
+
+
+
+context:
+  scopes: HashMap<id, Scope = { parent_id, vars: HashMap<id, Type> }>
+
+
+
+-> turn every closure scope into a struct on the heap
+  closure = { parent, data(known exact layout) }
+
+(module)       0: { parent: NULL, data: { some_digit } }
+(solve)        1: { parent: 0,    data: { input(N/A), digits } }
+(convert_base) 2: { parent: 1,    data: { hand(N/A) } }
+(*inline*)     3: { parent: 2,    data: { i(N/A), d(N/A) }}
+
+-> a function value also has a pointer to parent closure scope
+  fn = { code_ptr, parent_closure_ptr }
+  .. or multiple even? -- a fixed size array?
+  .... or I could even just trim this down to the parent closures I even need access to in the first place?
+
+
+CODEGEN(
+  expr: |(i, d)| { digits[d] << (i * 4) },
+  parent_scopes_shapes: [
+    module: { some_digit },
+    solve: { input, digits },
+    convert_base: { hand },
+  ]
+):
+  # how to access digits? we know it's in the second parent,
+  #   .. but how to get to it at runtime?
+
+  define dyn @anonymous_fn(%module_closure* %0, %solve_closure* %1, %convert_base_closure* %2, i, d) {
+    %digits_ptr = getelementptr %solve_closure, %solve_closure* %1, i64 0, i64 1
+    %digits = load dyn, dyn* %digits_ptr
+  }
+
+
+Codegen
+  evaluate(curr_scope_id, expr)
+    match expr {
+      bool(b) -> {
+        emit: %expr = i1 {b}
+      }
+      nil -> {
+        emit: %expr = i1 0
+      }
+      str(pieces) -> {
+        emit: %pieces = alloca [N x %dyn]
+
+        for piece, i in pieces {
+          let tmp_name = evaluate(curr_scope_id, pieces[i])
+
+          emit: %el_{i}_ptr = getelementptr [N x %dyn], [N x %dyn]* %pieces, i64 0, i64 {i}
+          emit: store dyn {tmp_name}, i32* %el_{i}_ptr
+        }
+
+        emit: %expr = call dyn @join_str_literal_pieces([N x %dyn] %pieces)
+      }
+      anonymous_fn(fn = {params, body}) -> {
+        # 1. define function body
+        # (see above for how to deal with lexical scope variable access...)
+        emit: define dyn @anonymous_fn(...parent_closures, ...{...params}) {
+          # 1.1. create new own closure
+          let closure_type = Codegen::get_closure_type(fn)
+          let size = closure_type.size_of() -- inkwell knows this
+          emit: %my_closure_ptr = call ptr @malloc({size})
+
+          # 1.2. populate the closure
+          # (we could choose to only store relevant data inside, but that's a lot of bookkeeping,
+          #  for now let's just use the closure for all of the scope)
+          for param of params {
+            emit: %param_{i}_ptr = getelementptr {closure_type}, {closure_type}* %my_closure_ptr, i64 0, i64 {i}
+            emit: store dyn {tmp_name}, i32* %param_{i}_ptr
+          }
+        }
+
+        # 2. compute and register runtime closure layout/type
+        let vars_in_closure = ..params (but we could maybe reduce this later)
+        let layout = { ... }
+        emit: %anonumous_fn_closure = type { ... }
+        Codegen::register_closure_type(fn, { name: "%anonumous_fn_closure", layout })
+      }
+      invoke(fn_expr, postfix (TODO), coalesce (TODO), arg_exprs) -> {
+        let fn = evaluate(curr_scope_id, fn_expr)
+        let args = arg_exprs.map(expr => evaluate(curr_scope_id, expr))
+
+        let closure_pointer_names = []
+        let curr_scope = self.get_scope(curr_scope_id)
+        while let Some(scope) = curr_scope {
+          closure_pointer_names.push(scope.ptr_id) // e.g. %my_closure_ptr
+          curr_scope = self.get_scope(scope.parent_id)
+        }
+
+        emit: %expr = call dyn {fn}(...{...closure_pointer_names}, ...{...args})
+
+        # ^^ this assumes that there's an unambiguous function,
+        #  but if we add overloading, it's more complicated..
+      }
+    }

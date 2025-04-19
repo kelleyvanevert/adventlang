@@ -62,11 +62,10 @@ impl<'ctx> JitCompiler<'ctx> {
             .add_module(self.modules.get(fn_name).unwrap())
             .expect("can add module to engine");
 
-        let fn_ptr = unsafe {
-            self.execution_engine
-                .get_function_address(fn_name)
-                .expect("can get jit compiled fn addr")
-        };
+        let fn_ptr = self
+            .execution_engine
+            .get_function_address(fn_name)
+            .expect("can get jit compiled fn addr");
 
         fn_ptr as *mut u8
     }

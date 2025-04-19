@@ -1,0 +1,107 @@
+LLVM
+
+https://llvm.org/docs/LangRef.html
+
+
+===
+BASICS
+===
+
+@ globals: always pointers
+% locals: either tmp/register, or alloca's
+-- can use mem2reg to "avoid" SSA-restriction, using alloca's all the time
+-- alloca's: always pointers
+-- alloca an array: %bar = alloca %Foo, i32 100
+
+load <ty>, <ty-ptr> <val>
+store
+ret
+mul, add, etc.
+constant
+getelementptr
+
+%Foo = type { i32, i8 }
+%Cyclic = type { i32, %Cyclic* }
+
+
+Accessing struct fields
+
+%foo = alloca %Foo
+%1 = getelementptr %Foo, %Foo* %foo, i32 0, i32 1
+-- the first index is for array indexing
+
+
+Nine types of casts
+
+- bitcast (reinterpret)
+- zext: unsigned upcast, e.g. from u8 to u32
+- sext: signed upcast, e.g. from i8 to i32
+- ptrtoint, inttoptr, to switch between ints and pointers
+- ...and some more
+
+
+Functions
+
+define i32 @main() nounwind { ... ret i32 17 }
+define private ...
+varargs are possible, somehow
+?? byval, sret, ...
+function pointers, e.g. i32(%Foo*)*
+
+<ret> = call <ret_ty> <fn>(<ty1> <arg1>, <ty2> <arg2>, ..)
+
+
+Regular unions
+.. don't exist, just bitcast
+
+
+Tagged unions
+- Use one general type + one per variant, all using the tag, then bitcast
+
+
+===
+CONTROL-FLOW CONSTRUCTS
+===
+
+basic blocks
+
+icmp <cond> <ty> <op1>, <op2>
+br i1 <cond>, label <t>, label <f>
+br label <dest>
+
+switch <int-ty> <cond>, ...
+
+phi: for ternary assignment that's still SSA and decides on the basis of previous block
+phi <ty> [<val>, <label>], ...
+
+select s1 <cond>, <ty> <val1>, <ty> <val2>
+
+
+===
+OBJECT-ORIENTED CONSTRUCTS
+===
+
+Classes: like in Rust, use `this` pointer param
+Void struct type: {}*
+Single inheritance: lay out memory in sequence from parent to child
+Multiple inheritances: a bit more complicated ..
+Class equivalence test: if classes each have a unique vtable, then test the pointers, otherwise ..
+Class inheritance test: search upwards? / search static data?
+
+Vtables
+%vtable = load void ({}*)**, void ({}*)*** %vtable_ptr
+...
+
+
+===
+EXCEPTION HANDLING
+===
+
+...tricky tricky...
+
+
+===
+OTHER THINGS
+===
+
+Intrinsics! @llvm.<whatever>
