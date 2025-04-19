@@ -19,6 +19,7 @@ use lazy_static::lazy_static;
 use libffi::high::Closure2;
 use ouroboros::self_referencing;
 
+mod codegen;
 mod runtime;
 
 struct JitCompiler<'ctx> {

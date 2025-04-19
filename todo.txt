@@ -176,3 +176,39 @@ Codegen
         #  but if we add overloading, it's more complicated..
       }
     }
+
+
+
+HOW TO REPRESENT VALUES .. in Rust, mostly
+
+option 1 -- tagged union with struct + union type
+
+  #[repr(C)]
+  struct Value {
+    tag: ValueType, -- simple rust tag enum
+    data: ValueData,
+  }
+
+  #[repr(C)]
+  union ValueData {
+    bool: bool,
+    int: i64,
+    ...
+  }
+
+
+
+.. actually, the type is not as easy as a tag -- because e.g. concrete function types, polymorphic function types, typed arrays, etc.
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Value {
+    Nil,
+    Bool(bool),
+    Str(Substr),
+    Numeric(Numeric),
+    Regex(AlRegex),
+    FnDef(FnDef),
+    List(Type, Vec<usize>),
+    Tuple(Option<Vec<Type>>, Vec<usize>),
+    Dict(Option<(Type, Type)>, Dict),
+}
