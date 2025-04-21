@@ -348,12 +348,12 @@ mod tests {
         );
 
         assert_eq!(
-            cmp_ty(Union(vec![Bool, FnDef(None)]), Bool),
+            cmp_ty(Union(vec![Bool, Fun(None)]), Bool),
             Some(Ordering::Greater)
         );
 
         assert_eq!(
-            cmp_ty(Union(vec![Bool, Union(vec![Bool, FnDef(None)])]), Bool),
+            cmp_ty(Union(vec![Bool, Union(vec![Bool, Fun(None)])]), Bool),
             Some(Ordering::Greater)
         );
 

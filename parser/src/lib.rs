@@ -1107,10 +1107,10 @@ fn type_fn(s: State) -> ParseResult<State, Type> {
             optional(preceded(seq((ws0, tag("->"), ws0)), typespec)),
         )),
         |(_, args, ret)| match (args, ret) {
-            (None, None) => Type::FnDef(None),
-            (Some((args, _)), None) => Type::FnDef(Some((args, Box::new(Type::Nil)))),
-            (None, Some(ret)) => Type::FnDef(Some((vec![], Box::new(ret)))),
-            (Some((args, _)), Some(ret)) => Type::FnDef(Some((args, Box::new(ret)))),
+            (None, None) => Type::Fun(None),
+            (Some((args, _)), None) => Type::Fun(Some((args, Box::new(Type::Nil)))),
+            (None, Some(ret)) => Type::Fun(Some((vec![], Box::new(ret)))),
+            (Some((args, _)), Some(ret)) => Type::Fun(Some((args, Box::new(ret)))),
         },
     )
     .parse(s)
@@ -1732,31 +1732,31 @@ mod tests {
             ])
         );
 
-        assert_eq!(parse_type("fn"), Type::FnDef(None));
+        assert_eq!(parse_type("fn"), Type::Fun(None));
 
         assert_eq!(
             parse_type("fn -> int"),
-            Type::FnDef(Some((vec![], Box::new(Type::Int))))
+            Type::Fun(Some((vec![], Box::new(Type::Int))))
         );
 
         assert_eq!(
             parse_type("fn ( bool ) -> int"),
-            Type::FnDef(Some((vec![Type::Bool], Box::new(Type::Int))))
+            Type::Fun(Some((vec![Type::Bool], Box::new(Type::Int))))
         );
 
         assert_eq!(
             parse_type("fn(bool)->int"),
-            Type::FnDef(Some((vec![Type::Bool], Box::new(Type::Int))))
+            Type::Fun(Some((vec![Type::Bool], Box::new(Type::Int))))
         );
 
         assert_eq!(
             parse_type("fn(bool , int,)"),
-            Type::FnDef(Some((vec![Type::Bool, Type::Int], Box::new(Type::Nil))))
+            Type::Fun(Some((vec![Type::Bool, Type::Int], Box::new(Type::Nil))))
         );
 
         assert_eq!(
             parse_type("fn(bool) -> int | any"),
-            Type::FnDef(Some((
+            Type::Fun(Some((
                 vec![Type::Bool],
                 Box::new(Type::Union(vec![Type::Int, Type::Any]))
             )))
@@ -1765,7 +1765,7 @@ mod tests {
         assert_eq!(
             parse_type("(fn(bool) -> int) | any"),
             Type::Union(vec![
-                Type::FnDef(Some((vec![Type::Bool], Box::new(Type::Int)))),
+                Type::Fun(Some((vec![Type::Bool], Box::new(Type::Int)))),
                 Type::Any,
             ])
         );

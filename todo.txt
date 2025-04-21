@@ -69,7 +69,7 @@ let some_digit = 5
 fn solve(input: str) {
   let digits = [2, 5, some_digit]
 
-  fn convert_base(hand: str) {
+  fn convert_base(hand) {
     hand :chars :reverse :enumerate
       :map |(i, d)| { digits[d] << (i * 4) }
       :sum
@@ -202,13 +202,115 @@ option 1 -- tagged union with struct + union type
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
-    Nil,
-    Bool(bool),
-    Str(Substr),
-    Numeric(Numeric),
-    Regex(AlRegex),
-    FnDef(FnDef),
-    List(Type, Vec<usize>),
-    Tuple(Option<Vec<Type>>, Vec<usize>),
-    Dict(Option<(Type, Type)>, Dict),
+  Nil,
+  Bool(bool),
+  Int(Int),
+  Float(Float),
+  Str(Substr),
+  Regex(AlRegex),
+  FnDef(FnDef),
+  List(Type, Vec<usize>),
+  Tuple(Option<Vec<Type>>, Vec<usize>),
+  Dict(Option<(Type, Type)>, Dict),
+}
+
+
+- how to encode value types?
+  88 88 88 88 + 88 pp
+  \---------/
+    64 bits
+
+  - [...type, data] -- array! clever, no?
+    [true,   "bool"]
+    [_,      "nil"]
+    [->str,  "str"]
+    [42,     "int"]
+    [->fn,   "fn(3)", "arg1", "arg2", "arg3", "ret"]
+    [->data, "list", "tuple", "int"]
+    ...
+    - pros?
+      - uniform
+    - cons?
+      - if dynamic size -> needs to be allocated on the heap, so then it becomes pointless because it loses its win on performance
+
+  - { type, data } -- but what about complicated types? (it needs an escape hatch, right?)
+      0   nil
+      1   bool
+     10   int
+     11   float
+    100   str
+    101
+
+    ppppppCC CC------ -------- --------
+
+    data size:
+    nil           0
+    bool          1
+    int          64
+    float        64
+    str          64 (ptr)
+    regex        64 (ptr)
+    fn        2x 64 (closure ptr + code ptr) -- but maybe I'll store the code ptr in the closure
+    list         64 (ptr)
+    tuple        64 (ptr)
+    dict         64 (ptr)
+
+    -> use (10 of) 16 bits for the type + 64 bits of data
+
+    - is it necessary to add the nested types? e.g. [int] is a list, but do we also need to add "int"?
+      -> no, because it'll be in the children
+      ... but then what if the list is empty? does it matter, then?
+
+        fn bla() -> [int] {
+          []
+        }
+
+        fn poly(input: [int])  { true }
+        fn poly(input: [any]) { false }
+
+        poly(bla()) -- will give an unexpected result (false instead of true)
+
+  - V8-style:
+
+    1..(...63 bits) -> pointer to an object on the heap with full info
+    0.. -> quick simple value type(s)
+      -- only small ints? and make booleans and nil heap singletons like in v8?
+
+    000 =  nil
+    001 = bool
+    010 = int
+    011 = float
+    100 = str
+    101 = regex
+    110
+    111
+    ... fn, list, tuple, dict
+
+    ..no, let's just go with V8's wisdom and only represent small numbers this way
+
+......
+......
+... maybe this is not the fight I actually want to fight, btw
+......
+... maybe I should just statically type the variables, infer them where necessary,
+     and select overloads at compile-time like Rust would.
+    Because, truthfully, it's not like I was really intending to crazy dynamic things..
+    I just wanted Rust-like syntax, but more flexibility:
+    - overloads are flexible, regardless of when they're resolved
+    - GC is flexible
+    - :map,:find -style infix function notation is flexible
+    
+    ..and selecting overloads at runtime due to unknown dynamic types is less important to me.
+
+
+let cache: dict<([str], [int]), int> = {}
+
+fn arrangements(pieces, ns, indent) {
+  let h = (pieces, ns)
+
+  if should_memoize {
+    if let memoized = cache[h] {
+      return memoized + 0
+    }
+  }
 }

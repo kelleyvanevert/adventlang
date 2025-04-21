@@ -12,11 +12,12 @@ pub enum Type {
     Float,
     Num,
     Regex,
-    FnDef(Option<(Vec<Type>, Box<Type>)>),
+    Fun(Option<(Vec<Type>, Box<Type>)>),
     List(Box<Type>),
     Tuple(Option<Vec<Type>>),
     Dict(Option<(Box<Type>, Box<Type>)>),
     Union(Vec<Type>),
+    // TODO: polymorphic variable abstraction stuff
 }
 
 impl Type {
@@ -176,7 +177,7 @@ impl PartialOrd for Type {
             (Type::Dict(_), Type::Tuple(_)) => None,
             (Type::Tuple(_), Type::Dict(_)) => None,
 
-            (Type::FnDef(a), Type::FnDef(b)) => match (a, b) {
+            (Type::Fun(a), Type::Fun(b)) => match (a, b) {
                 (None, None) => Some(Ordering::Equal),
                 (None, _) => Some(Ordering::Greater),
                 (_, None) => Some(Ordering::Less),
@@ -193,8 +194,8 @@ impl PartialOrd for Type {
                     }
                 }
             },
-            (Type::FnDef(_), _) => None,
-            (_, Type::FnDef(_)) => None,
+            (Type::Fun(_), _) => None,
+            (_, Type::Fun(_)) => None,
 
             (Type::Union(_), _) | (_, Type::Union(_)) => {
                 let a_types = a.flatten_unions();
@@ -256,7 +257,7 @@ impl Display for Type {
             Type::Float => write!(f, "float"),
             Type::Num => write!(f, "num"),
             Type::Regex => write!(f, "regex"),
-            Type::FnDef(signature) => {
+            Type::Fun(signature) => {
                 if let Some((args, ret)) = signature {
                     write!(f, "fn(")?;
                     let mut i = 0;
