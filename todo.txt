@@ -299,6 +299,7 @@ pub enum Value {
     - overloads are flexible, regardless of when they're resolved
     - GC is flexible
     - :map,:find -style infix function notation is flexible
+    - easy use of closures is flexible
     
     ..and selecting overloads at runtime due to unknown dynamic types is less important to me.
 
@@ -314,3 +315,44 @@ fn arrangements(pieces, ns, indent) {
     }
   }
 }
+
+
+
+
+
+generic types & instantiation
+
+
+
+It turns out that in order to check whether/how you can "instantiate" a generic type,
+ you need to include subtyping checks, to select either the narrowest or widest type
+ for certain type var instantiations
+
+
+So now I'm wondering, are these maybe actually the same checks? Or .. should I connect
+ the two problems? Checking whether a type is wider than another, and checking whether
+ it can be instantiated into the other?
+
+ If so, the sigature would be something like:
+
+ type.can_narrow_to(other_type) -> Option<{ instantiations, }>
+
+
+t                        int                        yes, with t=int
+t | int                  int                        yes, with t=int
+
+(t, t)                   (int, any)                 yes, with t=int -- because it's narrower than `any`
+
+fn<t>() -> (t, t)        fn() -> (int, any)         yes, with t=int
+
+[(t, t)]                 list
+
+fn<t>(t, t)              fn(int, any)               yes, with t=any
+
+fn<t>(t, fn<t>() -> t)   fn(bool, fn() -> int)      yes, with outer t=bool, inner t=int
+
+fn<t>(t, fn<s>(s))       fn(bool, fn(int))          yes, with t=bool
+
+fn<s>() -> (s, s)        fn<t>() -> (t, int)
+
+  ^^ what to do with nested generic functions? do they also need to be instantiated?

@@ -5,7 +5,7 @@ use std::fmt::Display;
 use compact_str::CompactString;
 pub use numeric::Numeric;
 pub use regex::AlRegex;
-pub use types::Type;
+pub use types::{Type, TypeVar};
 
 mod numeric;
 mod regex;

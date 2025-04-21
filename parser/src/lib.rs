@@ -10,7 +10,7 @@ use regex::Regex;
 use {
     ast::{
         AlRegex, Argument, AssignPattern, Block, Declarable, DeclareGuardExpr, DeclarePattern,
-        Document, Expr, Identifier, Item, Numeric, Stmt, StrLiteralPiece, Type,
+        Document, Expr, Identifier, Item, Numeric, Stmt, StrLiteralPiece, Type, TypeVar,
     },
     parser_combinators::{
         ParseResult, Parser, alt, check, delimited, many0, many1, map, map_opt, optional,
@@ -104,6 +104,20 @@ fn identifier(s: State) -> ParseResult<State, Identifier> {
     check(raw_identifier, |id| {
         ![
             "fn", "if", "else", "then", "while", "do", "for", "let", "loop", "true", "false",
+        ]
+        .contains(&id.0.as_str())
+    })
+    .parse(s)
+}
+
+fn raw_type_var(s: State) -> ParseResult<State, TypeVar> {
+    map(regex(r"^[_a-zA-Z][_a-zA-Z0-9]*"), |id| TypeVar(id.into())).parse(s)
+}
+
+fn type_var(s: State) -> ParseResult<State, TypeVar> {
+    check(raw_type_var, |id| {
+        ![
+            "any", "nil", "bool", "str", "int", "float", "num", "regex", "tuple", "list",
         ]
         .contains(&id.0.as_str())
     })
@@ -1093,6 +1107,7 @@ fn type_leaf(s: State) -> ParseResult<State, Type> {
             delimited(seq((tag("["), ws0)), typespec, seq((ws0, tag("]")))),
             |t| Type::List(t.into()),
         ),
+        map(type_var, Type::TypeVar),
         // recurse with parentheses
         parenthesized_type,
     ))
@@ -1103,14 +1118,24 @@ fn type_fn(s: State) -> ParseResult<State, Type> {
     map(
         seq((
             tag("fn"),
-            optional(preceded(ws0, listy("(", typespec, typespec, ")"))),
+            optional(seq((
+                optional(preceded(ws0, listy("<", type_var, type_var, ">"))),
+                preceded(ws0, listy("(", typespec, typespec, ")")),
+            ))),
             optional(preceded(seq((ws0, tag("->"), ws0)), typespec)),
         )),
-        |(_, args, ret)| match (args, ret) {
-            (None, None) => Type::Fun(None),
-            (Some((args, _)), None) => Type::Fun(Some((args, Box::new(Type::Nil)))),
-            (None, Some(ret)) => Type::Fun(Some((vec![], Box::new(ret)))),
-            (Some((args, _)), Some(ret)) => Type::Fun(Some((args, Box::new(ret)))),
+        |(_, generics_and_args, ret)| {
+            if generics_and_args.is_none() && ret.is_none() {
+                return Type::Fun(None);
+            }
+
+            let (generics, (args, _)) = generics_and_args.unwrap_or_default();
+            let generics = generics.map(|t| t.0).unwrap_or(vec![]);
+            let ret = ret.unwrap_or(Type::Nil);
+
+            // TODO: maybe validate?
+
+            Type::Fun(Some((generics, args, ret.into())))
         },
     )
     .parse(s)
@@ -1511,11 +1536,17 @@ pub fn parse_declarable(input: &str) -> Declarable {
         .expect("parse declarable")
 }
 
+fn try_parse_type(input: &str) -> Option<Type> {
+    terminated(typespec, eof)
+        .parse(input.trim().into())
+        .map(|(_, t)| t)
+}
+
 pub fn parse_type(input: &str) -> Type {
     terminated(typespec, eof)
         .parse(input.trim().into())
         .map(|(_, t)| t)
-        .expect("parse type")
+        .expect("can parse type")
 }
 
 #[test]
@@ -1736,27 +1767,32 @@ mod tests {
 
         assert_eq!(
             parse_type("fn -> int"),
-            Type::Fun(Some((vec![], Box::new(Type::Int))))
+            Type::Fun(Some((vec![], vec![], Box::new(Type::Int))))
         );
 
         assert_eq!(
             parse_type("fn ( bool ) -> int"),
-            Type::Fun(Some((vec![Type::Bool], Box::new(Type::Int))))
+            Type::Fun(Some((vec![], vec![Type::Bool], Box::new(Type::Int))))
         );
 
         assert_eq!(
             parse_type("fn(bool)->int"),
-            Type::Fun(Some((vec![Type::Bool], Box::new(Type::Int))))
+            Type::Fun(Some((vec![], vec![Type::Bool], Box::new(Type::Int))))
         );
 
         assert_eq!(
             parse_type("fn(bool , int,)"),
-            Type::Fun(Some((vec![Type::Bool, Type::Int], Box::new(Type::Nil))))
+            Type::Fun(Some((
+                vec![],
+                vec![Type::Bool, Type::Int],
+                Box::new(Type::Nil)
+            )))
         );
 
         assert_eq!(
             parse_type("fn(bool) -> int | any"),
             Type::Fun(Some((
+                vec![],
                 vec![Type::Bool],
                 Box::new(Type::Union(vec![Type::Int, Type::Any]))
             )))
@@ -1765,10 +1801,23 @@ mod tests {
         assert_eq!(
             parse_type("(fn(bool) -> int) | any"),
             Type::Union(vec![
-                Type::Fun(Some((vec![Type::Bool], Box::new(Type::Int)))),
+                Type::Fun(Some((vec![], vec![Type::Bool], Box::new(Type::Int)))),
                 Type::Any,
             ])
         );
+
+        assert_eq!(
+            parse_type("fn<t>(t)"),
+            Type::Fun(Some((
+                vec![TypeVar("t".into())],
+                vec![Type::TypeVar(TypeVar("t".into()))],
+                Box::new(Type::Nil)
+            )))
+        );
+
+        assert_eq!(try_parse_type("fn<t>"), None);
+
+        assert_eq!(try_parse_type("fn<t> -> t"), None);
     }
 
     #[test]
