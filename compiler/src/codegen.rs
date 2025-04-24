@@ -1,13 +1,11 @@
-use std::cell::RefCell;
-
 use ast::{Expr, Type};
 use fxhash::FxHashMap;
 use inkwell::{
     builder::Builder,
     context::Context,
     module::Module,
-    types::{AnyType, AnyTypeEnum, BasicMetadataTypeEnum, BasicTypeEnum, IntType},
-    values::{AnyValue, AnyValueEnum, BasicValue, BasicValueEnum},
+    types::{BasicType, BasicTypeEnum, IntType},
+    values::{BasicValue, BasicValueEnum},
 };
 use thiserror::Error;
 
@@ -68,7 +66,25 @@ impl<'ctx> CodegenContext<'ctx> {
         match expr {
             Expr::Bool(b) => self.bool_type().into(),
             Expr::NilLiteral => self.nil_type().into(),
-            _ => todo!(),
+            Expr::AnonymousFn { params, body } => {
+                // TODO
+
+                self.context
+                    .ptr_type(inkwell::AddressSpace::default())
+                    .as_basic_type_enum()
+            }
+            Expr::Invocation {
+                expr,
+                postfix,
+                coalesce,
+                args,
+            } => {
+                // TODO
+
+                // for now
+                self.context.i32_type().as_basic_type_enum()
+            }
+            _ => todo!("TODO: determine type of <expr>"),
         }
     }
 
@@ -77,12 +93,16 @@ impl<'ctx> CodegenContext<'ctx> {
         'ctx: 'ir,
     {
         match expr {
-            Expr::Bool(b) => Ok(self
-                .bool_type()
-                .const_int(*b as u64, false)
-                .as_basic_value_enum()),
+            Expr::Bool(b) => {
+                return Ok(self
+                    .bool_type()
+                    .const_int(*b as u64, false)
+                    .as_basic_value_enum());
+            }
 
-            Expr::NilLiteral => Ok(self.nil_type().const_zero().as_basic_value_enum()),
+            Expr::NilLiteral => {
+                return Ok(self.nil_type().const_zero().as_basic_value_enum());
+            }
 
             Expr::TupleLiteral { elements } => {
                 let types = elements
@@ -112,7 +132,59 @@ impl<'ctx> CodegenContext<'ctx> {
                     .as_basic_value_enum())
             }
 
-            _ => todo!(),
+            Expr::AnonymousFn { params, body } => {
+                // 1. get the "restore point"
+                let curr_block = self.builder.get_insert_block().unwrap();
+
+                // 2. build the function "elsewhere"
+                let i32_t = self.context.i32_type();
+
+                let fn_type = i32_t.fn_type(&[], false);
+
+                let fun = self
+                    .main_module()
+                    .add_function("some_other_fn", fn_type, None);
+
+                let basic_block = self.context.append_basic_block(fun, "entry");
+                self.builder.position_at_end(basic_block);
+                self.builder
+                    .build_return(Some(&i32_t.const_int(42, false).as_basic_value_enum()))
+                    .unwrap();
+
+                // 3. restore position afterwards
+                self.builder.position_at_end(curr_block);
+
+                Ok(fun.as_global_value().as_basic_value_enum())
+            }
+
+            Expr::Invocation {
+                expr,
+                postfix,
+                coalesce,
+                args,
+            } => {
+                let fn_val = self.compile_expr(expr)?;
+
+                let fn_ptr = match fn_val {
+                    BasicValueEnum::PointerValue(ptr) => ptr,
+                    _ => panic!("Expected pointer value, got something else"),
+                };
+
+                // need to retrieve/compute the fn type again
+                let i32_t = self.context.i32_type();
+                let fn_type = i32_t.fn_type(&[], false);
+
+                Ok(self
+                    .builder
+                    .build_indirect_call(fn_type, fn_ptr, &vec![], "invocation")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .left()
+                    .expect("could not unwrap CallSiteValue as BasicValueEnum"))
+            }
+
+            // Exp
+            _ => todo!("todo: compile <expr>"),
         }
     }
 }
@@ -162,7 +234,7 @@ mod tests {
         codegen_context.builder.position_at_end(basic_block);
 
         let tup = codegen_context
-            .compile_expr(&parse_expr("(true, false, nil)"))
+            .compile_expr(&parse_expr("(true, false, (|bla| {})(3))"))
             .unwrap();
 
         codegen_context
@@ -186,6 +258,6 @@ mod tests {
         //   ret i32 42
         // }
 
-        panic!("");
+        panic!("just checking things out...");
     }
 }
