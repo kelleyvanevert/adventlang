@@ -392,3 +392,43 @@ define i32 @main() {
     %2 = mul nsw i32 1, 4
     ret i32 %2
 }
+
+
+
+let num = 42;
+
+fn increment() {
+  num += 2;
+
+  num
+}
+
+====>>>>
+
+fn main() {
+  let num = 42;
+}
+
+
+
+
+either a fn is a (closure_ptr, fn_ptr) and you call it as *fn_ptr(closure_ptr, ...)
+or the closure_ptr is always lying around, to be passed to the fn_ptr
+
+
+
+fn bla() {                      -- bla     = ( &{num=42}, &bla_code )
+  let num = 42;
+
+  fn mk_inc() {                 -- mk_inc  = ( &{num=42}, &{}, &mk_inc_code )
+    return |n| {                -- anon    = ( &{num=42}, &{}, &{n}, &anon_code )
+      num += n;
+      return num
+    }
+  }
+
+  let f = mk_inc();             -- f       = ( &{num=42}, &{}, &{n}, &anon_code )
+  f(10);                        -- call anon_code w/ ( &{num=42}, &{}, &{n}, 10 )
+}
+
+bla()
