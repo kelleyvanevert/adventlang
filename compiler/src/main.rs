@@ -20,6 +20,7 @@ use libffi::high::Closure2;
 use ouroboros::self_referencing;
 
 mod codegen;
+mod inference;
 mod runtime;
 
 struct JitCompiler<'ctx> {

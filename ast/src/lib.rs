@@ -26,7 +26,7 @@ impl Display for Identifier {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
 pub struct Declarable {
     pub pattern: DeclarePattern,
     pub fallback: Option<Expr>,
@@ -42,7 +42,7 @@ impl Display for Declarable {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
 pub enum DeclarePattern {
     Declare {
         guard: DeclareGuardExpr,
@@ -123,7 +123,7 @@ impl Display for DeclarePattern {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
 pub enum AssignPattern {
     Id(Identifier),
     Index(Box<AssignPattern>, Option<Box<Expr>>),
@@ -139,13 +139,13 @@ pub enum AssignPattern {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
 pub enum StrLiteralPiece {
     Fragment(String),
     Interpolation(Expr),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
 pub struct Argument {
     pub name: Option<Identifier>,
     pub expr: Expr,
@@ -176,13 +176,13 @@ impl Display for DeclareGuardExpr {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
 pub enum DictKey {
     Identifier(Identifier),
     Expr(Expr),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
 pub enum Expr {
     StrLiteral {
         pieces: Vec<StrLiteralPiece>,
@@ -280,7 +280,7 @@ impl From<AssignPattern> for Expr {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
 pub enum Item {
     NamedFn {
         name: Identifier,
@@ -289,7 +289,7 @@ pub enum Item {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
 pub enum Stmt {
     Break {
         expr: Option<Expr>,
@@ -313,13 +313,13 @@ pub enum Stmt {
     }, // ...
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
 pub struct Block {
     pub items: Vec<Item>,
     pub stmts: Vec<Stmt>,
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Hash)]
+#[derive(Debug, PartialEq, Eq, PartialOrd)]
 pub struct Document {
     pub body: Block,
 }

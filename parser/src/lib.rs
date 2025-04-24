@@ -1536,17 +1536,24 @@ pub fn parse_declarable(input: &str) -> Declarable {
         .expect("parse declarable")
 }
 
-fn try_parse_type(input: &str) -> Option<Type> {
+pub fn try_parse_type(input: &str) -> Option<Type> {
     terminated(typespec, eof)
         .parse(input.trim().into())
         .map(|(_, t)| t)
 }
 
 pub fn parse_type(input: &str) -> Type {
-    terminated(typespec, eof)
+    try_parse_type(input).expect("can parse type")
+}
+
+pub fn try_parse_expr(input: &str) -> Option<Expr> {
+    terminated(expr, eof)
         .parse(input.trim().into())
         .map(|(_, t)| t)
-        .expect("can parse type")
+}
+
+pub fn parse_expr(input: &str) -> Expr {
+    try_parse_expr(input).expect("can parse expr")
 }
 
 #[test]

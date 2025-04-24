@@ -356,3 +356,39 @@ fn<t>(t, fn<s>(s))       fn(bool, fn(int))          yes, with t=bool
 fn<s>() -> (s, s)        fn<t>() -> (t, int)
 
   ^^ what to do with nested generic functions? do they also need to be instantiated?
+
+
+
+HOW TO DO TYPE INFERENCE?
+===
+
+- function bodies are the unit of closures
+- but lexical blocks determine visibility
+
+let's say we go from top, down
+then per function body we build up a scope with typings that start untyped and are narrowed down progressively
+  <closure>.check_narrowing_assignment(...)
+
+
+
+
+%Tp = type {
+    i32,
+    i1
+}
+
+define i32 @main() {
+    %bit = alloca i1
+    store i1 0, ptr %bit
+
+    %int = alloca i32
+    store i32 263, ptr %int
+
+    %tup = alloca %Tp
+    %field_1 = getelementptr %Tp, %Tp* %tup, i32 0, i32 1
+    %bit_val = load i1, ptr %bit
+    store i1 %bit_val, i1* %field_1
+
+    %2 = mul nsw i32 1, 4
+    ret i32 %2
+}
