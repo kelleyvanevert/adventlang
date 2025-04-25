@@ -3,7 +3,7 @@
 use std::fmt::Display;
 
 use compact_str::CompactString;
-pub use numeric::Numeric;
+pub use numeric::Float;
 pub use regex::AlRegex;
 pub use types::{Type, TypeVar};
 
@@ -192,7 +192,8 @@ pub enum Expr {
         regex: AlRegex,
     },
     Bool(bool),
-    Numeric(Numeric),
+    Int(i64),
+    Float(Float),
     Variable(Identifier),
     UnaryExpr {
         expr: Box<Expr>,

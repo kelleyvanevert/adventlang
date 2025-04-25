@@ -1,11 +1,11 @@
-use ast::{Expr, Type};
+use ast::{Block, Expr, Item, Stmt, Type};
 use fxhash::FxHashMap;
 use inkwell::{
     builder::Builder,
     context::Context,
     module::Module,
     types::{BasicType, BasicTypeEnum, IntType, PointerType},
-    values::{AnyValue, BasicValue, BasicValueEnum},
+    values::{AnyValue, BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue},
 };
 use thiserror::Error;
 
@@ -62,6 +62,10 @@ impl<'ctx> CodegenContext<'ctx> {
         self.context.custom_width_int_type(1)
     }
 
+    fn int_type(&self) -> IntType<'ctx> {
+        self.context.i64_type()
+    }
+
     fn ptr_type(&self) -> PointerType<'ctx> {
         self.context.ptr_type(inkwell::AddressSpace::default())
     }
@@ -90,11 +94,53 @@ impl<'ctx> CodegenContext<'ctx> {
         }
     }
 
-    fn compile_expr<'ir>(&self, expr: &Expr) -> IRGenResult<'ir>
+    fn compile_block<'ir>(&self, f: FunctionValue<'ctx>, block: &Block) -> IRGenResult<'ir>
+    where
+        'ctx: 'ir,
+    {
+        for item in &block.items {
+            self.compile_item(f, item)?;
+        }
+
+        let mut result = self.compile_expr(f, &Expr::NilLiteral)?;
+
+        for stmt in &block.stmts {
+            result = self.compile_stmt(f, stmt)?;
+        }
+
+        Ok(result)
+    }
+
+    fn compile_item<'ir>(&self, f: FunctionValue<'ctx>, item: &Item) -> IRGenResult<'ir>
+    where
+        'ctx: 'ir,
+    {
+        todo!("TODO: compile <item>")
+    }
+
+    fn compile_stmt<'ir>(&self, f: FunctionValue<'ctx>, stmt: &Stmt) -> IRGenResult<'ir>
+    where
+        'ctx: 'ir,
+    {
+        match stmt {
+            Stmt::Expr { expr } => self.compile_expr(f, expr),
+
+            // TODO
+            Stmt::Return { expr } => self.compile_expr(f, expr.as_ref().unwrap()),
+
+            _ => todo!("TODO: compile <stmt>"),
+        }
+    }
+
+    fn compile_expr<'ir>(&self, f: FunctionValue<'ctx>, expr: &Expr) -> IRGenResult<'ir>
     where
         'ctx: 'ir,
     {
         match expr {
+            Expr::NilLiteral => {
+                return Ok(self.nil_type().const_zero().as_basic_value_enum());
+            }
+
             Expr::Bool(b) => {
                 return Ok(self
                     .bool_type()
@@ -102,8 +148,11 @@ impl<'ctx> CodegenContext<'ctx> {
                     .as_basic_value_enum());
             }
 
-            Expr::NilLiteral => {
-                return Ok(self.nil_type().const_zero().as_basic_value_enum());
+            Expr::Int(n) => {
+                return Ok(self
+                    .int_type()
+                    .const_int(*n as u64, false)
+                    .as_basic_value_enum());
             }
 
             Expr::TupleLiteral { elements } => {
@@ -117,7 +166,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 let tuple_ptr = self.builder.build_alloca(tuple_type, "tuple_ptr").unwrap();
 
                 for (i, expr) in elements.iter().enumerate() {
-                    let val = self.compile_expr(expr)?;
+                    let val = self.compile_expr(f, expr)?;
 
                     let val_ptr = self
                         .builder
@@ -139,9 +188,10 @@ impl<'ctx> CodegenContext<'ctx> {
                 let curr_block = self.builder.get_insert_block().unwrap();
 
                 // 2. build the function "elsewhere"
-                let i32_t = self.context.i32_type();
+                let return_type = self.int_type();
 
-                let fn_type = i32_t.fn_type(&[self.ptr_type().into()], false);
+                let fn_type =
+                    return_type.fn_type(&[self.ptr_type().into(), self.int_type().into()], false);
 
                 let fun = self
                     .main_module()
@@ -149,8 +199,12 @@ impl<'ctx> CodegenContext<'ctx> {
 
                 let basic_block = self.context.append_basic_block(fun, "entry");
                 self.builder.position_at_end(basic_block);
+                let arg = match fun.get_nth_param(1).unwrap() {
+                    BasicValueEnum::IntValue(n) => n,
+                    _ => panic!("Expected int arg at pos 1"),
+                };
                 self.builder
-                    .build_return(Some(&i32_t.const_int(42, false).as_basic_value_enum()))
+                    .build_return(Some(&arg.as_basic_value_enum()))
                     .unwrap();
 
                 // 3. restore position afterwards
@@ -181,7 +235,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 coalesce,
                 args,
             } => {
-                let fn_tup_basic_val = self.compile_expr(expr)?;
+                let fn_tup_basic_val = self.compile_expr(f, expr)?;
 
                 let fn_tup_arr_val = match fn_tup_basic_val {
                     BasicValueEnum::ArrayValue(arr) => arr,
@@ -205,12 +259,18 @@ impl<'ctx> CodegenContext<'ctx> {
                 };
 
                 // need to retrieve/compute the fn type again
-                let i32_t = self.context.i32_type();
-                let fn_type = i32_t.fn_type(&[], false);
+                let return_type = self.int_type();
+                let fn_type =
+                    return_type.fn_type(&[self.ptr_type().into(), self.int_type().into()], false);
+
+                let mut llvm_args: Vec<BasicMetadataValueEnum> = vec![closure_ptr.into()];
+                for arg in args {
+                    llvm_args.push(self.compile_expr(f, &arg.expr)?.into());
+                }
 
                 Ok(self
                     .builder
-                    .build_indirect_call(fn_type, fn_ptr, &vec![closure_ptr.into()], "invocation")
+                    .build_indirect_call(fn_type, fn_ptr, &llvm_args, "invocation")
                     .unwrap()
                     .try_as_basic_value()
                     .left()
@@ -223,10 +283,50 @@ impl<'ctx> CodegenContext<'ctx> {
                 then,
                 els,
             } => {
-                //
-                let cond_val = self.compile_expr(expr)?;
+                let cond_basic_val = self.compile_expr(f, cond)?;
 
-                todo!()
+                let cond_bool_val = match cond_basic_val {
+                    BasicValueEnum::IntValue(int) => int,
+                    _ => panic!("Expected pointer value, got something else"),
+                };
+
+                let then_block = self.context.append_basic_block(f, "if_then");
+                let else_block = self.context.append_basic_block(f, "if_else");
+                let cont_block = self.context.append_basic_block(f, "if_cont");
+
+                self.builder
+                    .build_conditional_branch(cond_bool_val, then_block, else_block)
+                    .unwrap();
+
+                // PREPARE RESULT
+                // the result type is NIL if there's no ELSE branch,
+                //  and otherwise the same type that both branches have
+                //  (..of course we need to typecheck first to get this info)
+                let result_type = self.context.i64_type(); // TODO
+
+                // THEN
+                self.builder.position_at_end(then_block);
+                let then_result = self.compile_block(f, then)?;
+                self.builder.build_unconditional_branch(cont_block).unwrap();
+
+                // ELSE
+                self.builder.position_at_end(else_block);
+                let else_result = els
+                    .as_ref()
+                    .map(|els| self.compile_block(f, &els))
+                    .transpose()?;
+                self.builder.build_unconditional_branch(cont_block).unwrap();
+
+                // CONTINUE
+                self.builder.position_at_end(cont_block);
+                Ok(match else_result {
+                    None => self.nil_type().const_zero().as_basic_value_enum(),
+                    Some(else_result) => {
+                        let phi = self.builder.build_phi(result_type, "if_result").unwrap();
+                        phi.add_incoming(&[(&then_result, then_block), (&else_result, else_block)]);
+                        phi.as_basic_value()
+                    }
+                })
             }
 
             // Exp
@@ -270,44 +370,61 @@ mod tests {
         //     "\"i0 0\""
         // );
 
-        let i32_t = context.i32_type();
-        let fn_type = i32_t.fn_type(&[], false);
+        let i64_t = context.i64_type();
+        let fn_type = i64_t.fn_type(&[], false);
         let function = codegen_context
             .main_module()
             .add_function("main", fn_type, None);
         let basic_block = context.append_basic_block(function, "entry");
         codegen_context.builder.position_at_end(basic_block);
 
-        let tup = codegen_context
-            .compile_expr(&parse_expr("(true, false, (|bla| {})(3))"))
+        // let res_val = codegen_context
+        //     .compile_expr(function, &parse_expr("(true, false, (|bla| {})(3))"))
+        //     .unwrap();
+
+        let res_val = codegen_context
+            .compile_expr(
+                function,
+                &parse_expr(
+                    "
+                        if false {
+                            (|bla| {})(33)
+                        } else {
+                            67
+                        }
+                    ",
+                ),
+            )
             .unwrap();
 
         codegen_context
             .builder
             // .build_return(Some(&tup.as_basic_value_enum()))
-            .build_return(Some(&i32_t.const_int(42, false).as_basic_value_enum()))
+            .build_return(Some(&res_val))
             .unwrap();
 
         println!("{}", codegen_context.main_module().to_string());
 
-        // define i32 @main() {
+        // define i64 @main() {
         // entry:
-        //     %tuple_ptr = alloca { i1, i1, i32 }, align 8
-        //     %tuple_field_ptr = getelementptr inbounds { i1, i1, i32 }, ptr %tuple_ptr, i32 0, i32 0
-        //     store i1 true, ptr %tuple_field_ptr, align 1
-        //     %tuple_field_ptr1 = getelementptr inbounds { i1, i1, i32 }, ptr %tuple_ptr, i32 0, i32 1
-        //     store i1 false, ptr %tuple_field_ptr1, align 1
+        //     br i1 true, label %if_then, label %if_else
+        //
+        // if_then:                                          ; preds = %entry
         //     %closure_ptr = alloca {}, align 8
-        //     %invocation = call i32 @some_other_fn(ptr %closure_ptr)
-        //     %tuple_field_ptr2 = getelementptr inbounds { i1, i1, i32 }, ptr %tuple_ptr, i32 0, i32 2
-        //     store i32 %invocation, ptr %tuple_field_ptr2, align 4
-        //     %tuple_val = load { i1, i1, i32 }, ptr %tuple_ptr, align 4
-        //     ret i32 42
+        //     %invocation = call i64 @some_other_fn(ptr %closure_ptr, i64 33)
+        //     br label %if_cont
+        //
+        // if_else:                                          ; preds = %entry
+        //     br label %if_cont
+        //
+        // if_cont:                                          ; preds = %if_else, %if_then
+        //     %if_result = phi i64 [ %invocation, %if_then ], [ 67, %if_else ]
+        //     ret i64 %if_result
         // }
-
-        // define i32 @some_other_fn(ptr %0) {
+        //
+        // define i64 @some_other_fn(ptr %0, i64 %1) {
         // entry:
-        //     ret i32 42
+        //     ret i64 %1
         // }
 
         panic!("just checking things out...");

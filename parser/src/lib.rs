@@ -10,7 +10,7 @@ use regex::Regex;
 use {
     ast::{
         AlRegex, Argument, AssignPattern, Block, Declarable, DeclareGuardExpr, DeclarePattern,
-        Document, Expr, Identifier, Item, Numeric, Stmt, StrLiteralPiece, Type, TypeVar,
+        Document, Expr, Float, Identifier, Item, Stmt, StrLiteralPiece, Type, TypeVar,
     },
     parser_combinators::{
         ParseResult, Parser, alt, check, delimited, many0, many1, map, map_opt, optional,
@@ -345,18 +345,16 @@ fn regex_literal(s: State) -> ParseResult<State, Expr> {
     ))
 }
 
-// TODO
-fn integer(s: State) -> ParseResult<State, Numeric> {
+fn integer(s: State) -> ParseResult<State, Expr> {
     map(regex(r"^-?[0-9]+"), |num| {
-        Numeric::Int(num.parse::<i64>().unwrap())
+        Expr::Int(num.parse::<i64>().unwrap())
     })
     .parse(s)
 }
 
-// TODO
-fn float(s: State) -> ParseResult<State, Numeric> {
+fn float(s: State) -> ParseResult<State, Expr> {
     map(regex(r"^-?[0-9]+\.[0-9]+"), |num| {
-        Numeric::Float(num.parse::<f64>().unwrap())
+        Expr::Float(Float(num.parse::<f64>().unwrap()))
     })
     .parse(s)
 }
@@ -623,8 +621,8 @@ fn expr_leaf(s: State) -> ParseResult<State, Expr> {
         map(tag("nil"), |_| Expr::NilLiteral),
         raw_str_literal,
         str_literal,
-        map(float, Expr::Numeric),
-        map(integer, Expr::Numeric),
+        float,
+        integer,
         regex_literal,
         // control structures
         do_while_expr,
@@ -1637,7 +1635,7 @@ mod tests {
     }
 
     fn int(n: i64) -> Expr {
-        Expr::Numeric(Numeric::Int(n))
+        Expr::Int(n)
     }
 
     fn binary(op: &str, left: Expr, right: Expr) -> Expr {
@@ -2068,7 +2066,7 @@ let example_input = r"
                 Expr::BinaryExpr {
                     left: Expr::Variable(id("kelley")).into(),
                     op: "+".into(),
-                    right: Expr::Numeric(Numeric::Int(21)).into()
+                    right: Expr::Int(21).into()
                 }
             ))
         );
@@ -2099,7 +2097,7 @@ let example_input = r"
                     then: Block {
                         items: vec![],
                         stmts: vec![Stmt::Expr {
-                            expr: Expr::Numeric(Numeric::Int(21)).into()
+                            expr: Expr::Int(21).into()
                         }]
                     },
                     els: None,
@@ -2116,7 +2114,7 @@ let example_input = r"
                     then: Block {
                         items: vec![],
                         stmts: vec![Stmt::Expr {
-                            expr: Expr::Numeric(Numeric::Int(21)).into()
+                            expr: Expr::Int(21).into()
                         }]
                     },
                     els: None,
@@ -2134,12 +2132,12 @@ let example_input = r"
                         coalesce: false,
                         args: vec![Argument {
                             name: None,
-                            expr: Expr::Numeric(Numeric::Int(12)).into()
+                            expr: Expr::Int(12).into()
                         }]
                     }
                     .into(),
                     op: "+".into(),
-                    right: Expr::Numeric(Numeric::Int(21)).into()
+                    right: Expr::Int(21).into()
                 }
             ))
         );
@@ -2154,12 +2152,12 @@ let example_input = r"
                         coalesce: false,
                         args: vec![Argument {
                             name: Some(id("bla")),
-                            expr: Expr::Numeric(Numeric::Int(12)).into()
+                            expr: Expr::Int(12).into()
                         }]
                     }
                     .into(),
                     op: "+".into(),
-                    right: Expr::Numeric(Numeric::Int(21)).into()
+                    right: Expr::Int(21).into()
                 }
             ))
         );
@@ -2180,7 +2178,7 @@ let example_input = r"
                         args: vec![
                             Argument {
                                 name: Some(id("bla")),
-                                expr: Expr::Numeric(Numeric::Int(12)).into()
+                                expr: Expr::Int(12).into()
                             },
                             Argument {
                                 name: None,
@@ -2482,7 +2480,7 @@ let example_input = r"
                             StrLiteralPiece::Interpolation(Expr::BinaryExpr {
                                 left: Expr::Variable(id("x")).into(),
                                 op: "+".into(),
-                                right: Expr::Numeric(Numeric::Int(1)).into()
+                                right: Expr::Int(1).into()
                             }),
                             StrLiteralPiece::Fragment("ld".into()),
                         ]
@@ -2516,7 +2514,7 @@ let example_input = r"
                         items: vec![],
                         stmts: vec![Stmt::Assign {
                             pattern: AssignPattern::Id(id("h")),
-                            expr: Expr::Numeric(Numeric::Int(1)).into()
+                            expr: Expr::Int(1).into()
                         }]
                     }
                 }
@@ -2528,14 +2526,14 @@ let example_input = r"
             cond: Expr::BinaryExpr {
                 left: Expr::Variable(id("d")).into(),
                 op: "==".into(),
-                right: Expr::Numeric(Numeric::Int(0)).into(),
+                right: Expr::Int(0).into(),
             }
             .into(),
             then: Block {
                 items: vec![],
                 stmts: vec![Stmt::Assign {
                     pattern: AssignPattern::Id(id("n")),
-                    expr: Expr::Numeric(Numeric::Int(0)).into(),
+                    expr: Expr::Int(0).into(),
                 }],
             },
             els: Some(Block {
@@ -2626,14 +2624,14 @@ let example_input = r"
                     cond: Expr::BinaryExpr {
                         left: Expr::Variable(id("d")).into(),
                         op: "==".into(),
-                        right: Expr::Numeric(Numeric::Int(0)).into(),
+                        right: Expr::Int(0).into(),
                     }
                     .into(),
                     then: Block {
                         items: vec![],
                         stmts: vec![Stmt::Assign {
                             pattern: AssignPattern::Id(id("n")),
-                            expr: Expr::Numeric(Numeric::Int(0)).into(),
+                            expr: Expr::Int(0).into(),
                         }],
                     },
                     els: Some(Block {
@@ -2658,7 +2656,7 @@ let example_input = r"
                     items: vec![],
                     stmts: vec![Stmt::Declare {
                         pattern: declare_id("h"),
-                        expr: Expr::Numeric(Numeric::Int(7)).into()
+                        expr: Expr::Int(7).into()
                     }]
                 }
             ))
@@ -2677,10 +2675,10 @@ let example_input = r"
                     stmts: vec![
                         Stmt::Assign {
                             pattern: AssignPattern::Id(id("h")),
-                            expr: binary("+", var("h"), Expr::Numeric(Numeric::Int(7))).into()
+                            expr: binary("+", var("h"), Expr::Int(7)).into()
                         },
                         Stmt::Expr {
-                            expr: Expr::Numeric(Numeric::Int(5)).into()
+                            expr: Expr::Int(5).into()
                         }
                     ]
                 }
@@ -2703,14 +2701,14 @@ let example_input = r"
                                 guard: DeclareGuardExpr::Unguarded(id("h")),
                                 ty: Some(Type::Int)
                             },
-                            expr: Expr::Numeric(Numeric::Int(7)).into()
+                            expr: Expr::Int(7).into()
                         },
                         Stmt::Assign {
                             pattern: AssignPattern::Id(id("kelley")),
-                            expr: Expr::Numeric(Numeric::Int(712)).into()
+                            expr: Expr::Int(712).into()
                         },
                         Stmt::Expr {
-                            expr: Expr::Numeric(Numeric::Int(5)).into()
+                            expr: Expr::Int(5).into()
                         }
                     ]
                 }
@@ -2731,7 +2729,7 @@ let example_input = r"
                     }],
                     stmts: vec![Stmt::Declare {
                         pattern: declare_id("h"),
-                        expr: Expr::Numeric(Numeric::Int(7)).into()
+                        expr: Expr::Int(7).into()
                     }]
                 }
             ))
@@ -2748,10 +2746,10 @@ let example_input = r"
                             items: vec![],
                             stmts: vec![
                                 Stmt::Expr {
-                                    expr: Expr::Numeric(Numeric::Int(7)).into()
+                                    expr: Expr::Int(7).into()
                                 },
                                 Stmt::Expr {
-                                    expr: Expr::Numeric(Numeric::Int(1)).into()
+                                    expr: Expr::Int(1).into()
                                 }
                             ]
                         }
@@ -2803,7 +2801,7 @@ let example_input = r"
                             },
                             Stmt::Declare {
                                 pattern: declare_id("h"),
-                                expr: Expr::Numeric(Numeric::Int(2)).into()
+                                expr: Expr::Int(2).into()
                             },
                             Stmt::Expr {
                                 expr: Expr::AnonymousFn {

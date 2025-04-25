@@ -432,3 +432,18 @@ fn bla() {                      -- bla     = ( &{num=42}, &bla_code )
 }
 
 bla()
+
+
+
+
+
+====
+https://godbolt.org/z/zzf7frWjz
+
+define i64 @main() {
+  ret i64 500
+  ; ret i64 500 -> Program returned: 244
+  ; ret i64 512 -> Program returned: 0
+  ; what the hell??
+}
+====
