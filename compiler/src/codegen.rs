@@ -125,8 +125,16 @@ impl<'ctx> CodegenContext<'ctx> {
         match stmt {
             Stmt::Expr { expr } => self.compile_expr(f, expr),
 
-            // TODO
-            Stmt::Return { expr } => self.compile_expr(f, expr.as_ref().unwrap()),
+            Stmt::Return { expr } => {
+                let return_val = match expr {
+                    None => self.nil_type().const_zero().as_basic_value_enum(),
+                    Some(expr) => self.compile_expr(f, expr)?,
+                };
+
+                self.builder.build_return(Some(&return_val)).unwrap();
+
+                Ok(self.nil_type().const_zero().as_basic_value_enum())
+            }
 
             _ => todo!("TODO: compile <stmt>"),
         }
