@@ -183,6 +183,18 @@ impl<'ctx> CodegenContext<'ctx> {
                     .as_basic_value_enum())
             }
 
+            Expr::Variable(id) => {
+                // TODO actually locate, using static knowledge of the variable's
+                //  location in parent scopes, the argument list, or current stack frame
+
+                let arg = match f.get_nth_param(1).unwrap() {
+                    BasicValueEnum::IntValue(n) => n,
+                    _ => panic!("Expected int arg at pos 1"),
+                };
+
+                Ok(arg.as_basic_value_enum())
+            }
+
             Expr::AnonymousFn { params, body } => {
                 // 1. get the "restore point"
                 let curr_block = self.builder.get_insert_block().unwrap();
@@ -197,15 +209,10 @@ impl<'ctx> CodegenContext<'ctx> {
                     .main_module()
                     .add_function("some_other_fn", fn_type, None);
 
-                let basic_block = self.context.append_basic_block(fun, "entry");
-                self.builder.position_at_end(basic_block);
-                let arg = match fun.get_nth_param(1).unwrap() {
-                    BasicValueEnum::IntValue(n) => n,
-                    _ => panic!("Expected int arg at pos 1"),
-                };
-                self.builder
-                    .build_return(Some(&arg.as_basic_value_enum()))
-                    .unwrap();
+                let entry_block = self.context.append_basic_block(fun, "entry");
+                self.builder.position_at_end(entry_block);
+                let res = self.compile_block(fun, body)?;
+                self.builder.build_return(Some(&res)).unwrap();
 
                 // 3. restore position afterwards
                 self.builder.position_at_end(curr_block);
@@ -388,7 +395,7 @@ mod tests {
                 &parse_expr(
                     "
                         if false {
-                            (|bla| {})(33)
+                            (|bla| { bla })(33)
                         } else {
                             67
                         }
