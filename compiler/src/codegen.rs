@@ -5,7 +5,7 @@ use inkwell::{
     context::Context,
     module::Module,
     types::{BasicType, BasicTypeEnum, IntType, PointerType},
-    values::{BasicValue, BasicValueEnum},
+    values::{AnyValue, BasicValue, BasicValueEnum},
 };
 use thiserror::Error;
 
@@ -141,7 +141,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 // 2. build the function "elsewhere"
                 let i32_t = self.context.i32_type();
 
-                let fn_type = i32_t.fn_type(&[], false);
+                let fn_type = i32_t.fn_type(&[self.ptr_type().into()], false);
 
                 let fun = self
                     .main_module()
@@ -156,123 +156,52 @@ impl<'ctx> CodegenContext<'ctx> {
                 // 3. restore position afterwards
                 self.builder.position_at_end(curr_block);
 
-                // create the anonymouse function tuple [closure-ptr, code-ptr]
-                let fn_tup_ptr = self
+                let closure_type = self.context.struct_type(&[], false);
+                let closure_ptr = self
                     .builder
-                    .build_alloca(self.ptr_type().array_type(2), "fn_tup_ptr")
+                    .build_alloca(closure_type, "closure_ptr")
                     .unwrap();
 
-                // create an empty closure, and assign it to the first element
-                {
-                    let closure_type = self.context.struct_type(&[], false);
-                    let closure_ptr = self
-                        .builder
-                        .build_alloca(closure_type, "closure_ptr")
-                        .unwrap();
-
-                    let el_ptr = unsafe {
-                        self.builder
-                            .build_in_bounds_gep(
-                                self.ptr_type().array_type(2),
-                                fn_tup_ptr,
-                                &[
-                                    self.context.i32_type().const_int(0, false),
-                                    self.context.i32_type().const_int(0, false), // 0-th element
-                                ],
-                                "anon_fn_val_0_ptr",
-                            )
-                            .unwrap()
-                    };
-
-                    self.builder.build_store(el_ptr, closure_ptr).unwrap();
-                }
-
-                // then, assign the function pointer to the second element
-                {
-                    let el_ptr = unsafe {
-                        self.builder
-                            .build_in_bounds_gep(
-                                self.ptr_type().array_type(2),
-                                fn_tup_ptr,
-                                &[
-                                    self.context.i32_type().const_int(0, false),
-                                    self.context.i32_type().const_int(1, false), // 1-th element
-                                ],
-                                "anon_fn_val_1_ptr",
-                            )
-                            .unwrap()
-                    };
-
-                    self.builder
-                        .build_store(el_ptr, fun.as_global_value().as_basic_value_enum())
-                        .unwrap();
-                }
+                let f = fun.as_global_value().as_pointer_value();
 
                 // finally, return the array
-                Ok(fn_tup_ptr.as_basic_value_enum())
+                Ok(self
+                    .ptr_type()
+                    .const_array(&[closure_ptr, f])
+                    .as_basic_value_enum())
             }
 
+            /*
+             * %fn_tup = {compile(fn_expr)} -- as a pointer to an alloca
+             *
+             */
             Expr::Invocation {
                 expr,
                 postfix,
                 coalesce,
                 args,
             } => {
-                let fn_tup_ptr_val = self.compile_expr(expr)?;
+                let fn_tup_basic_val = self.compile_expr(expr)?;
 
-                let fn_tup_ptr = match fn_tup_ptr_val {
-                    BasicValueEnum::PointerValue(ptr) => ptr,
+                let fn_tup_arr_val = match fn_tup_basic_val {
+                    BasicValueEnum::ArrayValue(arr) => arr,
                     _ => panic!("Expected pointer value, got something else"),
                 };
 
                 // get the closure ptr
-                let closure_ptr = {
-                    let closure_ptr_loc = unsafe {
-                        self.builder
-                            .build_in_bounds_gep(
-                                self.ptr_type().array_type(2),
-                                fn_tup_ptr,
-                                &[
-                                    self.context.i32_type().const_int(0, false),
-                                    self.context.i32_type().const_int(0, false), // 0-th element
-                                ],
-                                "closure_ptr_loc",
-                            )
-                            .unwrap()
-                    };
-
-                    let closure_type = self.context.struct_type(&[], false);
-
-                    self.builder
-                        .build_load(closure_type, closure_ptr_loc, "closure_ptr")
-                        .unwrap()
-                };
+                let closure_ptr = self
+                    .builder
+                    .build_extract_value(fn_tup_arr_val, 0, "closure_ptr")
+                    .unwrap();
 
                 // get the function pointer
-                let fn_ptr = {
-                    let fn_ptr_loc = unsafe {
-                        self.builder
-                            .build_in_bounds_gep(
-                                self.ptr_type().array_type(2),
-                                fn_tup_ptr,
-                                &[
-                                    self.context.i32_type().const_int(0, false),
-                                    self.context.i32_type().const_int(1, false), // 1-st element
-                                ],
-                                "fn_ptr_loc",
-                            )
-                            .unwrap()
-                    };
-
-                    let fn_ptr_val = self
-                        .builder
-                        .build_load(self.ptr_type(), fn_ptr_loc, "fn_ptr")
-                        .unwrap();
-
-                    match fn_ptr_val {
-                        BasicValueEnum::PointerValue(ptr) => ptr,
-                        _ => panic!("Expected pointer value, got something else"),
-                    }
+                let fn_ptr = match self
+                    .builder
+                    .build_extract_value(fn_tup_arr_val, 1, "fn_ptr")
+                    .unwrap()
+                {
+                    BasicValueEnum::PointerValue(ptr) => ptr,
+                    _ => panic!("Expected pointer value, got something else"),
                 };
 
                 // need to retrieve/compute the fn type again
@@ -281,11 +210,23 @@ impl<'ctx> CodegenContext<'ctx> {
 
                 Ok(self
                     .builder
-                    .build_indirect_call(fn_type, fn_ptr, &vec![], "invocation")
+                    .build_indirect_call(fn_type, fn_ptr, &vec![closure_ptr.into()], "invocation")
                     .unwrap()
                     .try_as_basic_value()
                     .left()
                     .expect("could not unwrap CallSiteValue as BasicValueEnum"))
+            }
+
+            Expr::If {
+                pattern,
+                cond,
+                then,
+                els,
+            } => {
+                //
+                let cond_val = self.compile_expr(expr)?;
+
+                todo!()
             }
 
             // Exp
@@ -356,24 +297,15 @@ mod tests {
         //     store i1 true, ptr %tuple_field_ptr, align 1
         //     %tuple_field_ptr1 = getelementptr inbounds { i1, i1, i32 }, ptr %tuple_ptr, i32 0, i32 1
         //     store i1 false, ptr %tuple_field_ptr1, align 1
-        //     %fn_tup_ptr = alloca [2 x ptr], align 8
         //     %closure_ptr = alloca {}, align 8
-        //     %anon_fn_val_0_ptr = getelementptr inbounds [2 x ptr], ptr %fn_tup_ptr, i32 0, i32 0
-        //     store ptr %closure_ptr, ptr %anon_fn_val_0_ptr, align 8
-        //     %anon_fn_val_1_ptr = getelementptr inbounds [2 x ptr], ptr %fn_tup_ptr, i32 0, i32 1
-        //     store ptr @some_other_fn, ptr %anon_fn_val_1_ptr, align 8
-        //     %closure_ptr_loc = getelementptr inbounds [2 x ptr], ptr %fn_tup_ptr, i32 0, i32 0
-        //     %closure_ptr2 = load {}, ptr %closure_ptr_loc, align 1
-        //     %fn_ptr_loc = getelementptr inbounds [2 x ptr], ptr %fn_tup_ptr, i32 0, i32 1
-        //     %fn_ptr = load ptr, ptr %fn_ptr_loc, align 8
-        //     %invocation = call i32 %fn_ptr()
-        //     %tuple_field_ptr3 = getelementptr inbounds { i1, i1, i32 }, ptr %tuple_ptr, i32 0, i32 2
-        //     store i32 %invocation, ptr %tuple_field_ptr3, align 4
+        //     %invocation = call i32 @some_other_fn(ptr %closure_ptr)
+        //     %tuple_field_ptr2 = getelementptr inbounds { i1, i1, i32 }, ptr %tuple_ptr, i32 0, i32 2
+        //     store i32 %invocation, ptr %tuple_field_ptr2, align 4
         //     %tuple_val = load { i1, i1, i32 }, ptr %tuple_ptr, align 4
         //     ret i32 42
         // }
 
-        // define i32 @some_other_fn() {
+        // define i32 @some_other_fn(ptr %0) {
         // entry:
         //     ret i32 42
         // }
