@@ -446,4 +446,29 @@ define i64 @main() {
   ; ret i64 512 -> Program returned: 0
   ; what the hell??
 }
+
+..but it's actually just because return values are mod 255 :)
 ====
+
+
+
+
+
+For each function (item or inline), we need to know (and build at runtime):
+
+- it's type (args and return)
+  - in the case of a generic function:
+    - every instantiation that is used
+
+
+For each variable:
+  - if it's a fn argument
+    -> it's index
+      - ...or how to get to it in case of a pattern
+  - if it's a local
+    - if it's not used in nested functions
+      -> %-name
+    - if it is
+      -> it's location within .. -- how to encode? just a pointer? or a struct ptr + index? or just an index, because the ptr is lying around?
+  - if it's a parent scope's variable
+    -> ...
