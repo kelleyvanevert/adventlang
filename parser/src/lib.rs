@@ -1569,39 +1569,6 @@ pub fn parse_expr(input: &str) -> Expr {
     try_parse_expr(input).expect("can parse expr")
 }
 
-#[test]
-fn test_remove_comments() {
-    assert_eq!(
-        remove_comments(
-            r"
-hello //comment
-there"
-        ),
-        r"
-hello 
-there"
-            .to_string()
-    );
-
-    assert_eq!(
-        remove_comments(
-            r#"
-let rest = r"
-hello //comment
-there
-" // second comment
-bla"#
-        ),
-        r#"
-let rest = r"
-hello //comment
-there
-" 
-bla"#
-            .to_string()
-    );
-}
-
 pub fn parse_document(input: &str) -> Option<Document> {
     let input = remove_comments(input);
 
@@ -1626,6 +1593,17 @@ mod tests {
 
     fn var(name: &str) -> Expr {
         Expr::Variable(Identifier(name.into()))
+    }
+
+    fn empty_block() -> Expr {
+        Expr::DoWhile {
+            label: None,
+            body: Block {
+                items: vec![],
+                stmts: vec![],
+            },
+            cond: None,
+        }
     }
 
     #[allow(unused)]
@@ -1756,7 +1734,40 @@ mod tests {
     }
 
     #[test]
-    fn parsing_types() {
+    fn test_parse_remove_comments() {
+        assert_eq!(
+            remove_comments(
+                r"
+    hello //comment
+    there"
+            ),
+            r"
+    hello 
+    there"
+                .to_string()
+        );
+
+        assert_eq!(
+            remove_comments(
+                r#"
+    let rest = r"
+    hello //comment
+    there
+    " // second comment
+    bla"#
+            ),
+            r#"
+    let rest = r"
+    hello //comment
+    there
+    " 
+    bla"#
+                .to_string()
+        );
+    }
+
+    #[test]
+    fn test_parse_types() {
         assert_eq!(parse_type("bool"), Type::Bool);
 
         // assert_eq!(
@@ -1869,7 +1880,7 @@ mod tests {
     }
 
     #[test]
-    fn parsing_str_literals() {
+    fn test_parse_str_literals() {
         assert_eq!(test_parse(unicode_sequence, "u{1F419}"), Some(("", '🐙')));
 
         assert_eq!(
@@ -2045,7 +2056,7 @@ let example_input = r"
     }
 
     #[test]
-    fn parsing_stuff() {
+    fn test_parse_a_bunch_of_stuff() {
         assert_eq!(test_parse(identifier, "kelley"), Some(("", id("kelley"))));
         assert_eq!(test_parse(identifier, "_kel6*"), Some(("*", id("_kel6"))));
         assert_eq!(test_parse(identifier, " kelley"), None);
@@ -2882,7 +2893,7 @@ let example_input = r"
     }
 
     #[test]
-    fn parsing_named_fns() {
+    fn test_parse_named_fns() {
         assert_eq!(
             test_parse(item, r#"fn main() {}"#),
             Some((
@@ -2964,7 +2975,7 @@ let example_input = r"
     }
 
     #[test]
-    fn parsing_trailing_anon_vs_separate_stmt_ambiguity() {
+    fn test_parse_trailing_anon_vs_separate_stmt_ambiguity() {
         let doc_1 = parse_document(
             r#"
         fn make_closure() {
@@ -3007,7 +3018,7 @@ let example_input = r"
     }
 
     #[test]
-    fn parsing_infix_fns() {
+    fn test_parse_infix_fns() {
         assert_eq!(
             test_parse(expr, r"input :trim :split b"),
             Some((
@@ -3155,6 +3166,35 @@ let example_input = r"
                     simple_invocation_postfix("map", vec![var("lines"),]),
                     var("a"),
                     var("b")
+                )
+            ))
+        );
+    }
+
+    #[test]
+    fn test_parse_do_blocks() {
+        assert_eq!(
+            test_parse(expr, r"if bla { bla } else { bla }"),
+            Some(("", simple_if(var("bla"), var("bla"), var("bla"))))
+        );
+
+        assert_eq!(
+            test_parse(expr, r"if do { bla } { bla } else { bla }"),
+            Some((
+                "",
+                simple_if(
+                    Expr::DoWhile {
+                        label: None,
+                        body: Block {
+                            items: vec![],
+                            stmts: vec![Stmt::Expr {
+                                expr: var("bla").into()
+                            }],
+                        },
+                        cond: None
+                    },
+                    var("bla"),
+                    var("bla")
                 )
             ))
         );
