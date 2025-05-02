@@ -1,7 +1,7 @@
 use std::{cmp::Ordering, fmt::Display};
 
 use compact_str::CompactString;
-use fxhash::{FxHashMap, FxHashSet};
+use fxhash::FxHashMap;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TypeVar(pub CompactString);
@@ -22,12 +22,20 @@ pub enum Type {
     Float,
     Num,
     Regex,
-    Fun(Option<(Vec<TypeVar>, Vec<Type>, Box<Type>)>),
+    Fun(Option<FnType>),
     List(Box<Type>),
     Tuple(Option<Vec<Type>>),
     Dict(Option<(Box<Type>, Box<Type>)>),
-    Union(Vec<Type>),
+    // Union(Vec<Type>),
+    Nullable(Box<Type>),
     TypeVar(TypeVar),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FnType {
+    pub generics: Vec<TypeVar>,
+    pub params: Vec<Type>,
+    pub ret: Box<Type>,
 }
 
 impl Type {
@@ -38,39 +46,43 @@ impl Type {
         }
     }
 
-    fn flatten_unions(&self) -> Vec<Type> {
-        match self {
-            Type::Union(types) => types.into_iter().flat_map(Type::flatten_unions).collect(),
-            _ => vec![self.clone()],
-        }
-    }
+    // // fn flatten_unions(&self) -> Vec<Type> {
+    // //     match self {
+    // //         Type::Union(types) => types.into_iter().flat_map(Type::flatten_unions).collect(),
+    // //         _ => vec![self.clone()],
+    // //     }
+    // // }
 
-    fn canonicalize(&self) -> Type {
-        match self {
-            // does:
-            // - flatten nested unions
-            // - remove duplicates
-            // - if single type -> return that single type
-            Type::Union(_) => {
-                let types = self
-                    .flatten_unions()
-                    .iter()
-                    .map(Type::canonicalize)
-                    .collect::<FxHashSet<_>>()
-                    .into_iter()
-                    .collect::<Vec<_>>();
+    // fn canonicalize(&self) -> Type {
+    //     match self {
+    //         // does:
+    //         // - flatten nested unions
+    //         // - remove duplicates
+    //         // - if single type -> return that single type
+    //         // Type::Union(_) => {
+    //         //     let types = self
+    //         //         .flatten_unions()
+    //         //         .iter()
+    //         //         .map(Type::canonicalize)
+    //         //         .collect::<FxHashSet<_>>()
+    //         //         .into_iter()
+    //         //         .collect::<Vec<_>>();
 
-                if types.len() == 1 {
-                    types[0].clone()
-                } else if types.contains(&Type::Any) {
-                    Type::Any
-                } else {
-                    Type::Union(types)
-                }
-            }
-            t => t.clone(),
-        }
-    }
+    //         //     if types.len() == 1 {
+    //         //         types[0].clone()
+    //         //     } else if types.contains(&Type::Any) {
+    //         //         Type::Any
+    //         //     } else {
+    //         //         Type::Union(types)
+    //         //     }
+    //         // }
+    //         Type::Nullable(u) => {
+    //             // TODO
+    //             return u.as_ref().clone();
+    //         }
+    //         t => t.clone(),
+    //     }
+    // }
 
     // pub fn narrow(&self, other: &Type) -> Option<Type> {
     //     match self.partial_cmp(other) {
@@ -93,11 +105,15 @@ impl Type {
             Type::Num => false,
             Type::Regex => false,
             Type::Fun(None) => false,
-            Type::Fun(Some((generics, args, ret))) => {
+            Type::Fun(Some(FnType {
+                generics,
+                params,
+                ret,
+            })) => {
                 if generics.contains(var) {
                     false
                 } else {
-                    args.iter().any(|t| t.contains_var(var)) || ret.contains_var(var)
+                    params.iter().any(|t| t.contains_var(var)) || ret.contains_var(var)
                 }
             }
             Type::List(t) => t.contains_var(var),
@@ -105,93 +121,106 @@ impl Type {
             Type::Tuple(Some(types)) => types.iter().any(|t| t.contains_var(var)),
             Type::Dict(None) => false,
             Type::Dict(Some((k, v))) => k.contains_var(var) || v.contains_var(var),
-            Type::Union(types) => types.iter().any(|t| t.contains_var(var)),
+            // Type::Union(types) => types.iter().any(|t| t.contains_var(var)),
+            Type::Nullable(t) => t.contains_var(var),
             Type::TypeVar(v) => var == v,
         }
     }
 
-    /**
-     * Checks whether this type can instantiate into another type.
-     */
-    pub fn can_instantiate(
-        &self,
-        other: &Type,
-        instantiations: &mut FxHashMap<TypeVar, Type>,
-        covariant: bool,
-    ) -> bool {
-        match (self, other) {
-            (Type::Any, Type::Any) => true,
-            (Type::Nil, Type::Nil) => true,
-            (Type::Bool, Type::Bool) => true,
-            (Type::Str, Type::Str) => true,
-            (Type::Int, Type::Int) => true,
-            (Type::Float, Type::Float) => true,
-            (Type::Num, Type::Num) => true,
-            (Type::Regex, Type::Regex) => true,
-            (Type::Fun(_), Type::Fun(None)) => true,
-            (Type::Fun(None), Type::Fun(_)) => true,
-            (
-                Type::Fun(Some((a_generics, a_params, a_ret))),
-                Type::Fun(Some((b_generics, b_params, b_ret))),
-            ) => {
-                //
-                todo!()
-            }
-            (Type::List(a), Type::List(b)) => a.can_instantiate(b, instantiations, true),
-            (Type::Tuple(_), Type::Tuple(None)) => true,
-            (Type::Tuple(None), Type::Tuple(_)) => true,
-            (Type::Tuple(Some(a)), Type::Tuple(Some(b))) => {
-                a.len() == b.len()
-                    && a.iter()
-                        .zip(b)
-                        .all(|(a, b)| a.can_instantiate(b, instantiations, true))
-            }
-            (Type::Dict(_), Type::Dict(None)) => true,
-            (Type::Dict(None), Type::Dict(_)) => true,
-            (Type::Dict(Some((ka, va))), Type::Dict(Some((kb, vb)))) => {
-                ka.can_instantiate(kb, instantiations, true)
-                    && va.can_instantiate(vb, instantiations, true)
-            }
-            (Type::Union(types), _) => types
-                .iter()
-                .all(|t| t.can_instantiate(other, instantiations, true)),
-            (Type::TypeVar(v), _) => {
-                match instantiations.get(v) {
-                    None => {
-                        // we'll instantiate this variable in order to specialize
-                        instantiations.insert(v.clone(), other.clone());
-                        true
-                    }
-                    Some(current) => {
-                        // TODO: should we include a `context` here too?
-                        match current.partial_cmp(other) {
-                            None => {
-                                // we cannot instantiate this variable because of conflicting constraints
-                                false
-                            }
-                            Some(Ordering::Equal) => {
-                                // all good
-                                true
-                            }
-                            Some(Ordering::Less) => {
-                                if !covariant {
-                                    instantiations.insert(v.clone(), other.clone());
-                                }
-                                true
-                            }
-                            Some(Ordering::Greater) => {
-                                if covariant {
-                                    instantiations.insert(v.clone(), other.clone());
-                                }
-                                true
-                            }
-                        }
-                    }
-                }
-            }
-            _ => false,
-        }
-    }
+    // /**
+    //  * Checks whether this type can instantiate into another type.
+    //  */
+    // pub fn can_instantiate(
+    //     &self,
+    //     other: &Type,
+    //     instantiations: &mut FxHashMap<TypeVar, Type>,
+    //     covariant: bool,
+    // ) -> bool {
+    //     match (self, other) {
+    //         (Type::Any, Type::Any) => true,
+    //         (Type::Nil, Type::Nil) => true,
+    //         (Type::Bool, Type::Bool) => true,
+    //         (Type::Str, Type::Str) => true,
+    //         (Type::Int, Type::Int) => true,
+    //         (Type::Float, Type::Float) => true,
+    //         (Type::Num, Type::Num) => true,
+    //         (Type::Regex, Type::Regex) => true,
+    //         (Type::Fun(_), Type::Fun(None)) => true,
+    //         (Type::Fun(None), Type::Fun(_)) => true,
+    //         (
+    //             Type::Fun(Some(FnType {
+    //                 generics: a_generics,
+    //                 params: a_params,
+    //                 ret: a_ret,
+    //             })),
+    //             Type::Fun(Some(FnType {
+    //                 generics: b_generics,
+    //                 params: b_params,
+    //                 ret: b_ret,
+    //             })),
+    //         ) => {
+    //             //
+    //             todo!()
+    //         }
+    //         (Type::List(a), Type::List(b)) => a.can_instantiate(b, instantiations, true),
+    //         (Type::Tuple(_), Type::Tuple(None)) => true,
+    //         (Type::Tuple(None), Type::Tuple(_)) => true,
+    //         (Type::Tuple(Some(a)), Type::Tuple(Some(b))) => {
+    //             a.len() == b.len()
+    //                 && a.iter()
+    //                     .zip(b)
+    //                     .all(|(a, b)| a.can_instantiate(b, instantiations, true))
+    //         }
+    //         (Type::Dict(_), Type::Dict(None)) => true,
+    //         (Type::Dict(None), Type::Dict(_)) => true,
+    //         (Type::Dict(Some((ka, va))), Type::Dict(Some((kb, vb)))) => {
+    //             ka.can_instantiate(kb, instantiations, true)
+    //                 && va.can_instantiate(vb, instantiations, true)
+    //         }
+    //         // (Type::Union(types), _) => types
+    //         //     .iter()
+    //         //     .all(|t| t.can_instantiate(other, instantiations, true)),
+    //         (Type::Nullable(t), _) => {
+    //             // TODO
+    //             todo!()
+    //         }
+    //         (Type::TypeVar(v), _) => {
+    //             match instantiations.get(v) {
+    //                 None => {
+    //                     // we'll instantiate this variable in order to specialize
+    //                     instantiations.insert(v.clone(), other.clone());
+    //                     true
+    //                 }
+    //                 Some(current) => {
+    //                     // TODO: should we include a `context` here too?
+    //                     match current.partial_cmp(other) {
+    //                         None => {
+    //                             // we cannot instantiate this variable because of conflicting constraints
+    //                             false
+    //                         }
+    //                         Some(Ordering::Equal) => {
+    //                             // all good
+    //                             true
+    //                         }
+    //                         Some(Ordering::Less) => {
+    //                             if !covariant {
+    //                                 instantiations.insert(v.clone(), other.clone());
+    //                             }
+    //                             true
+    //                         }
+    //                         Some(Ordering::Greater) => {
+    //                             if covariant {
+    //                                 instantiations.insert(v.clone(), other.clone());
+    //                             }
+    //                             true
+    //                         }
+    //                     }
+    //                 }
+    //             }
+    //         }
+    //         _ => false,
+    //     }
+    // }
 }
 
 /*
@@ -276,8 +305,19 @@ fn partial_cmp_types(context: &FxHashMap<TypeVar, Type>, a: &Type, b: &Type) -> 
             (None, None) => Some(Ordering::Equal),
             (None, _) => Some(Ordering::Greater),
             (_, None) => Some(Ordering::Less),
-            (Some((a_generics, a_args, a_ret)), Some((b_generics, b_args, b_ret))) => {
-                if a_args.len() != b_args.len() {
+            (
+                Some(FnType {
+                    generics: a_generics,
+                    params: a_params,
+                    ret: a_ret,
+                }),
+                Some(FnType {
+                    generics: b_generics,
+                    params: b_params,
+                    ret: b_ret,
+                }),
+            ) => {
+                if a_params.len() != b_params.len() {
                     None
                 } else {
                     // variance of return type
@@ -288,7 +328,7 @@ fn partial_cmp_types(context: &FxHashMap<TypeVar, Type>, a: &Type, b: &Type) -> 
 
                         // contravariance of arguments types
                         Some(Ordering::Equal) => {
-                            partial_cmp_tuple_elements(context, b_args, a_args)
+                            partial_cmp_tuple_elements(context, b_params, a_params)
                         }
                     }
                 }
@@ -297,51 +337,61 @@ fn partial_cmp_types(context: &FxHashMap<TypeVar, Type>, a: &Type, b: &Type) -> 
         (Type::Fun(_), _) => None,
         (_, Type::Fun(_)) => None,
 
-        (Type::Union(_), _) | (_, Type::Union(_)) => {
-            let a_types = a.flatten_unions();
-            let b_types = b.flatten_unions();
+        // TODO: I'm not 100% about these...
+        (Type::Nullable(a), Type::Nullable(b)) => partial_cmp_types(context, a, b),
+        (Type::Nullable(t1), &t2) if t1.as_ref().eq(t2) => match t1.as_ref() {
+            Type::Nil => Some(Ordering::Equal),
+            _ => Some(Ordering::Greater),
+        },
+        (Type::Nullable(_), Type::Nil) => Some(Ordering::Greater),
+        (Type::Nullable(_), _) => None,
 
-            let mut a_gte_b = true;
-            let mut b_gte_a = true;
+        // (Type::Union(_), _) | (_, Type::Union(_)) => {
+        //     let a_types = a.flatten_unions();
+        //     let b_types = b.flatten_unions();
 
-            for b in &b_types {
-                // disprove that a >= b
-                if a_gte_b && !a_types.iter().any(|a| gte(context, a, b)) {
-                    a_gte_b = false;
-                    // println!("found b {} not in A {:?}", b, a_types);
-                    if !b_gte_a {
-                        return None;
-                    }
-                }
-            }
+        //     let mut a_gte_b = true;
+        //     let mut b_gte_a = true;
 
-            for a in &a_types {
-                // try to find any other type that is not covered in my types
-                if b_gte_a && !b_types.iter().any(|b| gte(context, b, a)) {
-                    // println!("found a {} not in B {:?}", a, b_types);
-                    b_gte_a = false;
-                    if !a_gte_b {
-                        return None;
-                    }
-                }
-            }
+        //     for b in &b_types {
+        //         // disprove that a >= b
+        //         if a_gte_b && !a_types.iter().any(|a| gte(context, a, b)) {
+        //             a_gte_b = false;
+        //             // println!("found b {} not in A {:?}", b, a_types);
+        //             if !b_gte_a {
+        //                 return None;
+        //             }
+        //         }
+        //     }
 
-            // println!("res a >= b {a_gte_b}, b >= a {b_gte_a}");
-            if a_gte_b && b_gte_a {
-                Some(Ordering::Equal)
-            } else if a_gte_b {
-                Some(Ordering::Greater)
-            } else if b_gte_a {
-                Some(Ordering::Less)
-            } else {
-                None
-            }
+        //     for a in &a_types {
+        //         // try to find any other type that is not covered in my types
+        //         if b_gte_a && !b_types.iter().any(|b| gte(context, b, a)) {
+        //             // println!("found a {} not in B {:?}", a, b_types);
+        //             b_gte_a = false;
+        //             if !a_gte_b {
+        //                 return None;
+        //             }
+        //         }
+        //     }
+
+        //     // println!("res a >= b {a_gte_b}, b >= a {b_gte_a}");
+        //     if a_gte_b && b_gte_a {
+        //         Some(Ordering::Equal)
+        //     } else if a_gte_b {
+        //         Some(Ordering::Greater)
+        //     } else if b_gte_a {
+        //         Some(Ordering::Less)
+        //     } else {
+        //         None
+        //     }
+        // }
+        (_, _) => {
+            panic!(
+                "unexpected type comparison (should never happen): {} <?> {}",
+                a, b
+            )
         }
-
-        (_, _) => panic!(
-            "unexpected type comparison (should never happen): {} <?> {}",
-            a, b
-        ),
     }
 }
 
@@ -398,8 +448,8 @@ fn partial_cmp_tuple_elements(
 // - Union([]) contains zero elements
 impl PartialOrd for Type {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        let a = self.canonicalize();
-        let b = other.canonicalize();
+        let a = self; //.canonicalize();
+        let b = other; //.canonicalize();
 
         partial_cmp_types(&FxHashMap::default(), &a, &b)
     }
@@ -420,7 +470,12 @@ impl Display for Type {
             Type::Fun(signature) => {
                 write!(f, "fn")?;
 
-                if let Some((generics, args, ret)) = signature {
+                if let Some(FnType {
+                    generics,
+                    params,
+                    ret,
+                }) = signature
+                {
                     write!(f, "fn")?;
                     if generics.len() > 0 {
                         write!(f, "<")?;
@@ -434,14 +489,14 @@ impl Display for Type {
                         }
                         write!(f, ">")?;
                     }
-                    if args.len() > 0 {
+                    if params.len() > 0 {
                         write!(f, "(")?;
                         let mut i = 0;
-                        for arg in args {
+                        for param in params {
                             if i > 0 {
                                 write!(f, ", ")?;
                             }
-                            write!(f, "{arg}")?;
+                            write!(f, "{param}")?;
                             i += 1;
                         }
                         write!(f, ")")?;
@@ -482,21 +537,23 @@ impl Display for Type {
 
                 Ok(())
             }
-            Type::Union(types) => {
-                if types.len() == 0 {
-                    write!(f, "!")
-                } else {
-                    write!(
-                        f,
-                        "{}",
-                        types
-                            .iter()
-                            .map(|t| format!("{t}"))
-                            .collect::<Vec<_>>()
-                            .join(" | ")
-                    )
-                }
-            }
+            Type::Nullable(t) => {
+                write!(f, "?({t})")
+            } // Type::Union(types) => {
+              //     if types.len() == 0 {
+              //         write!(f, "!")
+              //     } else {
+              //         write!(
+              //             f,
+              //             "{}",
+              //             types
+              //                 .iter()
+              //                 .map(|t| format!("{t}"))
+              //                 .collect::<Vec<_>>()
+              //                 .join(" | ")
+              //         )
+              //     }
+              // }
         }
     }
 }

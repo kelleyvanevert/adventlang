@@ -81,6 +81,7 @@ name = "compiler"
 version = "0.1.0"
 dependencies = [
  "ast",
+ "compact_str",
  "fxhash",
  "inkwell",
  "lazy_static",

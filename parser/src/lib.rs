@@ -3,7 +3,7 @@
 
 use std::str::FromStr;
 
-use ast::DictKey;
+use ast::{DictKey, FnDecl, FnType};
 use either::Either;
 use regex::Regex;
 
@@ -373,8 +373,12 @@ fn anonymous_fn(s: State) -> ParseResult<State, Expr> {
             delimited(seq((char('{'), ws0)), block_contents, seq((ws0, char('}')))),
         )),
         |(params, body)| Expr::AnonymousFn {
-            params: params.unwrap_or_else(|| vec![]),
-            body,
+            decl: FnDecl {
+                generics: vec![],
+                ret: None,
+                params: params.unwrap_or_else(|| vec![]),
+                body,
+            },
         },
     )
     .parse(s)
@@ -1127,13 +1131,17 @@ fn type_fn(s: State) -> ParseResult<State, Type> {
                 return Type::Fun(None);
             }
 
-            let (generics, (args, _)) = generics_and_args.unwrap_or_default();
+            let (generics, (params, _)) = generics_and_args.unwrap_or_default();
             let generics = generics.map(|t| t.0).unwrap_or(vec![]);
             let ret = ret.unwrap_or(Type::Nil);
 
             // TODO: maybe validate?
 
-            Type::Fun(Some((generics, args, ret.into())))
+            Type::Fun(Some(FnType {
+                generics,
+                params,
+                ret: ret.into(),
+            }))
         },
     )
     .parse(s)
@@ -1146,33 +1154,34 @@ fn parenthesized_type(s: State) -> ParseResult<State, Type> {
 fn type_nullable_stack(s: State) -> ParseResult<State, Type> {
     map(
         seq((many0(terminated(tag("?"), ws0)), type_leaf)),
-        |(nullable, mut ty)| {
+        |(nullable, ty)| {
             if !nullable.is_empty() {
-                ty = Type::Union(vec![Type::Nil, ty]);
+                Type::Nullable(ty.into())
+            } else {
+                ty
             }
-
-            ty
         },
     )
     .parse(s)
 }
 
 fn type_union_stack(s: State) -> ParseResult<State, Type> {
-    map(
-        seq((
-            type_nullable_stack,
-            many0(preceded(seq((ws0, tag("|"), ws0)), type_nullable_stack)),
-        )),
-        |(first, mut rest)| {
-            if rest.len() > 0 {
-                rest.insert(0, first);
-                Type::Union(rest)
-            } else {
-                first
-            }
-        },
-    )
-    .parse(s)
+    type_nullable_stack
+        // map(
+        //     seq((
+        //         type_nullable_stack,
+        //         many0(preceded(seq((ws0, tag("|"), ws0)), type_nullable_stack)),
+        //     )),
+        //     |(first, mut rest)| {
+        //         if rest.len() > 0 {
+        //             rest.insert(0, first);
+        //             Type::Union(rest)
+        //         } else {
+        //             first
+        //         }
+        //     },
+        // )
+        .parse(s)
 }
 
 fn typespec(s: State) -> ParseResult<State, Type> {
@@ -1392,22 +1401,28 @@ fn named_fn_item(s: State) -> ParseResult<State, Item> {
             ws0,
             identifier,
             ws0,
+            optional(terminated(listy("<", type_var, type_var, ">"), ws0)),
             tag("("),
             ws0,
             parameter_list,
             ws0,
             tag(")"),
             ws0,
+            optional(seq((tag("->"), ws0, typespec, ws0))),
             tag("{"),
             ws0,
             block_contents,
             ws0,
             tag("}"),
         )),
-        |(_, _, name, _, _, _, params, _, _, _, _, _, body, _, _)| Item::NamedFn {
+        |(_, _, name, _, generics, _, _, params, _, _, _, ret, _, _, body, _, _)| Item::NamedFn {
             name,
-            params,
-            body,
+            decl: FnDecl {
+                generics: generics.map(|(generics, _)| generics).unwrap_or_default(),
+                ret: ret.map(|(_, _, t, _)| t),
+                params,
+                body,
+            },
         },
     )
     .parse(s)
@@ -1605,6 +1620,10 @@ mod tests {
         Identifier(id.into())
     }
 
+    fn tv(id: &str) -> TypeVar {
+        TypeVar(id.into())
+    }
+
     fn var(name: &str) -> Expr {
         Expr::Variable(Identifier(name.into()))
     }
@@ -1655,10 +1674,14 @@ mod tests {
 
     fn empty_anon() -> Expr {
         Expr::AnonymousFn {
-            params: vec![],
-            body: Block {
-                items: vec![],
-                stmts: vec![],
+            decl: FnDecl {
+                generics: vec![],
+                ret: None,
+                params: vec![],
+                body: Block {
+                    items: vec![],
+                    stmts: vec![],
+                },
             },
         }
     }
@@ -1672,10 +1695,14 @@ mod tests {
 
     fn anon_expr(params: Vec<&str>, expr: Expr) -> Expr {
         Expr::AnonymousFn {
-            params: params.into_iter().map(declarable).collect(),
-            body: Block {
-                items: vec![],
-                stmts: vec![Stmt::Expr { expr: expr.into() }],
+            decl: FnDecl {
+                generics: vec![],
+                ret: None,
+                params: params.into_iter().map(declarable).collect(),
+                body: Block {
+                    items: vec![],
+                    stmts: vec![Stmt::Expr { expr: expr.into() }],
+                },
             },
         }
     }
@@ -1732,92 +1759,108 @@ mod tests {
     fn parsing_types() {
         assert_eq!(parse_type("bool"), Type::Bool);
 
-        assert_eq!(
-            parse_type("bool | nil"),
-            Type::Union(vec![Type::Bool, Type::Nil])
-        );
+        // assert_eq!(
+        //     parse_type("bool | nil"),
+        //     Type::Union(vec![Type::Bool, Type::Nil])
+        // );
 
-        assert_eq!(
-            parse_type("?bool"),
-            Type::Union(vec![Type::Nil, Type::Bool])
-        );
+        // assert_eq!(
+        //     parse_type("?bool"),
+        //     Type::Union(vec![Type::Nil, Type::Bool])
+        // );
 
-        assert_eq!(
-            parse_type("?bool | int"),
-            Type::Union(vec![Type::Union(vec![Type::Nil, Type::Bool]), Type::Int])
-        );
+        // assert_eq!(
+        //     parse_type("?bool | int"),
+        //     Type::Union(vec![Type::Union(vec![Type::Nil, Type::Bool]), Type::Int])
+        // );
 
-        assert_eq!(
-            parse_type("?(bool | int)"),
-            Type::Union(vec![Type::Nil, Type::Union(vec![Type::Bool, Type::Int]),])
-        );
+        // assert_eq!(
+        //     parse_type("?(bool | int)"),
+        //     Type::Union(vec![Type::Nil, Type::Union(vec![Type::Bool, Type::Int]),])
+        // );
 
-        assert_eq!(
-            parse_type("?(bool | int,)"),
-            Type::Union(vec![
-                Type::Nil,
-                Type::Tuple(Some(vec![Type::Union(vec![Type::Bool, Type::Int])]))
-            ])
-        );
+        // assert_eq!(
+        //     parse_type("?(bool | int,)"),
+        //     Type::Union(vec![
+        //         Type::Nil,
+        //         Type::Tuple(Some(vec![Type::Union(vec![Type::Bool, Type::Int])]))
+        //     ])
+        // );
 
-        assert_eq!(
-            parse_type("?((bool | int),)"),
-            Type::Union(vec![
-                Type::Nil,
-                Type::Tuple(Some(vec![Type::Union(vec![Type::Bool, Type::Int])]))
-            ])
-        );
+        // assert_eq!(
+        //     parse_type("?((bool | int),)"),
+        //     Type::Union(vec![
+        //         Type::Nil,
+        //         Type::Tuple(Some(vec![Type::Union(vec![Type::Bool, Type::Int])]))
+        //     ])
+        // );
 
         assert_eq!(parse_type("fn"), Type::Fun(None));
 
         assert_eq!(
             parse_type("fn -> int"),
-            Type::Fun(Some((vec![], vec![], Box::new(Type::Int))))
+            Type::Fun(Some(FnType {
+                generics: vec![],
+                params: vec![],
+                ret: Box::new(Type::Int)
+            }))
         );
 
         assert_eq!(
             parse_type("fn ( bool ) -> int"),
-            Type::Fun(Some((vec![], vec![Type::Bool], Box::new(Type::Int))))
+            Type::Fun(Some(FnType {
+                generics: vec![],
+                params: vec![Type::Bool],
+                ret: Box::new(Type::Int)
+            }))
         );
 
         assert_eq!(
             parse_type("fn(bool)->int"),
-            Type::Fun(Some((vec![], vec![Type::Bool], Box::new(Type::Int))))
+            Type::Fun(Some(FnType {
+                generics: vec![],
+                params: vec![Type::Bool],
+                ret: Box::new(Type::Int)
+            }))
         );
 
         assert_eq!(
             parse_type("fn(bool , int,)"),
-            Type::Fun(Some((
-                vec![],
-                vec![Type::Bool, Type::Int],
-                Box::new(Type::Nil)
-            )))
+            Type::Fun(Some(FnType {
+                generics: vec![],
+                params: vec![Type::Bool, Type::Int],
+                ret: Box::new(Type::Nil)
+            }))
         );
 
-        assert_eq!(
-            parse_type("fn(bool) -> int | any"),
-            Type::Fun(Some((
-                vec![],
-                vec![Type::Bool],
-                Box::new(Type::Union(vec![Type::Int, Type::Any]))
-            )))
-        );
+        // assert_eq!(
+        //     parse_type("fn(bool) -> int | any"),
+        //     Type::Fun(Some(FnType {
+        //         generics: vec![],
+        //         params: vec![Type::Bool],
+        //         ret: Box::new(Type::Union(vec![Type::Int, Type::Any]))
+        //     }))
+        // );
 
-        assert_eq!(
-            parse_type("(fn(bool) -> int) | any"),
-            Type::Union(vec![
-                Type::Fun(Some((vec![], vec![Type::Bool], Box::new(Type::Int)))),
-                Type::Any,
-            ])
-        );
+        // assert_eq!(
+        //     parse_type("(fn(bool) -> int) | any"),
+        //     Type::Union(vec![
+        //         Type::Fun(Some(FnType {
+        //             generics: vec![],
+        //             params: vec![Type::Bool],
+        //             ret: Box::new(Type::Int)
+        //         })),
+        //         Type::Any,
+        //     ])
+        // );
 
         assert_eq!(
             parse_type("fn<t>(t)"),
-            Type::Fun(Some((
-                vec![TypeVar("t".into())],
-                vec![Type::TypeVar(TypeVar("t".into()))],
-                Box::new(Type::Nil)
-            )))
+            Type::Fun(Some(FnType {
+                generics: vec![TypeVar("t".into())],
+                params: vec![Type::TypeVar(TypeVar("t".into()))],
+                ret: Box::new(Type::Nil)
+            }))
         );
 
         assert_eq!(try_parse_type("fn<t>"), None);
@@ -1826,7 +1869,7 @@ mod tests {
     }
 
     #[test]
-    fn str_literals() {
+    fn parsing_str_literals() {
         assert_eq!(test_parse(unicode_sequence, "u{1F419}"), Some(("", '🐙')));
 
         assert_eq!(
@@ -2002,7 +2045,7 @@ let example_input = r"
     }
 
     #[test]
-    fn bla() {
+    fn parsing_stuff() {
         assert_eq!(test_parse(identifier, "kelley"), Some(("", id("kelley"))));
         assert_eq!(test_parse(identifier, "_kel6*"), Some(("*", id("_kel6"))));
         assert_eq!(test_parse(identifier, " kelley"), None);
@@ -2182,14 +2225,7 @@ let example_input = r"
                             },
                             Argument {
                                 name: None,
-                                expr: Expr::AnonymousFn {
-                                    params: vec![],
-                                    body: Block {
-                                        items: vec![],
-                                        stmts: vec![]
-                                    }
-                                }
-                                .into(),
+                                expr: empty_anon(),
                             }
                         ]
                     },
@@ -2200,39 +2236,25 @@ let example_input = r"
 
         assert_eq!(
             test_parse(constrained(false, expr), "|| { } ?"),
-            Some((
-                " ?",
-                Expr::AnonymousFn {
-                    params: vec![],
-                    body: Block {
-                        items: vec![],
-                        stmts: vec![]
-                    }
-                }
-            ))
+            Some((" ?", empty_anon()))
         );
         assert_eq!(
             test_parse(constrained(false, expr), "||{} ?"),
-            Some((
-                " ?",
-                Expr::AnonymousFn {
-                    params: vec![],
-                    body: Block {
-                        items: vec![],
-                        stmts: vec![]
-                    }
-                }
-            ))
+            Some((" ?", empty_anon()))
         );
         assert_eq!(
             test_parse(constrained(false, expr), "|a| { } ?"),
             Some((
                 " ?",
                 Expr::AnonymousFn {
-                    params: vec![declarable("a")],
-                    body: Block {
-                        items: vec![],
-                        stmts: vec![]
+                    decl: FnDecl {
+                        generics: vec![],
+                        ret: None,
+                        params: vec![declarable("a")],
+                        body: Block {
+                            items: vec![],
+                            stmts: vec![]
+                        }
                     }
                 }
             ))
@@ -2242,16 +2264,20 @@ let example_input = r"
             Some((
                 " ?",
                 Expr::AnonymousFn {
-                    params: vec![Declarable {
-                        pattern: DeclarePattern::Tuple {
-                            elements: vec![declarable("a"), declarable("b")],
-                            rest: None,
-                        },
-                        fallback: None,
-                    }],
-                    body: Block {
-                        items: vec![],
-                        stmts: vec![]
+                    decl: FnDecl {
+                        generics: vec![],
+                        ret: None,
+                        params: vec![Declarable {
+                            pattern: DeclarePattern::Tuple {
+                                elements: vec![declarable("a"), declarable("b")],
+                                rest: None,
+                            },
+                            fallback: None,
+                        }],
+                        body: Block {
+                            items: vec![],
+                            stmts: vec![]
+                        }
                     }
                 }
             ))
@@ -2489,37 +2515,6 @@ let example_input = r"
                 }
             ))
         );
-        assert_eq!(
-            test_parse(item, r#"fn main() {}"#),
-            Some((
-                "",
-                Item::NamedFn {
-                    name: id("main"),
-                    params: vec![],
-                    body: Block {
-                        items: vec![],
-                        stmts: vec![]
-                    }
-                }
-            ))
-        );
-        assert_eq!(
-            test_parse(item, r#"fn main() { h = 1 }"#),
-            Some((
-                "",
-                Item::NamedFn {
-                    name: id("main"),
-                    params: vec![],
-                    body: Block {
-                        items: vec![],
-                        stmts: vec![Stmt::Assign {
-                            pattern: AssignPattern::Id(id("h")),
-                            expr: Expr::Int(1).into()
-                        }]
-                    }
-                }
-            ))
-        );
 
         let if_block = Expr::If {
             pattern: None,
@@ -2568,27 +2563,35 @@ let example_input = r"
                 "",
                 Item::NamedFn {
                     name: id("make_counter"),
-                    params: vec![declarable("start")],
-                    body: Block {
-                        items: vec![],
-                        stmts: vec![
-                            Stmt::Declare {
-                                pattern: declare_id("n"),
-                                expr: Expr::Variable(id("start")).into()
-                            },
-                            Stmt::Expr {
-                                expr: Expr::AnonymousFn {
-                                    params: vec![declarable("d")],
-                                    body: Block {
-                                        items: vec![],
-                                        stmts: vec![Stmt::Expr {
-                                            expr: if_block.clone().into()
-                                        }]
+                    decl: FnDecl {
+                        generics: vec![],
+                        ret: None,
+                        params: vec![declarable("start")],
+                        body: Block {
+                            items: vec![],
+                            stmts: vec![
+                                Stmt::Declare {
+                                    pattern: declare_id("n"),
+                                    expr: Expr::Variable(id("start")).into()
+                                },
+                                Stmt::Expr {
+                                    expr: Expr::AnonymousFn {
+                                        decl: FnDecl {
+                                            generics: vec![],
+                                            ret: None,
+                                            params: vec![declarable("d")],
+                                            body: Block {
+                                                items: vec![],
+                                                stmts: vec![Stmt::Expr {
+                                                    expr: if_block.clone().into()
+                                                }]
+                                            }
+                                        }
                                     }
+                                    .into()
                                 }
-                                .into()
-                            }
-                        ]
+                            ]
+                        }
                     }
                 }
             ))
@@ -2721,10 +2724,14 @@ let example_input = r"
                 Block {
                     items: vec![Item::NamedFn {
                         name: id("main"),
-                        params: vec![],
-                        body: Block {
-                            items: vec![],
-                            stmts: vec![]
+                        decl: FnDecl {
+                            generics: vec![],
+                            ret: None,
+                            params: vec![],
+                            body: Block {
+                                items: vec![],
+                                stmts: vec![]
+                            }
                         }
                     }],
                     stmts: vec![Stmt::Declare {
@@ -2741,17 +2748,21 @@ let example_input = r"
                 Stmt::Declare {
                     pattern: declare_id("h"),
                     expr: Expr::AnonymousFn {
-                        params: vec![],
-                        body: Block {
-                            items: vec![],
-                            stmts: vec![
-                                Stmt::Expr {
-                                    expr: Expr::Int(7).into()
-                                },
-                                Stmt::Expr {
-                                    expr: Expr::Int(1).into()
-                                }
-                            ]
+                        decl: FnDecl {
+                            generics: vec![],
+                            ret: None,
+                            params: vec![],
+                            body: Block {
+                                items: vec![],
+                                stmts: vec![
+                                    Stmt::Expr {
+                                        expr: Expr::Int(7).into()
+                                    },
+                                    Stmt::Expr {
+                                        expr: Expr::Int(1).into()
+                                    }
+                                ]
+                            }
                         }
                     }
                     .into()
@@ -2805,24 +2816,28 @@ let example_input = r"
                             },
                             Stmt::Expr {
                                 expr: Expr::AnonymousFn {
-                                    params: vec![],
-                                    body: Block {
-                                        items: vec![],
-                                        stmts: vec![Stmt::Expr {
-                                            expr: Expr::StrLiteral {
-                                                pieces: vec![
-                                                    StrLiteralPiece::Fragment("hello ".into()),
-                                                    StrLiteralPiece::Interpolation(Expr::Variable(
-                                                        id("v")
-                                                    )),
-                                                    StrLiteralPiece::Fragment(" ".into()),
-                                                    StrLiteralPiece::Interpolation(Expr::Variable(
-                                                        id("h")
-                                                    )),
-                                                ]
-                                            }
-                                            .into()
-                                        }]
+                                    decl: FnDecl {
+                                        generics: vec![],
+                                        ret: None,
+                                        params: vec![],
+                                        body: Block {
+                                            items: vec![],
+                                            stmts: vec![Stmt::Expr {
+                                                expr: Expr::StrLiteral {
+                                                    pieces: vec![
+                                                        StrLiteralPiece::Fragment("hello ".into()),
+                                                        StrLiteralPiece::Interpolation(
+                                                            Expr::Variable(id("v"))
+                                                        ),
+                                                        StrLiteralPiece::Fragment(" ".into()),
+                                                        StrLiteralPiece::Interpolation(
+                                                            Expr::Variable(id("h"))
+                                                        ),
+                                                    ]
+                                                }
+                                                .into()
+                                            }]
+                                        }
                                     }
                                 }
                                 .into()
@@ -2867,7 +2882,89 @@ let example_input = r"
     }
 
     #[test]
-    fn trailing_anon_vs_separate_stmt_ambiguity() {
+    fn parsing_named_fns() {
+        assert_eq!(
+            test_parse(item, r#"fn main() {}"#),
+            Some((
+                "",
+                Item::NamedFn {
+                    name: id("main"),
+                    decl: FnDecl {
+                        generics: vec![],
+                        ret: None,
+                        params: vec![],
+                        body: Block {
+                            items: vec![],
+                            stmts: vec![]
+                        }
+                    }
+                }
+            ))
+        );
+
+        assert_eq!(
+            test_parse(item, r#"fn main() { h = 1 }"#),
+            Some((
+                "",
+                Item::NamedFn {
+                    name: id("main"),
+                    decl: FnDecl {
+                        generics: vec![],
+                        ret: None,
+                        params: vec![],
+                        body: Block {
+                            items: vec![],
+                            stmts: vec![Stmt::Assign {
+                                pattern: AssignPattern::Id(id("h")),
+                                expr: Expr::Int(1).into()
+                            }]
+                        }
+                    }
+                }
+            ))
+        );
+
+        assert_eq!(
+            test_parse(item, r#"fn main<A, b>() {}"#),
+            Some((
+                "",
+                Item::NamedFn {
+                    name: id("main"),
+                    decl: FnDecl {
+                        generics: vec![tv("A"), tv("b")],
+                        ret: None,
+                        params: vec![],
+                        body: Block {
+                            items: vec![],
+                            stmts: vec![]
+                        }
+                    }
+                }
+            ))
+        );
+
+        assert_eq!(
+            test_parse(item, r#"fn main<A, b>() -> b {}"#),
+            Some((
+                "",
+                Item::NamedFn {
+                    name: id("main"),
+                    decl: FnDecl {
+                        generics: vec![tv("A"), tv("b")],
+                        ret: Some(Type::TypeVar(tv("b"))),
+                        params: vec![],
+                        body: Block {
+                            items: vec![],
+                            stmts: vec![]
+                        }
+                    }
+                }
+            ))
+        );
+    }
+
+    #[test]
+    fn parsing_trailing_anon_vs_separate_stmt_ambiguity() {
         let doc_1 = parse_document(
             r#"
         fn make_closure() {
@@ -2889,7 +2986,11 @@ let example_input = r"
                 body: Block { mut items, .. },
             } => match items.pop().unwrap() {
                 Item::NamedFn {
-                    body: Block { stmts, .. },
+                    decl:
+                        FnDecl {
+                            body: Block { stmts, .. },
+                            ..
+                        },
                     ..
                 } => {
                     assert_eq!(stmts.len(), 2);
@@ -2906,7 +3007,7 @@ let example_input = r"
     }
 
     #[test]
-    fn infix_fns() {
+    fn parsing_infix_fns() {
         assert_eq!(
             test_parse(expr, r"input :trim :split b"),
             Some((

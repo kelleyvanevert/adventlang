@@ -461,6 +461,8 @@ For each function (item or inline), we need to know (and build at runtime):
     - every instantiation that is used
 
 
+
+
 For each variable:
   - if it's a fn argument
     -> it's index
@@ -472,3 +474,75 @@ For each variable:
       -> it's location within .. -- how to encode? just a pointer? or a struct ptr + index? or just an index, because the ptr is lying around?
   - if it's a parent scope's variable
     -> ...
+
+
+
+
+
+===
+
+  let bla = 42;
+
+  fn solve(input) {
+    let values = input :lines :map |line: str| {
+      let digits = line :chars :filter |c| { is_digit(c) }
+      int(digits[0] + digits[-1] + bla)
+    }
+
+    values :sum
+  }
+
+  solve("someinputstr")
+
+==>
+
+  fn (stdlib) map<A, B>(arr: [A], f: fn(A) -> B, ... closure_ptrs: **ptr) -> [B] {
+    [...]
+  }
+
+  fn $anonfilter(c: char, ... $global_closure_ptr: ptr, $solve_closure_ptr: ptr, $anonmap_closure_ptr: ptr) {
+    let $res = is_digit(c)
+
+    return $res
+  }
+
+  fn $anonmap(line: str, ... $global_closure_ptr: ptr, $solve_closure_ptr: ptr) {
+    -- create a closure for all escaping locals
+    let $my_closure_ptr = {}
+
+    let $chars = chars(line)
+    let digits = filter($chars, $anonfilter, ... $global_closure_ptr, $solve_closure_ptr, $my_closure_ptr)
+    let $x = digits[0]
+    let $y = digits[-1]
+    let $z = $global_closure_ptr.bla
+    let $sum = $x + $y + $z
+    let $res = int($sum)
+
+    return $res
+  }
+
+  fn solve(input: str, ... $global_closure_ptr: ptr) {
+    -- create a closure for all escaping locals
+    let $my_closure_ptr = {}
+    $my_closure_ptr.input = input
+
+    let $lines: [str] = lines($my_closure_ptr.input)
+    let values: [int] = map($lines, $anonmap, ... $global_closure_ptr, $my_closure_ptr);
+    let $sum = sum(values)
+
+    -- if there'd be a reassignment of `input` and another function call afterwards,
+    --  we'd create a new ("shadowing") closure scope beforehand
+
+    return $sum
+  }
+
+  fn main() {
+    let $global_closure_ptr = {}
+    $global_closure_ptr.bla = 42;
+
+    solve("someinputstr", ... $global_closure_ptr)
+
+    return 0
+  }
+
+===

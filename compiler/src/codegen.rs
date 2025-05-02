@@ -74,7 +74,7 @@ impl<'ctx> CodegenContext<'ctx> {
         match expr {
             Expr::Bool(b) => self.bool_type().into(),
             Expr::NilLiteral => self.nil_type().into(),
-            Expr::AnonymousFn { params, body } => {
+            Expr::AnonymousFn { decl } => {
                 // TODO
 
                 self.ptr_type().array_type(2).as_basic_type_enum()
@@ -203,7 +203,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 Ok(arg.as_basic_value_enum())
             }
 
-            Expr::AnonymousFn { params, body } => {
+            Expr::AnonymousFn { decl } => {
                 // 1. get the "restore point"
                 let curr_block = self.builder.get_insert_block().unwrap();
 
@@ -219,7 +219,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
                 let entry_block = self.context.append_basic_block(fun, "entry");
                 self.builder.position_at_end(entry_block);
-                let res = self.compile_block(fun, body)?;
+                let res = self.compile_block(fun, &decl.body)?;
                 self.builder.build_return(Some(&res)).unwrap();
 
                 // 3. restore position afterwards
