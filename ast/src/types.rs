@@ -14,7 +14,7 @@ impl Display for TypeVar {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
-    Any,
+    // Any,
     Nil,
     Bool,
     Str,
@@ -23,7 +23,7 @@ pub enum Type {
     Num,
     Regex,
     Fun(Option<FnType>),
-    List(Box<Type>),
+    List(Option<Box<Type>>),
     Tuple(Option<Vec<Type>>),
     Dict(Option<(Box<Type>, Box<Type>)>),
     // Union(Vec<Type>),
@@ -96,7 +96,7 @@ impl Type {
 
     pub fn contains_var(&self, var: &TypeVar) -> bool {
         match self {
-            Type::Any => false,
+            // Type::Any => false,
             Type::Nil => false,
             Type::Bool => false,
             Type::Str => false,
@@ -116,7 +116,8 @@ impl Type {
                     params.iter().any(|t| t.contains_var(var)) || ret.contains_var(var)
                 }
             }
-            Type::List(t) => t.contains_var(var),
+            Type::List(None) => false,
+            Type::List(Some(t)) => t.contains_var(var),
             Type::Tuple(None) => false,
             Type::Tuple(Some(types)) => types.iter().any(|t| t.contains_var(var)),
             Type::Dict(None) => false,
@@ -260,9 +261,9 @@ fn partial_cmp_types(context: &FxHashMap<TypeVar, Type>, a: &Type, b: &Type) -> 
             Some(b) => partial_cmp_types(&context, a, b),
         },
 
-        (Type::Any, Type::Any) => Some(Ordering::Equal),
-        (Type::Any, _) => Some(Ordering::Greater),
-        (_, Type::Any) => Some(Ordering::Less),
+        // (Type::Any, Type::Any) => Some(Ordering::Equal),
+        // (Type::Any, _) => Some(Ordering::Greater),
+        // (_, Type::Any) => Some(Ordering::Less),
 
         // TODO add int, float, num comparisons
         (a, b) if simple.contains(a) & simple.contains(b) => {
@@ -275,7 +276,9 @@ fn partial_cmp_types(context: &FxHashMap<TypeVar, Type>, a: &Type, b: &Type) -> 
 
         (Type::List(_), b) if simple.contains(b) => None,
         (a, Type::List(_)) if simple.contains(a) => None,
-        (Type::List(a), Type::List(b)) => partial_cmp_types(context, a, b),
+        (Type::List(None), Type::List(_)) => Some(Ordering::Greater), // or equal, actually
+        (Type::List(_), Type::List(None)) => Some(Ordering::Less),    // or equal, actually
+        (Type::List(Some(a)), Type::List(Some(b))) => partial_cmp_types(context, a, b),
 
         (Type::Tuple(_), b) if simple.contains(b) => None,
         (a, Type::Tuple(_)) if simple.contains(a) => None,
@@ -458,7 +461,7 @@ impl PartialOrd for Type {
 impl Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Type::Any => write!(f, "any"),
+            // Type::Any => write!(f, "any"),
             Type::Nil => write!(f, "nil"),
             Type::Bool => write!(f, "bool"),
             Type::Str => write!(f, "str"),
@@ -508,26 +511,24 @@ impl Display for Type {
 
                 write!(f, "")
             }
-            Type::List(t) => write!(f, "[{t}]"),
-            Type::Tuple(opt) => {
-                if let Some(ts) = opt {
-                    write!(f, "(")?;
-                    let mut i = 0;
-                    for t in ts {
-                        if i > 0 {
-                            write!(f, ", ")?;
-                        }
-                        write!(f, "{t}")?;
-                        i += 1;
+            Type::List(None) => write!(f, "list"),
+            Type::List(Some(t)) => write!(f, "[{t}]"),
+            Type::Tuple(None) => write!(f, "tuple"),
+            Type::Tuple(Some(ts)) => {
+                write!(f, "(")?;
+                let mut i = 0;
+                for t in ts {
+                    if i > 0 {
+                        write!(f, ", ")?;
                     }
-                    if ts.len() == 1 {
-                        // to make clear that it's a tuple, not just some extra parentheses
-                        write!(f, ",")?;
-                    }
-                    write!(f, ")")
-                } else {
-                    write!(f, "tuple")
+                    write!(f, "{t}")?;
+                    i += 1;
                 }
+                if ts.len() == 1 {
+                    // to make clear that it's a tuple, not just some extra parentheses
+                    write!(f, ",")?;
+                }
+                write!(f, ")")
             }
             Type::Dict(p) => {
                 write!(f, "dict")?;

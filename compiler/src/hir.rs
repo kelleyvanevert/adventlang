@@ -1,4 +1,6 @@
-use ast::{AlRegex, Float, FnType, Identifier, Type, TypeVar};
+use ast::{AlRegex, Float, Identifier, TypeVar};
+
+use crate::inference_pass::InferencePass;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct DocumentHIR {
@@ -7,22 +9,9 @@ pub struct DocumentHIR {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockHIR {
-    pub ty: Type,
-    pub items: Vec<ItemHIR>,
+    pub ty: TypeHIR,
+    // pub items: Vec<ItemHIR>,
     pub stmts: Vec<StmtHIR>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ItemHIR {
-    NamedFn { name: Identifier, fn_id: usize },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FnDeclHIR {
-    pub generics: Vec<TypeVar>,
-    pub ret: Type,
-    pub params: Vec<(Identifier, Type)>,
-    pub body: BlockHIR,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,14 +39,14 @@ pub enum StmtHIR {
 }
 
 impl StmtHIR {
-    pub fn ty(&self) -> Type {
+    pub fn ty(&self, pass: &InferencePass) -> TypeHIR {
         match self {
-            Self::Break { .. } => Type::Nil,
-            Self::Continue { .. } => Type::Nil,
-            Self::Return { .. } => Type::Nil,
-            Self::Declare { .. } => Type::Nil,
-            Self::Assign { .. } => Type::Nil,
-            Self::Expr { expr } => expr.ty(),
+            Self::Break { .. } => TypeHIR::Nil, // ?
+            Self::Continue { .. } => TypeHIR::Nil,
+            Self::Return { .. } => TypeHIR::Nil,
+            Self::Declare { .. } => TypeHIR::Nil,
+            Self::Assign { .. } => TypeHIR::Nil,
+            Self::Expr { expr } => expr.ty(pass),
         }
     }
 }
@@ -96,20 +85,21 @@ pub enum ExprHIR {
     Int(i64),
     Float(Float),
     ListLiteral {
-        el_ty: Type,
+        el_ty: TypeHIR,
         elements: Vec<ExprHIR>,
         splat: Option<Box<ExprHIR>>,
     },
     TupleLiteral {
         elements: Vec<ExprHIR>,
     },
-    DictLiteral {
-        key_ty: Type,
-        val_ty: Type,
-        elements: Vec<(DictKeyHIR, ExprHIR)>,
-    },
-    AnonymousFn {
-        ty: FnType,
+    // DictLiteral {
+    //     key_ty: TypeHIR,
+    //     val_ty: TypeHIR,
+    //     elements: Vec<(DictKeyHIR, ExprHIR)>,
+    // },
+
+    // NamedFn {}, // ???
+    AnonFn {
         fn_id: usize,
     },
 
@@ -117,7 +107,7 @@ pub enum ExprHIR {
     // `Expr::Variable` breaks down into five cases:
     // ===
     Variable {
-        ty: Type,
+        ty: TypeHIR,
         id: Identifier,
         // how to access it?
         // - it's a builtin (by name)
@@ -131,8 +121,8 @@ pub enum ExprHIR {
     // The difference is mostly is the expression, which will be a `Builtin` or otherwise..
     Invocation {
         coalesce: bool,
-        resolved_fn_type: FnType,
-        expr: Box<ExprHIR>,
+        resolved_fn_id: usize, // See comment todo.txt #FNREF
+        // generic fn instantiation?
         args: Vec<ArgumentHIR>,
         //
         // in order to compute the type, the overload matching needs to happen here,
@@ -151,32 +141,32 @@ pub enum ExprHIR {
     // Control structure
     // ===
     If {
-        ty: Type,
+        ty: TypeHIR,
         // pattern: Option<DeclarePatternHIR>, /// ????
         cond: Box<ExprHIR>,
         then: BlockHIR,
         els: Option<BlockHIR>,
     },
     While {
-        ty: Type,
+        ty: TypeHIR,
         label: Option<Identifier>,
         // pattern: Option<DeclarePatternHIR>, /// ????
         cond: Box<ExprHIR>,
         body: BlockHIR,
     },
     DoWhile {
-        ty: Type,
+        ty: TypeHIR,
         label: Option<Identifier>,
         body: BlockHIR,
         cond: Option<Box<ExprHIR>>,
     },
     Loop {
-        ty: Type,
+        ty: TypeHIR,
         label: Option<Identifier>,
         body: BlockHIR,
     },
     For {
-        ty: Type,
+        ty: TypeHIR,
         label: Option<Identifier>,
         // pattern: DeclarePatternHIR, // <- lowered away, will be unpacked in body
         range: Box<ExprHIR>,
@@ -185,32 +175,34 @@ pub enum ExprHIR {
 }
 
 impl ExprHIR {
-    pub fn ty(&self) -> Type {
+    pub fn ty(&self, pass: &InferencePass) -> TypeHIR {
         match self {
-            Self::StrLiteral { .. } => Type::Str,
-            Self::NilLiteral => Type::Nil,
-            Self::RegexLiteral { .. } => Type::Regex,
-            Self::Bool(_) => Type::Bool,
-            Self::Int(_) => Type::Int,
-            Self::Float(_) => Type::Float,
-            Self::ListLiteral { el_ty, .. } => Type::List(el_ty.clone().into()),
+            Self::StrLiteral { .. } => TypeHIR::Str,
+            Self::NilLiteral => TypeHIR::Nil,
+            Self::RegexLiteral { .. } => TypeHIR::Regex,
+            Self::Bool(_) => TypeHIR::Bool,
+            Self::Int(_) => TypeHIR::Int,
+            Self::Float(_) => TypeHIR::Float,
+            Self::ListLiteral { el_ty, .. } => TypeHIR::List(el_ty.clone().into()),
             Self::TupleLiteral { elements } => {
-                Type::Tuple(Some(elements.iter().map(|el| el.ty()).collect()))
+                TypeHIR::Tuple(elements.iter().map(|el| el.ty(pass)).collect())
             }
-            Self::DictLiteral { key_ty, val_ty, .. } => {
-                Type::Dict(Some((key_ty.clone().into(), val_ty.clone().into())))
-            }
-            Self::AnonymousFn { ty, .. } => Type::Fun(Some(ty.clone())),
+            // Self::DictLiteral { key_ty, val_ty, .. } => {
+            //     TypeHIR::Dict(Some((key_ty.clone().into(), val_ty.clone().into())))
+            // }
+            Self::AnonFn { fn_id } => TypeHIR::Fn {
+                overload_fn_ids: vec![*fn_id],
+            },
             Self::Variable { ty, .. } => ty.clone(),
             Self::Invocation {
                 coalesce,
-                resolved_fn_type,
+                resolved_fn_id,
                 ..
             } => {
-                let ret_ty = resolved_fn_type.ret.as_ref().clone();
+                let ret_ty = pass.get_fn_ty(*resolved_fn_id).ret.as_ref().clone();
 
                 if *coalesce {
-                    Type::Nullable(ret_ty.into())
+                    TypeHIR::Nullable(ret_ty.into())
                 } else {
                     ret_ty
                 }
@@ -245,4 +237,43 @@ pub enum AssignPatternHIR {
         // TODO maybe also add rest spread
         //   AFTER I also add rest spread to tuple literal exprs
     },
+}
+
+/// The representation/content of a single function, e.g. as it would be written in code
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FnDeclHIR {
+    pub ty: FnTypeHIR,
+    pub params: Vec<Identifier>,
+    pub body: BlockHIR,
+}
+
+/// The type of a single function
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FnTypeHIR {
+    pub generics: Vec<TypeVar>,
+    pub params: Vec<TypeHIR>,
+    pub ret: Box<TypeHIR>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TypeHIR {
+    Nil,
+    Bool,
+    Str,
+    Int,
+    Float,
+    Num,
+    Regex,
+    Fn {
+        // the "trick" here, is that the type is used to
+        //  determine which concrete overload to use,
+        //  so we actually pass on the `fn_id` ;)
+        overload_fn_ids: Vec<usize>,
+    },
+    List(Box<TypeHIR>),
+    Tuple(Vec<TypeHIR>),
+    // Dict(Option<(Box<Type>, Box<Type>)>),
+    // // Union(Vec<Type>),
+    Nullable(Box<TypeHIR>),
+    TypeVar(TypeVar),
 }

@@ -1066,7 +1066,7 @@ fn return_stmt(s: State) -> ParseResult<State, Stmt> {
 
 fn type_leaf(s: State) -> ParseResult<State, Type> {
     alt((
-        map(tag("any"), |_| Type::Any),
+        // map(tag("any"), |_| Type::Any),
         map(tag("nil"), |_| Type::Nil),
         map(tag("bool"), |_| Type::Bool),
         map(tag("str"), |_| Type::Str),
@@ -1087,7 +1087,7 @@ fn type_leaf(s: State) -> ParseResult<State, Type> {
             ),
             |opt| Type::Dict(opt.map(|(k, _, _, _, v)| (k.into(), v.into()))),
         ),
-        // any N-sized tuple of any's
+        // implicitly typed tuple
         map(tag("tuple"), |_| Type::Tuple(None)),
         // (a, b, c, ..)
         map(
@@ -1102,12 +1102,12 @@ fn type_leaf(s: State) -> ParseResult<State, Type> {
                 }
             },
         ),
-        // heterogeneous lists: [any]
-        map(tag("list"), |_| Type::List(Type::Any.into())),
-        // homogeneous lists: [T]
+        // implicitly typed list
+        map(tag("list"), |_| Type::List(None)),
+        // explicitly typed list: [T]
         map(
             delimited(seq((tag("["), ws0)), typespec, seq((ws0, tag("]")))),
-            |t| Type::List(t.into()),
+            |t| Type::List(Some(t.into())),
         ),
         map(type_var, Type::TypeVar),
         // recurse with parentheses

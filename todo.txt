@@ -546,3 +546,71 @@ For each variable:
   }
 
 ===
+
+
+
+#FNREF
+
+What about assigning and passing around fn references?
+  ...and how it relates to overloads?
+
+The "ideal" situation would be to be able to resolve a fn "as an overloaded fn",
+  or just as a regular variable, so that after re-assigning and/or passing it around,
+  it behaves the same as "where it came from" (right?)
+
+But, because assignment is a runtime thing, this cannot work.
+
+One solution: only allow invocations of names.
+  But then we lose:
+    - higher-order fn passing, as arguments to e.g. `map` or `filter` -- can't go here
+    - 
+
+So then .. maybe we just always resolve the fn to a specific overload,
+  when we pass/assign/call it?
+The overload would be specified, but, it could still be a generic function
+  (so still might need to be instantiated)
+
+
+
+let inc = 5;
+
+fn inc(n: int) -> int { ... }
+
+fn inc(c: char) -> char { ... }
+
+// inc :: (fn(int) -> int) | (fn(char) -> char)
+
+// fn get_inc() {
+//   if true {
+//     inc
+//   } else {
+//     |s: str| { s }
+//   }
+// }
+
+fn get_inc() {
+  inc
+}
+
+fn main() {
+  let m = get_inc()
+  // or
+  let m = inc
+
+  // how to resolve `m` ?
+  // it's a variable, but it doesn't refer to a function,
+  //  instead it's a local in scope, that happens to, at runtime,
+  //  be resolved to a function
+  print("{m(42)}")
+  print("{m('k')}")
+}
+
+
+
+
+
+#BYE-VARLEN-TUPLES
+
+I guess I can't have variable length tuples, i.e. heterogenous lists,
+ if I want to strictly type upfront,
+ unless I dynamically include type tags .. bringing the whole dynamic nature back again

@@ -23,6 +23,7 @@ mod codegen;
 mod hir;
 mod inference_pass;
 mod runtime;
+mod stdlib;
 
 struct JitCompiler<'ctx> {
     context: &'ctx Context,

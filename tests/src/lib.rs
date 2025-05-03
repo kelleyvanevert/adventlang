@@ -13,13 +13,13 @@ mod tests {
 
     #[test]
     fn test_subtyping() {
-        assert_eq!(comp("any", "any"), Some(Ordering::Equal));
+        // assert_eq!(comp("any", "any"), Some(Ordering::Equal));
 
-        assert_eq!(comp("any", "int"), Some(Ordering::Greater));
+        assert_eq!(comp("num", "int"), Some(Ordering::Greater));
 
-        assert_eq!(comp("[any]", "[int]"), Some(Ordering::Greater));
+        assert_eq!(comp("[num]", "[int]"), Some(Ordering::Greater));
 
-        assert_eq!(comp("(any,)", "(int,)"), Some(Ordering::Greater));
+        assert_eq!(comp("(num,)", "(int,)"), Some(Ordering::Greater));
 
         assert_eq!(comp("tuple", "(int,bool)"), Some(Ordering::Greater));
 
@@ -27,7 +27,7 @@ mod tests {
 
         assert_eq!(comp("(int,bool)", "(int,bool)"), Some(Ordering::Equal));
 
-        assert_eq!(comp("any", "fn"), Some(Ordering::Greater));
+        // assert_eq!(comp("any", "fn"), Some(Ordering::Greater));
 
         assert_eq!(comp("fn(int)", "fn(int)"), Some(Ordering::Equal));
 
@@ -35,41 +35,41 @@ mod tests {
 
         // you can assign a fn returning an int, to a variable that accepts fns returning anything
         // (covariance)
-        assert_eq!(comp("fn -> any", "fn -> int"), Some(Ordering::Greater));
+        assert_eq!(comp("fn -> num", "fn -> int"), Some(Ordering::Greater));
 
         // you can give a fn taking any argument, where a fn taking ints is expected
         // (contravariance)
-        assert_eq!(comp("fn(int)", "fn(any)"), Some(Ordering::Greater));
+        assert_eq!(comp("fn(int)", "fn(num)"), Some(Ordering::Greater));
 
         // both at the same time
         assert_eq!(
-            comp("fn(int) -> any", "fn(any) -> int"),
+            comp("fn(int) -> num", "fn(num) -> int"),
             Some(Ordering::Greater)
         );
 
         // incomparable number of arguments
-        assert_eq!(comp("fn(any, int)", "fn(int)"), None);
+        assert_eq!(comp("fn(num, int)", "fn(int)"), None);
 
         // incomparable arguments
         assert_eq!(comp("fn(bool)", "fn(int)"), None);
 
         // covariance in return type + covariance in list type
-        assert_eq!(comp("fn -> [any]", "fn -> [int]"), Some(Ordering::Greater));
+        assert_eq!(comp("fn -> [num]", "fn -> [int]"), Some(Ordering::Greater));
 
         // contravariance in argument types + covariance in list type
-        assert_eq!(comp("fn([int])", "fn([any])"), Some(Ordering::Greater));
+        assert_eq!(comp("fn([int])", "fn([num])"), Some(Ordering::Greater));
 
         assert_eq!(
-            comp("fn -> (fn -> any)", "fn -> (fn -> int)"),
+            comp("fn -> (fn -> num)", "fn -> (fn -> int)"),
             Some(Ordering::Greater)
         );
 
         assert_eq!(
-            comp("fn(fn -> int)", "fn(fn -> any)"),
+            comp("fn(fn -> int)", "fn(fn -> num)"),
             Some(Ordering::Greater)
         );
 
-        assert_eq!(comp("fn(fn(any))", "fn(fn(int))"), Some(Ordering::Greater));
+        assert_eq!(comp("fn(fn(num))", "fn(fn(int))"), Some(Ordering::Greater));
 
         // assert_eq!(
         //     comp("fn -> tuple", "fn<t>() -> (t,t)"),
