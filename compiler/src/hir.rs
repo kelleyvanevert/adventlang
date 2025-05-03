@@ -1,6 +1,6 @@
 use ast::{AlRegex, Float, Identifier, TypeVar};
 
-use crate::inference_pass::InferencePass;
+use crate::inference_pass::{Binding, InferencePass};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct DocumentHIR {
@@ -70,6 +70,20 @@ pub enum DictKeyHIR {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AccessHIR {
+    Var {
+        // how many times to access the parent (lexical) fn scope to get there?
+        // 0 = current fn's scope, etc..
+        ancestor_num: usize,
+        scope_id: usize,
+        name: Identifier,
+    },
+    Fn {
+        overload_fn_ids: Vec<usize>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExprHIR {
     // ===
     // All the various literals...
@@ -103,16 +117,7 @@ pub enum ExprHIR {
     // ===
     // NamedFn {}, // ???
     // AnonFn {}, // ???
-    Fn {
-        overload_fn_ids: Vec<usize>,
-    },
-    Variable {
-        ty: TypeHIR,
-        id: Identifier,
-        // how to access it?
-        // - it's a builtin (by name)
-        // - it's a parent scope's local (parent_no, local_idx)
-    },
+    Access(AccessHIR),
 
     // ===
     // Invocation
@@ -190,10 +195,27 @@ impl ExprHIR {
             // Self::DictLiteral { key_ty, val_ty, .. } => {
             //     TypeHIR::Dict(Some((key_ty.clone().into(), val_ty.clone().into())))
             // }
-            Self::Fn { overload_fn_ids } => TypeHIR::Fn {
+            Self::Access(AccessHIR::Fn { overload_fn_ids }) => TypeHIR::Fn {
                 overload_fn_ids: overload_fn_ids.clone(),
             },
-            Self::Variable { ty, .. } => ty.clone(),
+            Self::Access(AccessHIR::Var {
+                ancestor_num,
+                scope_id,
+                name,
+            }) => {
+                let binding = pass
+                    .get_scope(*scope_id)
+                    .bindings
+                    .get(name)
+                    .expect("scope to contain var {name}");
+
+                match binding {
+                    Binding::Var { ty } => ty.clone(),
+                    Binding::NamedFn { .. } => {
+                        panic!("var access to be actual var instead of (named) fn")
+                    }
+                }
+            }
             Self::Invocation {
                 coalesce,
                 resolved_fn_id,

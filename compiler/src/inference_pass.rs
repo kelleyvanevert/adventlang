@@ -1,17 +1,18 @@
 use ast::{
     Argument, AssignPattern, Block, Declarable, DeclareGuardExpr, DeclarePattern, Document, Expr,
-    FnDecl, Identifier, Item, Stmt, StrLiteralPiece, Type, TypeVar,
+    FnDecl, Identifier, Item, Stmt, StrLiteralPiece, TypeVar,
 };
 use fxhash::FxHashMap;
 
 use crate::{
     hir::{
-        BlockHIR, DocumentHIR, ExprHIR, FnDeclHIR, FnTypeHIR, StmtHIR, StrLiteralPieceHIR, TypeHIR,
+        AccessHIR, BlockHIR, DocumentHIR, ExprHIR, FnDeclHIR, FnTypeHIR, StmtHIR,
+        StrLiteralPieceHIR, TypeHIR,
     },
     stdlib::register_stdlib,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Binding {
     Var { ty: TypeHIR },
     NamedFn { fn_ids: Vec<usize> },
@@ -425,6 +426,66 @@ impl InferencePass {
         }
     }
 
+    fn lookup(&self, scope_id: usize, id: &Identifier) -> Option<AccessHIR> {
+        let Some((located_scope_id, ancestor_num, binding)) = self._lookup(scope_id, id, 0) else {
+            return None;
+        };
+
+        match binding {
+            Binding::Var { .. } => Some(AccessHIR::Var {
+                ancestor_num,
+                scope_id: located_scope_id,
+                name: id.clone(),
+            }),
+            Binding::NamedFn { .. } => {
+                let mut overload_fn_ids = vec![];
+
+                // this variable was resolved to a (named) fn -- but then, let's go
+                //  and collect all the overloads in ancestor lexical scopes
+                self.collect_ancestor_overloads(scope_id, id, &mut overload_fn_ids);
+
+                Some(AccessHIR::Fn { overload_fn_ids })
+            }
+        }
+    }
+
+    fn collect_ancestor_overloads(
+        &self,
+        scope_id: usize,
+        id: &Identifier,
+        overload_fn_ids: &mut Vec<usize>,
+    ) {
+        let scope = self.get_scope(scope_id);
+
+        if let Some(Binding::NamedFn { fn_ids }) = scope.bindings.get(id) {
+            overload_fn_ids.extend_from_slice(&fn_ids);
+        }
+
+        if let Some(parent_scope_id) = scope.parent_scope {
+            self.collect_ancestor_overloads(parent_scope_id, id, overload_fn_ids);
+        }
+    }
+
+    fn _lookup(
+        &self,
+        scope_id: usize,
+        id: &Identifier,
+        mut ancestor_num: usize,
+    ) -> Option<(usize, usize, &Binding)> {
+        let current_scope = self.get_scope(scope_id);
+
+        match (current_scope.parent_scope, current_scope.bindings.get(id)) {
+            (_, Some(b)) => Some((scope_id, ancestor_num, b)),
+            (None, None) => None,
+            (Some(parent_scope_id), None) => {
+                if self.get_scope(parent_scope_id).is_fun.is_some() {
+                    ancestor_num += 1;
+                }
+                return self._lookup(parent_scope_id, id, ancestor_num);
+            }
+        }
+    }
+
     fn process_expr(&mut self, scope_id: usize, expr: &Expr) -> ExprHIR {
         match expr {
             Expr::StrLiteral { pieces } => {
@@ -449,9 +510,12 @@ impl InferencePass {
             Expr::Float(f) => ExprHIR::Float(f.clone()),
 
             Expr::Variable(id) => {
-                // TODO:
-                // search for variable in scope tree
-                //
+                let Some(access) = self.lookup(scope_id, id) else {
+                    panic!("variable {id} not found in scope");
+                };
+
+                ExprHIR::Access(access)
+
                 // check types
                 // - if type resolves to a TypeHIR::Fn { overload_fn_ids },
                 //    then return ExprHIR::Fn { overload_fn_ids }
@@ -461,7 +525,6 @@ impl InferencePass {
                 // - otherwise, construct the relevant info to access the data, later
                 //    e.g. where to find the binding, which ancestor scope, ..
                 //
-                todo!("TODO: resolve variable {id}")
             }
 
             // lower a pattern-checking if to a regular if
@@ -621,7 +684,7 @@ impl InferencePass {
                 // - fully runtime: at runtime I check the resolved type and choose an overload
 
                 //
-                todo!("invo")
+                todo!("invo {:?}", expr_hir)
             }
 
             Expr::AnonymousFn { decl } => {
@@ -630,9 +693,9 @@ impl InferencePass {
                 let fn_id = self.fns.len();
                 self.fns.push(decl_hir);
 
-                ExprHIR::Fn {
+                ExprHIR::Access(AccessHIR::Fn {
                     overload_fn_ids: vec![fn_id],
-                }
+                })
             }
 
             _ => todo!("TODO: process expr: {:?}", expr),
@@ -685,20 +748,6 @@ impl InferencePass {
 
     pub fn get_scope_mut(&mut self, id: usize) -> &mut Scope {
         &mut self.scopes[id]
-    }
-
-    fn lookup(&self, scope_id: usize, id: &Identifier) -> Option<Binding> {
-        let scope = self.get_scope(scope_id);
-
-        if let Some(binding) = scope.bindings.get(id) {
-            return Some(binding.clone());
-        }
-
-        let Some(parent_scope_id) = scope.parent_scope else {
-            return None;
-        };
-
-        self.lookup(parent_scope_id, id)
     }
 }
 
