@@ -187,14 +187,18 @@ impl InferencePass {
             },
         );
 
+        // TODO typecheck that the original decl's `ret` matches, if specified
+        // `ret ?= body.ty`
+
         FnDeclHIR {
             ty: FnTypeHIR {
                 generics: generics.clone(),
-                ret: todo!(), //ret.clone().expect("TODO: inferred fn result type"),
-                params: params_hir.iter().map(|p| p.1).collect(),
+                ret: body.ty.clone().into(),
+                params: params_hir.iter().map(|p| p.1.clone()).collect(),
             },
-            params: params_hir.iter().map(|p| p.0).collect(),
-            body,
+            params: params_hir.iter().map(|p| p.0.clone()).collect(),
+            body: Some(body),
+            llvm_body: None,
         }
     }
 
@@ -448,7 +452,14 @@ impl InferencePass {
                 // TODO:
                 // search for variable in scope tree
                 //
-                // -
+                // check types
+                // - if type resolves to a TypeHIR::Fn { overload_fn_ids },
+                //    then return ExprHIR::Fn { overload_fn_ids }
+                //    (this is the "trick" where the static type system
+                //     directs the overload selection process)
+                //
+                // - otherwise, construct the relevant info to access the data, later
+                //    e.g. where to find the binding, which ancestor scope, ..
                 //
                 todo!("TODO: resolve variable {id}")
             }
@@ -530,7 +541,7 @@ impl InferencePass {
 
                 // TODO: check that it's a boolean
                 let cond_hir = self.process_expr(if_scope_id, cond);
-                if cond_hir.ty() != Type::Bool {
+                if cond_hir.ty(&self) != TypeHIR::Bool {
                     panic!("if-cond is not a bool");
                 }
 
@@ -538,7 +549,7 @@ impl InferencePass {
                 let els_hir = els.as_ref().map(|els| self.process_block(if_scope_id, els));
 
                 let res_ty = match &els_hir {
-                    None => Type::Nil,
+                    None => TypeHIR::Nil,
                     Some(els_hir) => {
                         let els_ty = &els_hir.ty;
                         let then_ty = &then_hir.ty;
@@ -616,12 +627,12 @@ impl InferencePass {
             Expr::AnonymousFn { decl } => {
                 let decl_hir = self.process_fn_decl(scope_id, decl);
 
-                let ty = decl_hir.ty();
-
                 let fn_id = self.fns.len();
                 self.fns.push(decl_hir);
 
-                ExprHIR::FnRef { ty, fn_id }
+                ExprHIR::Fn {
+                    overload_fn_ids: vec![fn_id],
+                }
             }
 
             _ => todo!("TODO: process expr: {:?}", expr),

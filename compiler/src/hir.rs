@@ -98,14 +98,14 @@ pub enum ExprHIR {
     //     elements: Vec<(DictKeyHIR, ExprHIR)>,
     // },
 
-    // NamedFn {}, // ???
-    AnonFn {
-        fn_id: usize,
-    },
-
     // ===
     // `Expr::Variable` breaks down into five cases:
     // ===
+    // NamedFn {}, // ???
+    // AnonFn {}, // ???
+    Fn {
+        overload_fn_ids: Vec<usize>,
+    },
     Variable {
         ty: TypeHIR,
         id: Identifier,
@@ -190,8 +190,8 @@ impl ExprHIR {
             // Self::DictLiteral { key_ty, val_ty, .. } => {
             //     TypeHIR::Dict(Some((key_ty.clone().into(), val_ty.clone().into())))
             // }
-            Self::AnonFn { fn_id } => TypeHIR::Fn {
-                overload_fn_ids: vec![*fn_id],
+            Self::Fn { overload_fn_ids } => TypeHIR::Fn {
+                overload_fn_ids: overload_fn_ids.clone(),
             },
             Self::Variable { ty, .. } => ty.clone(),
             Self::Invocation {
@@ -244,7 +244,10 @@ pub enum AssignPatternHIR {
 pub struct FnDeclHIR {
     pub ty: FnTypeHIR,
     pub params: Vec<Identifier>,
-    pub body: BlockHIR,
+    pub body: Option<BlockHIR>,
+
+    // TODO express this is a workable way
+    pub llvm_body: Option<String>,
 }
 
 /// The type of a single function
