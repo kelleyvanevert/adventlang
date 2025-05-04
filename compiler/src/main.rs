@@ -21,6 +21,7 @@ use ouroboros::self_referencing;
 
 mod codegen;
 mod hir;
+mod hir_display;
 mod inference_pass;
 mod runtime;
 mod stdlib;

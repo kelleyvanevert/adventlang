@@ -134,7 +134,7 @@ impl InferencePass {
     fn fresh_var(&mut self) -> Identifier {
         let n = self.next_var_id;
         self.next_var_id += 1;
-        let id = Identifier(format!("___{}", n).into());
+        let id = Identifier(format!("__{}", n).into());
 
         id
     }
@@ -142,7 +142,7 @@ impl InferencePass {
     fn fresh_typevar(&mut self) -> TypeVar {
         let n = self.next_var_id;
         self.next_var_id += 1;
-        let id = TypeVar(format!("___{}", n).into());
+        let id = TypeVar(format!("'{}", n).into());
 
         id
     }
@@ -944,9 +944,9 @@ mod tests {
         )
         .unwrap();
         let doc_hir = pass.process(&doc);
-        println!("DOC: {:?}", doc_hir);
-        for f in &pass.fns[3..] {
-            println!("FN {:?}", f);
+        println!("DOC: {}", doc_hir);
+        for i in 0..pass.fns.len() {
+            println!("fn${i} ::= {}", pass.fns[i]);
         }
     }
 }
