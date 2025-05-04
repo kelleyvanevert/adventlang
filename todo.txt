@@ -606,6 +606,15 @@ fn main() {
 }
 
 
+  process_expr(Expr::Invocation { ... })
+    // levels:
+    // - fully static: I *now* select/resolve a concrete fn_id overload
+    // - semi-static: I only know that expr_hir *will* at runtime resolve to a fn_id overload,
+    //                  but I can check *now* that all possible resolutions are valid ??
+    //     -- but how/when do I instantiate generic fns, and select a fn overload?
+    // - fully runtime: at runtime I check the resolved type and choose an overload
+
+
 
 
 

@@ -6,7 +6,7 @@ use fxhash::FxHashMap;
 
 use crate::{
     hir::{
-        AccessHIR, BlockHIR, DocumentHIR, ExprHIR, FnDeclHIR, FnTypeHIR, StmtHIR,
+        AccessHIR, ArgumentHIR, BlockHIR, DocumentHIR, ExprHIR, FnDeclHIR, FnTypeHIR, StmtHIR,
         StrLiteralPieceHIR, TypeHIR,
     },
     stdlib::register_stdlib,
@@ -26,6 +26,7 @@ pub enum Binding {
 pub struct Scope {
     pub parent_scope: Option<usize>,
     pub is_fun: Option<usize>,
+    pub belongs_to_fun: usize,
     pub bindings: FxHashMap<Identifier, Binding>,
 }
 
@@ -34,6 +35,7 @@ impl Scope {
         Scope {
             parent_scope: None,
             is_fun: None,
+            belongs_to_fun: 0,
             bindings: FxHashMap::default(),
         }
     }
@@ -41,7 +43,7 @@ impl Scope {
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 enum DeclareLocation {
-    FnParam,
+    Body,
     If,
     While,
 }
@@ -59,6 +61,21 @@ impl InferencePass {
             fns: vec![],
             next_var_id: 0,
         };
+
+        pass.add_fn_decl(
+            0,
+            &"main".into(),
+            FnDeclHIR {
+                ty: FnTypeHIR {
+                    generics: vec![],
+                    params: vec![],
+                    ret: TypeHIR::Nil.into(),
+                },
+                params: vec![],
+                body: None,
+                llvm_body: None,
+            },
+        );
 
         register_stdlib(&mut pass);
 
@@ -108,9 +125,7 @@ impl InferencePass {
         let mut ty = TypeHIR::Nil;
 
         for stmt in &block.stmts {
-            let stmt = self.process_stmt(scope_id, stmt);
-            ty = stmt.ty(&self);
-            stmts.push(stmt);
+            ty = self.process_stmt(scope_id, stmt, &mut stmts);
         }
 
         BlockHIR { ty, stmts }
@@ -148,6 +163,7 @@ impl InferencePass {
         self.scopes.push(Scope {
             parent_scope: Some(scope_id),
             is_fun: Some(fn_id),
+            belongs_to_fun: fn_id,
             bindings: FxHashMap::default(),
         });
 
@@ -162,14 +178,14 @@ impl InferencePass {
             params_hir.push((id.clone(), ty.clone())); // ???
 
             {
-                self.get_scope_mut(scope_id)
+                self.get_scope_mut(fn_scope_id)
                     .bindings
                     .insert(id.clone(), Binding::Var { ty: ty.clone() });
             }
 
             self.lower_declarable(
                 fn_scope_id,
-                DeclareLocation::FnParam,
+                DeclareLocation::Body,
                 param,
                 id,
                 &mut declaration_unpacking_stmts,
@@ -213,6 +229,16 @@ impl InferencePass {
         }
     }
 
+    /**
+     * Lower complicated declaration patterns to simple ones
+     *
+     * let [[a, b], c] = S
+     * // becomes
+     * let ss0 = S[0]
+     * let a = ss[0]
+     * let b = ss[1]
+     * let c = S[1]
+     */
     fn lower_declare_pattern(
         &mut self,
         scope_id: usize,
@@ -246,7 +272,7 @@ impl InferencePass {
                                     // - in a `while let` -> just break the loop
                                     match loc {
                                         // in the case of unpacking a function param, if the declaration pattern doesn't match, it's a runtime failure
-                                        DeclareLocation::FnParam => Stmt::Expr {
+                                        DeclareLocation::Body => Stmt::Expr {
                                             expr: Expr::Failure(format!("some-guard failed"))
                                                 .into(),
                                         },
@@ -265,8 +291,11 @@ impl InferencePass {
                     });
                 }
 
-                unpacking.push(Stmt::Assign {
-                    pattern: AssignPattern::Id(target_id.clone()),
+                unpacking.push(Stmt::Declare {
+                    pattern: DeclarePattern::Declare {
+                        guard: DeclareGuardExpr::Unguarded(target_id.clone()),
+                        ty: None, // ??
+                    },
                     expr: Expr::Variable(source_id).into(),
                 });
             }
@@ -393,35 +422,101 @@ impl InferencePass {
         self.lower_declare_pattern(scope_id, loc, pattern, source_id, unpacking);
     }
 
-    fn process_stmt(&mut self, scope_id: usize, stmt: &Stmt) -> StmtHIR {
+    fn process_stmt(
+        &mut self,
+        scope_id: usize,
+        stmt: &Stmt,
+        processed: &mut Vec<StmtHIR>,
+    ) -> TypeHIR {
         match stmt {
             Stmt::Break { expr } => {
-                return StmtHIR::Break {
+                processed.push(StmtHIR::Break {
                     expr: expr.as_ref().map(|expr| self.process_expr(scope_id, expr)),
-                };
+                });
+                TypeHIR::Nil
             }
             Stmt::Continue { label } => {
-                return StmtHIR::Continue {
+                processed.push(StmtHIR::Continue {
                     label: label.clone(),
-                };
+                });
+                TypeHIR::Nil
             }
             Stmt::Return { expr } => {
-                return StmtHIR::Return {
+                processed.push(StmtHIR::Return {
                     expr: expr.as_ref().map(|expr| self.process_expr(scope_id, expr)),
-                };
+                });
+                TypeHIR::Nil
             }
-            Stmt::Declare { .. } => {
-                //
-                todo!("process_stmt(declare)")
+            Stmt::Declare { pattern, expr } => {
+                if let DeclarePattern::Declare {
+                    guard: DeclareGuardExpr::Unguarded(id),
+                    ty,
+                } = pattern
+                {
+                    let expr_hir = self.process_expr(scope_id, expr);
+                    let ty = expr_hir.ty(&self);
+
+                    self.get_scope_mut(scope_id)
+                        .bindings
+                        .insert(id.clone(), Binding::Var { ty });
+
+                    processed.push(StmtHIR::Declare {
+                        id: id.clone(),
+                        expr: expr_hir.into(),
+                    });
+
+                    TypeHIR::Nil
+                } else {
+                    // it's a compound declare statement
+
+                    // create fresh <source_id>
+                    // assign <expr> to <source_id>
+                    // lower_declare_pattern(...)
+
+                    // // lower this one first
+                    let mut unpacking_stmts = vec![];
+
+                    let source_id = self.fresh_var();
+
+                    // 1. assign condition-expr
+                    unpacking_stmts.push(Stmt::Declare {
+                        pattern: DeclarePattern::Declare {
+                            guard: DeclareGuardExpr::Unguarded(source_id.clone()),
+                            ty: None, // cond.ty(),
+                        },
+                        expr: expr.clone().into(),
+                    });
+
+                    // 2. try to unpack it (if it fails it will `break` out of the do-{} block)
+                    self.lower_declare_pattern(
+                        scope_id,
+                        DeclareLocation::Body,
+                        pattern,
+                        source_id,
+                        &mut unpacking_stmts,
+                    );
+
+                    // 3. now, process all unpacking stmts
+                    for stmt in unpacking_stmts {
+                        self.process_stmt(scope_id, &stmt, processed);
+                    }
+
+                    TypeHIR::Nil
+                }
             }
             Stmt::Assign { .. } => {
                 //
                 todo!("process_stmt(assign)")
             }
             Stmt::Expr { expr } => {
-                return StmtHIR::Expr {
-                    expr: self.process_expr(scope_id, expr).into(),
-                };
+                let expr_hir = self.process_expr(scope_id, expr);
+                let ty = expr_hir.ty(&self);
+
+                processed.push(StmtHIR::Expr {
+                    expr: expr_hir.into(),
+                });
+
+                ty
             }
         }
     }
@@ -478,11 +573,45 @@ impl InferencePass {
             (_, Some(b)) => Some((scope_id, ancestor_num, b)),
             (None, None) => None,
             (Some(parent_scope_id), None) => {
-                if self.get_scope(parent_scope_id).is_fun.is_some() {
+                if self.get_scope(parent_scope_id).belongs_to_fun != current_scope.belongs_to_fun {
+                    // println!("_lookup {id} found ancestor {scope_id} -> {parent_scope_id}");
                     ancestor_num += 1;
                 }
                 return self._lookup(parent_scope_id, id, ancestor_num);
             }
+        }
+    }
+
+    fn select_overload(&self, overload_fn_ids: &Vec<usize>, args: &Vec<ArgumentHIR>) -> usize {
+        // TODO type-check & infer
+
+        let matches = overload_fn_ids
+            .iter()
+            .filter_map(|&fn_id| {
+                let decl = &self.fns[fn_id];
+
+                if decl.params.len() == args.len() {
+                    Some(fn_id)
+                } else {
+                    // println!(
+                    //     "overload doesn't match\n- DECL (id={}, #={}) {:?}\n- ARGS (#={}) {:?}",
+                    //     fn_id,
+                    //     decl.params.len(),
+                    //     decl,
+                    //     args.len(),
+                    //     args,
+                    // );
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+
+        if matches.len() == 0 {
+            panic!("no overload match found");
+        } else if matches.len() > 1 {
+            panic!("mutliple overload matches found");
+        } else {
+            matches[0]
         }
     }
 
@@ -538,6 +667,7 @@ impl InferencePass {
                 self.scopes.push(Scope {
                     parent_scope: Some(scope_id),
                     is_fun: None,
+                    belongs_to_fun: self.get_scope(scope_id).belongs_to_fun,
                     bindings: FxHashMap::default(),
                 });
 
@@ -599,6 +729,7 @@ impl InferencePass {
                 self.scopes.push(Scope {
                     parent_scope: Some(scope_id),
                     is_fun: None,
+                    belongs_to_fun: self.get_scope(scope_id).belongs_to_fun,
                     bindings: FxHashMap::default(),
                 });
 
@@ -668,6 +799,34 @@ impl InferencePass {
                 },
             ),
 
+            // lower
+            Expr::Index {
+                expr,
+                coalesce,
+                index,
+            } => self.process_expr(
+                scope_id,
+                &Expr::Invocation {
+                    expr: Expr::Variable(Identifier("op[]".into())).into(),
+                    postfix: false,
+                    coalesce: false,
+                    args: vec![
+                        Argument {
+                            name: Some("expr".into()),
+                            expr: expr.as_ref().clone(),
+                        },
+                        Argument {
+                            name: Some("index".into()),
+                            expr: index.as_ref().clone(),
+                        },
+                        Argument {
+                            name: Some("coalesce".into()),
+                            expr: Expr::Bool(*coalesce),
+                        },
+                    ],
+                },
+            ),
+
             Expr::Invocation {
                 expr,
                 coalesce,
@@ -675,16 +834,29 @@ impl InferencePass {
                 ..
             } => {
                 let expr_hir = self.process_expr(scope_id, expr);
+                let ty = expr_hir.ty(&self);
 
-                // levels:
-                // - fully static: I *now* select/resolve a concrete fn_id overload
-                // - semi-static: I only know that expr_hir *will* at runtime resolve to a fn_id overload,
-                //                  but I can check *now* that all possible resolutions are valid ??
-                //     -- but how/when do I instantiate generic fns, and select a fn overload?
-                // - fully runtime: at runtime I check the resolved type and choose an overload
+                let TypeHIR::Fn { overload_fn_ids } = ty else {
+                    panic!("cannot invoke on non-fn: {:?}", ty);
+                };
 
-                //
-                todo!("invo {:?}", expr_hir)
+                // TODO: coalescing nullable fn
+
+                let args_hir = args
+                    .iter()
+                    .map(|Argument { name, expr }| ArgumentHIR {
+                        name: name.clone(),
+                        expr: self.process_expr(scope_id, expr),
+                    })
+                    .collect::<Vec<_>>();
+
+                let resolved_fn_id = self.select_overload(&overload_fn_ids, &args_hir);
+
+                ExprHIR::Invocation {
+                    coalesce: *coalesce,
+                    resolved_fn_id,
+                    args: args_hir,
+                }
             }
 
             Expr::AnonymousFn { decl } => {
@@ -697,6 +869,8 @@ impl InferencePass {
                     overload_fn_ids: vec![fn_id],
                 })
             }
+
+            Expr::Failure(message) => ExprHIR::Failure(message.clone()),
 
             _ => todo!("TODO: process expr: {:?}", expr),
         }
@@ -761,7 +935,18 @@ mod tests {
     fn test_lowering() {
         let mut pass = InferencePass::new();
 
-        let doc = parse_document("fn main([a, b]) {}").unwrap();
-        pass.process(&doc);
+        let doc = parse_document(
+            "
+                fn main([a, b]) {}
+
+                main(42)
+            ",
+        )
+        .unwrap();
+        let doc_hir = pass.process(&doc);
+        println!("DOC: {:?}", doc_hir);
+        for f in &pass.fns[3..] {
+            println!("FN {:?}", f);
+        }
     }
 }

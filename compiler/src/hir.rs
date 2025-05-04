@@ -16,6 +16,7 @@ pub struct BlockHIR {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StmtHIR {
+    Pass,
     Break {
         expr: Option<ExprHIR>,
     },
@@ -38,18 +39,19 @@ pub enum StmtHIR {
     }, // ...
 }
 
-impl StmtHIR {
-    pub fn ty(&self, pass: &InferencePass) -> TypeHIR {
-        match self {
-            Self::Break { .. } => TypeHIR::Nil, // ?
-            Self::Continue { .. } => TypeHIR::Nil,
-            Self::Return { .. } => TypeHIR::Nil,
-            Self::Declare { .. } => TypeHIR::Nil,
-            Self::Assign { .. } => TypeHIR::Nil,
-            Self::Expr { expr } => expr.ty(pass),
-        }
-    }
-}
+// impl StmtHIR {
+//     pub fn ty(&self, pass: &InferencePass) -> TypeHIR {
+//         match self {
+//             Self::Pass => TypeHIR::Nil,
+//             Self::Break { .. } => TypeHIR::Nil, // ?
+//             Self::Continue { .. } => TypeHIR::Nil,
+//             Self::Return { .. } => TypeHIR::Nil,
+//             Self::Declare { .. } => TypeHIR::Nil,
+//             Self::Assign { .. } => TypeHIR::Nil,
+//             Self::Expr { expr } => expr.ty(pass),
+//         }
+//     }
+// }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StrLiteralPieceHIR {
@@ -85,6 +87,11 @@ pub enum AccessHIR {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExprHIR {
+    // ===
+    // Runtime necessities
+    // ===
+    Failure(String),
+
     // ===
     // All the various literals...
     // ===
@@ -182,6 +189,7 @@ pub enum ExprHIR {
 impl ExprHIR {
     pub fn ty(&self, pass: &InferencePass) -> TypeHIR {
         match self {
+            Self::Failure(..) => TypeHIR::Never,
             Self::StrLiteral { .. } => TypeHIR::Str,
             Self::NilLiteral => TypeHIR::Nil,
             Self::RegexLiteral { .. } => TypeHIR::Regex,
@@ -282,6 +290,8 @@ pub struct FnTypeHIR {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeHIR {
+    Never,
+
     Nil,
     Bool,
     Str,
