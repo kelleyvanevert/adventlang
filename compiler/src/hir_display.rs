@@ -1,4 +1,4 @@
-use std::fmt::{Debug, Display, Write};
+use std::fmt::{Display, Write};
 
 use indenter::indented;
 
@@ -124,7 +124,7 @@ impl Display for StmtHIR {
             StmtHIR::Return { expr: None } => write!(f, "return"),
             StmtHIR::Return { expr: Some(expr) } => write!(f, "return {expr}"),
             StmtHIR::Declare { id, expr } => write!(f, "let {id} = {expr}"),
-            StmtHIR::Assign { pattern, expr } => write!(f, "<assignment>"),
+            StmtHIR::Assign { .. } => write!(f, "<assignment>"),
             StmtHIR::Expr { expr } => write!(f, "{expr}"),
         }
     }
@@ -145,24 +145,25 @@ impl Display for ExprHIR {
                 write!(f, "\"")
             }
             ExprHIR::NilLiteral => write!(f, "()"),
-            ExprHIR::RegexLiteral { regex } => write!(f, "<regex>"),
+            ExprHIR::RegexLiteral { .. } => write!(f, "<regex>"),
             ExprHIR::Bool(b) => write!(f, "{b}"),
             ExprHIR::Int(n) => write!(f, "{n}"),
             ExprHIR::Float(n) => write!(f, "{n}"),
             ExprHIR::ListLiteral {
-                el_ty,
-                elements,
-                splat,
+                elements, splat, ..
             } => {
                 write!(f, "[")?;
                 for el in elements {
                     write!(f, "{el}, ")?;
                 }
                 if let Some(splat) = splat {
-                    write!(f, "...{splat}");
+                    write!(f, "...{splat}")?;
                 }
                 write!(f, "]")
             }
+            // ExprHIR::EmptyList { el_ty } => {
+            //     write!(f, "[]::[{el_ty}]")
+            // }
             ExprHIR::TupleLiteral { elements } => {
                 write!(f, "(")?;
                 for el in elements {
@@ -200,10 +201,7 @@ impl Display for ExprHIR {
                 write!(f, ")")
             }
             ExprHIR::If {
-                ty,
-                cond,
-                then,
-                els,
+                cond, then, els, ..
             } => {
                 write!(f, "if {cond} {then}")?;
                 if let Some(els) = els {
@@ -212,7 +210,23 @@ impl Display for ExprHIR {
                 write!(f, "")
             }
             ExprHIR::While { .. } => panic!("TODO: while"),
-            ExprHIR::DoWhile { .. } => panic!("TODO: do-while"),
+            ExprHIR::DoWhile {
+                ty,
+                label,
+                body,
+                cond,
+            } => {
+                if let Some(label) = label {
+                    write!(f, "'{label}: ")?;
+                }
+                write!(f, "do {body}")?;
+
+                if let Some(cond) = cond {
+                    write!(f, " while {cond}")?;
+                }
+
+                write!(f, "")
+            }
             ExprHIR::Loop { .. } => panic!("TODO: loop"),
             ExprHIR::For { .. } => panic!("TODO: for"),
         }

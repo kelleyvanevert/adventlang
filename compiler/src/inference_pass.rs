@@ -52,6 +52,7 @@ pub struct InferencePass {
     scopes: Vec<Scope>,
     fns: Vec<FnDeclHIR>,
     next_var_id: usize,
+    builtins: FxHashMap<&'static str, usize>,
 }
 
 impl InferencePass {
@@ -60,6 +61,7 @@ impl InferencePass {
             scopes: vec![Scope::root()],
             fns: vec![],
             next_var_id: 0,
+            builtins: FxHashMap::default(),
         };
 
         pass.add_fn_decl(
@@ -86,7 +88,7 @@ impl InferencePass {
         &self.fns[fn_id].ty
     }
 
-    fn add_fn_decl(&mut self, scope_id: usize, name: &Identifier, decl: FnDeclHIR) {
+    fn add_fn_decl(&mut self, scope_id: usize, name: &Identifier, decl: FnDeclHIR) -> usize {
         let fn_id = self.fns.len();
         self.fns.push(decl);
 
@@ -104,10 +106,13 @@ impl InferencePass {
                 },
             );
         }
+
+        fn_id
     }
 
-    pub fn register_builtin(&mut self, name: &str, decl: FnDeclHIR) {
-        self.add_fn_decl(0, &Identifier(name.into()), decl);
+    pub fn register_builtin(&mut self, name: &'static str, decl: FnDeclHIR) {
+        let fn_id = self.add_fn_decl(0, &Identifier(name.into()), decl);
+        self.builtins.insert(name, fn_id);
     }
 
     pub fn process(&mut self, doc: &Document) -> DocumentHIR {
@@ -872,6 +877,82 @@ impl InferencePass {
 
             Expr::Failure(message) => ExprHIR::Failure(message.clone()),
 
+            Expr::ListLiteral { elements, splat } => {
+                // This one's a bit tricky.
+                // It's necessary to first process all the expressions, so that their types are checked correctly first, and then we can resolve the unified element type.
+                // But, in this way, I can't desugar at the level of `Expr`, compiling the whole thing into a do-block which constructs starting with an empty list and then adding elements using "push" at the level of `Expr::Invocation(...)` -- it would be compiling the element expression again!
+                // In the end, I just decided that maybe type-checking at this stage is more important than the desugaring .. we'll just pass the same list literal structure on to the compilation stage, let's see how that works..
+
+                let elements_hir = elements
+                    .iter()
+                    .map(|el| self.process_expr(scope_id, el))
+                    .collect::<Vec<_>>();
+
+                let splat_hir = splat
+                    .as_ref()
+                    .map(|splat| self.process_expr(scope_id, splat));
+
+                let mut element_types = elements_hir
+                    .iter()
+                    .map(|el| el.ty(&self))
+                    .collect::<Vec<_>>();
+
+                if let Some(splat) = &splat_hir {
+                    let splat_ty = splat.ty(&self);
+                    let TypeHIR::List(t) = splat_ty else {
+                        panic!("splat has non-list type: {:?}", splat_ty);
+                    };
+
+                    element_types.push(*t);
+                }
+
+                // TODO type-check/infer
+                let el_ty = if element_types.len() == 0 {
+                    TypeHIR::TypeVar(self.fresh_typevar())
+                } else {
+                    element_types[0].clone()
+                };
+
+                ExprHIR::ListLiteral {
+                    el_ty,
+                    elements: elements_hir,
+                    splat: splat_hir.map(|splat| splat.into()),
+                }
+
+                // let mut construction_stmts = vec![];
+
+                // let list_var = self.fresh_var();
+
+                // construction_stmts.insert(
+                //     0,
+                //     StmtHIR::Declare {
+                //         id: list_var.clone(),
+                //         expr: ExprHIR::EmptyList {
+                //             el_ty: el_ty.clone(),
+                //         }
+                //         .into(),
+                //     },
+                // );
+
+                // let push_fn_id = self.builtins.get("push").unwrap();
+
+                // for element in elements_hir {
+                //     construction_stmts.push(StmtHIR::Expr {
+                //         expr: ExprHIR::Invocation {
+                //             coalesce: false,
+                //             resolved_fn_id: push_fn_id,
+                //             args: vec![
+                //                 ArgumentHIR {
+                //                     name: Some("list".into()),
+                //                     expr: ExprHIR::Access(())
+                //                 }
+                //             ],
+                //         }
+                //         .into(),
+                //     });
+                // }
+            }
+
             _ => todo!("TODO: process expr: {:?}", expr),
         }
         // ListLiteral {
@@ -937,9 +1018,13 @@ mod tests {
 
         let doc = parse_document(
             "
+                fn f(n) {
+                    n + 10
+                }
+
                 fn main([a, b]) {}
 
-                main(42)
+                main([41, f(42)])
             ",
         )
         .unwrap();

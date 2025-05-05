@@ -15,6 +15,25 @@ fn id(id: &str) -> Identifier {
 
 pub fn register_stdlib(pass: &mut InferencePass) {
     pass.register_builtin(
+        "op+",
+        FnDeclHIR {
+            ty: FnTypeHIR {
+                generics: vec![],
+                ret: TypeHIR::Int.into(),
+                params: vec![TypeHIR::Int, TypeHIR::Int],
+            },
+            params: vec![id("a"), id("b")],
+            body: None,
+            llvm_body: Some(
+                "
+                    // todo
+                "
+                .into(),
+            ),
+        },
+    );
+
+    pass.register_builtin(
         "op<",
         FnDeclHIR {
             ty: FnTypeHIR {

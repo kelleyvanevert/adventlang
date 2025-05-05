@@ -196,6 +196,7 @@ impl ExprHIR {
             Self::Bool(_) => TypeHIR::Bool,
             Self::Int(_) => TypeHIR::Int,
             Self::Float(_) => TypeHIR::Float,
+            // Self::EmptyList { el_ty } => TypeHIR::List(el_ty.clone().into()),
             Self::ListLiteral { el_ty, .. } => TypeHIR::List(el_ty.clone().into()),
             Self::TupleLiteral { elements } => {
                 TypeHIR::Tuple(elements.iter().map(|el| el.ty(pass)).collect())
