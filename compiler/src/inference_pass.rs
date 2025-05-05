@@ -283,6 +283,7 @@ impl InferencePass {
                                         },
                                         // in the case of an if let condition check, if the declaration pattern doesn't match, we just conclude that the condition doesn't match. In the case of compiling declaration patterns in if conditions, we'll be using a do-{} block, which means that we can break out of it to early-escape the rest of the unpacking
                                         DeclareLocation::If => Stmt::Break {
+                                            label: None,
                                             expr: Some(Expr::Bool(false)),
                                         },
                                         // in the case of a while let condition check, ... TODO TODO
@@ -434,13 +435,16 @@ impl InferencePass {
         processed: &mut Vec<StmtHIR>,
     ) -> TypeHIR {
         match stmt {
-            Stmt::Break { expr } => {
+            Stmt::Break { label, expr } => {
+                // todo check that label is valid
                 processed.push(StmtHIR::Break {
+                    label: label.clone(),
                     expr: expr.as_ref().map(|expr| self.process_expr(scope_id, expr)),
                 });
                 TypeHIR::Nil
             }
             Stmt::Continue { label } => {
+                // todo check that label is valid
                 processed.push(StmtHIR::Continue {
                     label: label.clone(),
                 });
@@ -953,26 +957,26 @@ impl InferencePass {
                 // }
             }
 
+            Expr::TupleLiteral { elements } => {
+                let elements_hir = elements
+                    .iter()
+                    .map(|el| self.process_expr(scope_id, el))
+                    .collect::<Vec<_>>();
+
+                ExprHIR::TupleLiteral {
+                    elements: elements_hir,
+                }
+            }
+
+            Expr::DoWhile { label, body, cond } => {
+                //
+                todo!()
+            }
+
             _ => todo!("TODO: process expr: {:?}", expr),
         }
-        // ListLiteral {
-        //     elements: Vec<Expr>,
-        //     splat: Option<Box<Expr>>,
-        // },
-        // TupleLiteral {
-        //     elements: Vec<Expr>,
-        // },
         // DictLiteral {
         //     elements: Vec<(DictKey, Expr)>,
-        // },
-        // Index {
-        //     expr: Box<Expr>,
-        //     coalesce: bool,
-        //     index: Box<Expr>,
-        // },
-        // AnonymousFn {
-        //     params: Vec<Declarable>,
-        //     body: Block,
         // },
         // While {
         //     label: Option<Identifier>,

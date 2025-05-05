@@ -1039,9 +1039,16 @@ fn break_stmt(s: State) -> ParseResult<State, Stmt> {
     map(
         seq((
             tag("break"),
-            optional(preceded(slws1, constrained(false, expr))),
+            optional(preceded(ws1, label)),
+            optional(preceded(
+                seq((slws1, tag("with"), slws1)),
+                constrained(false, expr),
+            )),
         )),
-        |(_, expr)| Stmt::Break { expr: expr.into() },
+        |(_, label, expr)| Stmt::Break {
+            label: label.into(),
+            expr: expr.into(),
+        },
     )
     .parse(s)
 }

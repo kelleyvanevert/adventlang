@@ -117,10 +117,26 @@ impl Display for StmtHIR {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             StmtHIR::Pass => write!(f, "pass"),
-            StmtHIR::Break { expr: None } => write!(f, "break"),
-            StmtHIR::Break { expr: Some(expr) } => write!(f, "break {expr}"),
-            StmtHIR::Continue { label: None } => write!(f, "continue"),
-            StmtHIR::Continue { label: Some(label) } => write!(f, "continue '{label}"),
+            StmtHIR::Break { label, expr } => {
+                write!(f, "break")?;
+                if let Some(label) = label {
+                    write!(f, " '{label}")?;
+                }
+                if let Some(expr) = expr {
+                    write!(f, " with {expr}")?;
+                }
+                write!(f, "")
+            }
+            StmtHIR::Continue { label } => {
+                write!(f, "continue")?;
+                if let Some(label) = label {
+                    write!(f, " '{label}")?;
+                }
+                // if let Some(expr) = expr {
+                //     write!(f, " with {expr}")?;
+                // }
+                write!(f, "")
+            }
             StmtHIR::Return { expr: None } => write!(f, "return"),
             StmtHIR::Return { expr: Some(expr) } => write!(f, "return {expr}"),
             StmtHIR::Declare { id, expr } => write!(f, "let {id} = {expr}"),

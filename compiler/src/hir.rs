@@ -18,6 +18,7 @@ pub struct BlockHIR {
 pub enum StmtHIR {
     Pass,
     Break {
+        label: Option<Identifier>,
         expr: Option<ExprHIR>,
     },
     Continue {

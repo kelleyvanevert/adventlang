@@ -297,6 +297,7 @@ pub enum Item {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
 pub enum Stmt {
     Break {
+        label: Option<Identifier>,
         expr: Option<Expr>,
     },
     Continue {
