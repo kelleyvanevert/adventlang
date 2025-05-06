@@ -623,3 +623,42 @@ fn main() {
 I guess I can't have variable length tuples, i.e. heterogenous lists,
  if I want to strictly type upfront,
  unless I dynamically include type tags .. bringing the whole dynamic nature back again
+
+
+
+Type memory layout
+  no relevant
+    Never
+    Num
+    TypeVar { var }
+
+  relevant
+    Nil                       -> just     (): size =  0, align = 0x1, no Drop
+    Bool                      -> just   bool: size =  1, align = 0x1, no Drop
+    Str                       -> just String: size = 24, align = 0x8, needs Drop   (ptr, len, cap, __)
+    Int                       -> just    i64: size =  8, align = 0x8, no Drop
+    Float
+    Regex
+    Fn
+    List { el_ty }            -> Vec<T>
+    Tuple { ...el_types }
+    Nullable { ty }
+
+
+FFI things
+
+  Option<T> and Vec<T> are not FFI-safe
+
+  https://stackoverflow.com/a/39270881
+
+  https://doc.rust-lang.org/std/vec/struct.Vec.html#method.from_raw_parts
+
+  allocators are super important -- Rust's is a different one
+
+  mem::forget()
+  Vec::from_raw_parts()
+
+
+Ownership things
+
+  ...

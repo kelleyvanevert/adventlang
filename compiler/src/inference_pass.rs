@@ -27,7 +27,7 @@ pub enum Binding {
 #[derive(Debug)]
 pub struct Scope {
     pub parent_scope: Option<usize>,
-    pub is_fun: Option<usize>,
+    // pub is_fun: Option<usize>,
     pub belongs_to_fun: usize,
     pub bindings: FxHashMap<Identifier, Binding>,
 }
@@ -36,7 +36,7 @@ impl Scope {
     pub fn root() -> Scope {
         Scope {
             parent_scope: None,
-            is_fun: None,
+            // is_fun: None,
             belongs_to_fun: 0,
             bindings: FxHashMap::default(),
         }
@@ -198,7 +198,7 @@ impl InferencePass {
         let fn_scope_id = self.scopes.len();
         self.scopes.push(Scope {
             parent_scope: Some(scope_id),
-            is_fun: Some(fn_id),
+            // is_fun: Some(fn_id),
             belongs_to_fun: fn_id,
             bindings: FxHashMap::default(),
         });
@@ -707,7 +707,7 @@ impl InferencePass {
                 let if_scope_id = self.scopes.len();
                 self.scopes.push(Scope {
                     parent_scope: Some(scope_id),
-                    is_fun: None,
+                    // is_fun: None,
                     belongs_to_fun: self.get_scope(scope_id).belongs_to_fun,
                     bindings: FxHashMap::default(),
                 });
@@ -769,7 +769,7 @@ impl InferencePass {
                 let if_scope_id = self.scopes.len();
                 self.scopes.push(Scope {
                     parent_scope: Some(scope_id),
-                    is_fun: None,
+                    // is_fun: None,
                     belongs_to_fun: self.get_scope(scope_id).belongs_to_fun,
                     bindings: FxHashMap::default(),
                 });

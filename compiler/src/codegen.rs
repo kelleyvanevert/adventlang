@@ -5,7 +5,7 @@ use inkwell::{
     context::Context,
     module::Module,
     types::{BasicType, BasicTypeEnum, IntType, PointerType},
-    values::{AnyValue, BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue},
+    values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue},
 };
 use thiserror::Error;
 
@@ -23,29 +23,34 @@ pub enum BackendError {
 
 pub struct CodegenContext<'ctx> {
     context: &'ctx Context,
-    modules: FxHashMap<String, Module<'ctx>>,
+    // modules: FxHashMap<String, Module<'ctx>>,
     builder: Builder<'ctx>,
+    main_module: Module<'ctx>,
 }
 
 impl<'ctx> CodegenContext<'ctx> {
     fn new(context: &'ctx Context) -> Self {
-        let mut modules = FxHashMap::default();
+        // let mut modules = FxHashMap::default();
         let main_module = context.create_module("main");
 
-        modules.insert("main".into(), main_module);
+        let h1 = "hello";
+        let h2 = &("hello".to_string())[0..2];
+
+        // modules.insert("main".into(), main_module);
 
         let builder = context.create_builder();
 
         Self {
             context,
-            modules,
+            // modules,
             builder,
+            main_module,
         }
     }
 
-    fn main_module(&self) -> &Module<'ctx> {
-        self.modules.get("main").unwrap()
-    }
+    // fn main_module(&self) -> &Module<'ctx> {
+    //     self.modules.get("main").unwrap()
+    // }
 
     // fn mk_type(&self, ty: &Type) -> AnyTypeEnum<'ctx> {
     //     match ty {
@@ -214,7 +219,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     return_type.fn_type(&[self.ptr_type().into(), self.int_type().into()], false);
 
                 let fun = self
-                    .main_module()
+                    .main_module
                     .add_function("some_other_fn", fn_type, None);
 
                 let entry_block = self.context.append_basic_block(fun, "entry");
@@ -388,7 +393,7 @@ mod tests {
         let i64_t = context.i64_type();
         let fn_type = i64_t.fn_type(&[], false);
         let function = codegen_context
-            .main_module()
+            .main_module
             .add_function("main", fn_type, None);
         let basic_block = context.append_basic_block(function, "entry");
         codegen_context.builder.position_at_end(basic_block);
@@ -418,7 +423,7 @@ mod tests {
             .build_return(Some(&res_val))
             .unwrap();
 
-        println!("{}", codegen_context.main_module().to_string());
+        println!("{}", codegen_context.main_module.to_string());
 
         // define i64 @main() {
         // entry:

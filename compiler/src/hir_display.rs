@@ -21,7 +21,7 @@ impl Display for FnDeclHIR {
         write!(f, "fn ")?;
 
         if let Some(name) = &self.name {
-            write!(f, "{}", name);
+            write!(f, "{}", name)?;
         }
 
         if self.ty.generics.len() > 0 {
@@ -248,10 +248,7 @@ impl Display for ExprHIR {
             }
             ExprHIR::While { .. } => panic!("TODO: while"),
             ExprHIR::DoWhile {
-                ty,
-                label,
-                body,
-                cond,
+                label, body, cond, ..
             } => {
                 if let Some(label) = label {
                     write!(f, "'{label}: ")?;
