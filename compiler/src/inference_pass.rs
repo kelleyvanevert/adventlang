@@ -52,7 +52,7 @@ pub struct InferencePass {
     scopes: Vec<Scope>,
     fns: Vec<FnDeclHIR>,
     next_var_id: usize,
-    builtins: FxHashMap<&'static str, usize>,
+    builtins: FxHashMap<String, usize>,
 }
 
 impl InferencePass {
@@ -68,6 +68,7 @@ impl InferencePass {
             0,
             &"main".into(),
             FnDeclHIR {
+                name: Some("<root>".into()),
                 ty: FnTypeHIR {
                     generics: vec![],
                     params: vec![],
@@ -110,8 +111,15 @@ impl InferencePass {
         fn_id
     }
 
-    pub fn register_builtin(&mut self, name: &'static str, decl: FnDeclHIR) {
-        let fn_id = self.add_fn_decl(0, &Identifier(name.into()), decl);
+    pub fn register_builtin(&mut self, decl: FnDeclHIR) {
+        let name = decl
+            .name
+            .as_ref()
+            .expect("builtins can only be registered with a name")
+            .clone();
+
+        let fn_id = self.add_fn_decl(0, &Identifier(name.clone().into()), decl);
+
         self.builtins.insert(name, fn_id);
     }
 
@@ -155,6 +163,7 @@ impl InferencePass {
     fn process_fn_decl(
         &mut self,
         scope_id: usize,
+        name: Option<String>,
         FnDecl {
             generics,
             ret,
@@ -213,6 +222,7 @@ impl InferencePass {
         // `ret ?= body.ty`
 
         FnDeclHIR {
+            name,
             ty: FnTypeHIR {
                 generics: generics.clone(),
                 ret: body.ty.clone().into(),
@@ -227,7 +237,7 @@ impl InferencePass {
     fn process_item(&mut self, scope_id: usize, item: &Item) {
         match item {
             Item::NamedFn { name, decl } => {
-                let decl_hir = self.process_fn_decl(scope_id, decl);
+                let decl_hir = self.process_fn_decl(scope_id, Some(name.0.clone().into()), decl);
 
                 self.add_fn_decl(scope_id, name, decl_hir);
             }
@@ -758,11 +768,14 @@ impl InferencePass {
                         let then_ty = &then_hir.ty;
 
                         // TODO: find common (unifying??) type
+                        // TODO: we can relax this is the result is not actually used though (e.g. in an assignment or implicit block-return) --- or, if this is too tricky to figure out in the syntax (because we lack ; like in rust), we can just automatically assign the if a nil-type if the then and else branches have a different type
                         if els_ty != then_ty {
-                            panic!("if-then and if-else branch don't have the same type");
-                        }
+                            // panic!("if-then and if-else branch don't have the same type");
 
-                        els_ty.clone()
+                            TypeHIR::Nil
+                        } else {
+                            els_ty.clone()
+                        }
                     }
                 };
 
@@ -869,7 +882,7 @@ impl InferencePass {
             }
 
             Expr::AnonymousFn { decl } => {
-                let decl_hir = self.process_fn_decl(scope_id, decl);
+                let decl_hir = self.process_fn_decl(scope_id, None, decl);
 
                 let fn_id = self.fns.len();
                 self.fns.push(decl_hir);
@@ -1017,7 +1030,7 @@ mod tests {
     use super::InferencePass;
 
     #[test]
-    fn test_lowering() {
+    fn test_inference() {
         let mut pass = InferencePass::new();
 
         let doc = parse_document(
@@ -1035,7 +1048,7 @@ mod tests {
         let doc_hir = pass.process(&doc);
         println!("DOC: {}", doc_hir);
         for i in 0..pass.fns.len() {
-            println!("fn${i} ::= {}", pass.fns[i]);
+            println!("\n{}", pass.fns[i]);
         }
     }
 }

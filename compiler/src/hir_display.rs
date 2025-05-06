@@ -18,18 +18,39 @@ impl Display for DocumentHIR {
 
 impl Display for FnDeclHIR {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.ty)?;
+        write!(f, "fn ")?;
 
-        write!(f, "; params (")?;
-        let mut i = 0;
-        for p in &self.params {
-            if i > 0 {
-                write!(f, ", ")?;
-            }
-            write!(f, "{p}")?;
-            i += 1;
+        if let Some(name) = &self.name {
+            write!(f, "{}", name);
         }
-        write!(f, ")")?;
+
+        if self.ty.generics.len() > 0 {
+            write!(f, "<")?;
+            let mut i = 0;
+            for v in &self.ty.generics {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{v}")?;
+                i += 1;
+            }
+            write!(f, ">")?;
+        }
+        {
+            write!(f, "(")?;
+            let mut i = 0;
+            for (id, t) in self.params.iter().zip(&self.ty.params) {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{id}: {t}")?;
+                i += 1;
+            }
+            write!(f, ")")?;
+        }
+        if self.ty.ret.as_ref() != &TypeHIR::Nil {
+            write!(f, " -> {}", self.ty.ret)?;
+        }
 
         match &self.body {
             None => write!(f, " <builtin>")?,

@@ -274,6 +274,8 @@ pub enum AssignPatternHIR {
 /// The representation/content of a single function, e.g. as it would be written in code
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FnDeclHIR {
+    pub name: Option<String>,
+
     pub ty: FnTypeHIR,
     pub params: Vec<Identifier>,
     pub body: Option<BlockHIR>,
