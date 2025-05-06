@@ -1,3 +1,6 @@
+use inference_pass::InferencePass;
+use parser::parse_document;
+
 mod codegen;
 mod hir;
 mod hir_display;
@@ -7,6 +10,14 @@ mod runtime;
 mod stdlib;
 
 fn main() {
-    // jit
-    crate::poc::jit::main();
+    // run JIT proof-of-concept
+    // crate::poc::jit::main();
+
+    let code = "
+        print(42)
+    ";
+
+    let doc = parse_document(&code).expect("could not parse");
+    let pass = InferencePass::run(&doc);
+    println!("{pass}");
 }

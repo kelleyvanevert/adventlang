@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use ast::{
     Argument, AssignPattern, Block, Declarable, DeclareGuardExpr, DeclarePattern, Document, Expr,
     FnDecl, Identifier, Item, Stmt, StrLiteralPiece, TypeVar,
@@ -53,15 +55,27 @@ pub struct InferencePass {
     fns: Vec<FnDeclHIR>,
     next_var_id: usize,
     builtins: FxHashMap<String, usize>,
+    doc: Option<DocumentHIR>,
+}
+
+impl Display for InferencePass {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "DOC: {}\n", self.doc())?;
+        for i in 0..self.fns.len() {
+            write!(f, "{}\n", self.fns[i])?;
+        }
+        write!(f, "")
+    }
 }
 
 impl InferencePass {
-    pub fn new() -> Self {
+    pub fn run(doc: &Document) -> Self {
         let mut pass = Self {
             scopes: vec![Scope::root()],
             fns: vec![],
             next_var_id: 0,
             builtins: FxHashMap::default(),
+            doc: None,
         };
 
         pass.add_fn_decl(
@@ -82,7 +96,15 @@ impl InferencePass {
 
         register_stdlib(&mut pass);
 
+        pass.doc = Some(DocumentHIR {
+            body: pass.process_block(0, &doc.body),
+        });
+
         pass
+    }
+
+    pub fn doc(&self) -> &DocumentHIR {
+        self.doc.as_ref().unwrap()
     }
 
     pub fn get_fn_ty(&self, fn_id: usize) -> &FnTypeHIR {
@@ -1031,8 +1053,6 @@ mod tests {
 
     #[test]
     fn test_inference() {
-        let mut pass = InferencePass::new();
-
         let doc = parse_document(
             "
                 fn f(n) {
@@ -1045,8 +1065,10 @@ mod tests {
             ",
         )
         .unwrap();
-        let doc_hir = pass.process(&doc);
-        println!("DOC: {}", doc_hir);
+
+        let pass = InferencePass::run(&doc);
+
+        println!("DOC: {}", pass.doc());
         for i in 0..pass.fns.len() {
             println!("\n{}", pass.fns[i]);
         }
