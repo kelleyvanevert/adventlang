@@ -10,14 +10,17 @@ mod runtime;
 mod stdlib;
 
 fn main() {
-    // run JIT proof-of-concept
+    // // run JIT proof-of-concept
     // crate::poc::jit::main();
 
-    let code = "
-        print(42)
-    ";
+    // run vector-passing proof-of-concept
+    crate::poc::vec::main();
 
-    let doc = parse_document(&code).expect("could not parse");
-    let pass = InferencePass::run(&doc);
-    println!("{pass}");
+    // let code = "
+    //     print(42)
+    // ";
+
+    // let doc = parse_document(&code).expect("could not parse");
+    // let pass = InferencePass::run(&doc);
+    // println!("{pass}");
 }

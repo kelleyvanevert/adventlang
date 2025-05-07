@@ -33,9 +33,6 @@ impl<'ctx> CodegenContext<'ctx> {
         // let mut modules = FxHashMap::default();
         let main_module = context.create_module("main");
 
-        let h1 = "hello";
-        let h2 = &("hello".to_string())[0..2];
-
         // modules.insert("main".into(), main_module);
 
         let builder = context.create_builder();

@@ -635,7 +635,7 @@ Type memory layout
   relevant
     Nil                       -> just     (): size =  0, align = 0x1, no Drop
     Bool                      -> just   bool: size =  1, align = 0x1, no Drop
-    Str                       -> just String: size = 24, align = 0x8, needs Drop   (ptr, len, cap, __)
+    Str                       -> just String: size = 24, align = 0x8, needs Drop   (ptr, len, cap)
     Int                       -> just    i64: size =  8, align = 0x8, no Drop
     Float
     Regex
