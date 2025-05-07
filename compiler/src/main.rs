@@ -2,6 +2,7 @@ use inference_pass::InferencePass;
 use parser::parse_document;
 
 mod codegen;
+mod codegen_types;
 mod hir;
 mod hir_display;
 mod inference_pass;

@@ -1,6 +1,7 @@
 use ast::{Block, Expr, Item, Stmt, Type};
 use fxhash::FxHashMap;
 use inkwell::{
+    AddressSpace,
     builder::Builder,
     context::Context,
     module::Module,
@@ -8,6 +9,8 @@ use inkwell::{
     values::{BasicMetadataValueEnum, BasicValue, BasicValueEnum, FunctionValue},
 };
 use thiserror::Error;
+
+use crate::{hir::TypeHIR, inference_pass::InferencePass};
 
 type IRGenResult<'ir> = Result<BasicValueEnum<'ir>, BackendError>;
 
@@ -26,6 +29,8 @@ pub struct CodegenContext<'ctx> {
     // modules: FxHashMap<String, Module<'ctx>>,
     builder: Builder<'ctx>,
     main_module: Module<'ctx>,
+
+    hir_types: FxHashMap<TypeHIR, BasicTypeEnum<'ctx>>,
 }
 
 impl<'ctx> CodegenContext<'ctx> {
@@ -42,6 +47,7 @@ impl<'ctx> CodegenContext<'ctx> {
             // modules,
             builder,
             main_module,
+            hir_types: FxHashMap::default(),
         }
     }
 
@@ -55,6 +61,103 @@ impl<'ctx> CodegenContext<'ctx> {
     //         _ => todo!(),
     //     }
     // }
+
+    fn get_hir_type(&self, pass: &InferencePass, ty: &TypeHIR) -> BasicTypeEnum<'ctx> {
+        let llvm_type = match ty {
+            TypeHIR::Never => todo!(),
+
+            TypeHIR::Nil => self.context.i8_type().as_basic_type_enum(),
+            TypeHIR::Bool => self.context.i8_type().as_basic_type_enum(),
+            TypeHIR::Str => {
+                // like the rust String type
+                self.context
+                    .struct_type(
+                        &[
+                            // pointer
+                            self.context
+                                .ptr_type(AddressSpace::default())
+                                .as_basic_type_enum(),
+                            // size
+                            self.context.i64_type().as_basic_type_enum(),
+                            // capacity
+                            self.context.i64_type().as_basic_type_enum(),
+                        ],
+                        false,
+                    )
+                    .as_basic_type_enum()
+            }
+            TypeHIR::Int => self.context.i64_type().as_basic_type_enum(),
+            TypeHIR::Float => self.context.f64_type().as_basic_type_enum(),
+            TypeHIR::Num => {
+                panic!("`num` is not a concrete type and cannot be converted to LLVM IR")
+            }
+            TypeHIR::Regex => todo!("TODO LLVM IR type for `regex`"),
+            TypeHIR::Fn { .. } => {
+                unreachable!("`fn {{ overloads }}` will never be typed concretely")
+            }
+            TypeHIR::List(_el) => {
+                // like the rust Vec<_> type
+                self.context
+                    .struct_type(
+                        &[
+                            // pointer
+                            self.context
+                                .ptr_type(AddressSpace::default())
+                                .as_basic_type_enum(),
+                            // size
+                            self.context.i64_type().as_basic_type_enum(),
+                            // capacity
+                            self.context.i64_type().as_basic_type_enum(),
+                        ],
+                        false,
+                    )
+                    .as_basic_type_enum()
+            }
+            TypeHIR::Tuple(elements) => {
+                let elements_llvm = elements
+                    .iter()
+                    .map(|el| self.get_hir_type(pass, el))
+                    .collect::<Vec<_>>();
+
+                self.context
+                    .struct_type(&elements_llvm, false)
+                    .as_basic_type_enum()
+            }
+            // // Dict(Option<(Box<Type>, Box<Type>)>),
+            // // // Union(Vec<Type>),
+            TypeHIR::TypeVar(v) => {
+                panic!("type var `{v}` is not a concrete type and cannot be converted to LLVM IR")
+            }
+            TypeHIR::Nullable(t) => {
+                // we could choose to make some types a bit smaller, e.g. a pointer can just be a null-pointer, and we could also do the same for the fat pointers, that is, lists and strings and regexes
+                match t.as_ref() {
+                    TypeHIR::Nil => self.context.i8_type().as_basic_type_enum(),
+                    TypeHIR::Bool
+                    | TypeHIR::Str
+                    | TypeHIR::Int
+                    | TypeHIR::Float
+                    | TypeHIR::Regex
+                    | TypeHIR::List(_)
+                    | TypeHIR::Tuple(_) => {
+                        self.context
+                            .struct_type(
+                                &[
+                                    // whether nil or not
+                                    self.context.i8_type().as_basic_type_enum(),
+                                    // boolean
+                                    self.get_hir_type(pass, t),
+                                ],
+                                false,
+                            )
+                            .as_basic_type_enum()
+                    }
+                    _ => unreachable!("not a valid type to be LLVM'd: {t}"),
+                }
+            }
+        };
+
+        llvm_type
+    }
 
     fn bool_type(&self) -> IntType<'ctx> {
         self.context.custom_width_int_type(1)

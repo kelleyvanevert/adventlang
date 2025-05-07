@@ -292,7 +292,7 @@ pub struct FnTypeHIR {
     pub ret: Box<TypeHIR>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TypeHIR {
     Never,
 
