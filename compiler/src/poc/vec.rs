@@ -1,3 +1,5 @@
+use std::mem;
+
 use inkwell::{
     OptimizationLevel,
     context::Context,
@@ -15,6 +17,67 @@ pub extern "C" fn my_mul_impl_2(arg: i32) -> i32 {
     arg * 2
 }
 
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct MyVeci64 {
+    ptr: *const i64,
+    length: u64,
+    capacity: u64,
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn al_create_vec() -> *mut MyVeci64 {
+    let mut vec: Vec<i64> = vec![123, 456, 789];
+    vec.push(4321);
+    // vec.shrink_to_fit();
+
+    let vec = mem::ManuallyDrop::new(vec);
+
+    let length = vec.len() as u64;
+    let capacity = vec.capacity() as u64;
+    let ptr = vec.as_ptr();
+
+    let boxed = Box::new(MyVeci64 {
+        ptr,
+        length,
+        capacity,
+    });
+
+    println!("(create) vec: {:?}, {:?}, {:?}", ptr, length, capacity);
+
+    Box::into_raw(boxed)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn al_index_vec(ptr: *mut MyVeci64, index: u64) -> i64 {
+    let vec = unsafe { Box::from_raw(ptr) };
+
+    println!(
+        "(index) vec: {:?}, {:?}, {:?}",
+        vec.ptr, vec.length, vec.capacity
+    );
+
+    let vec = unsafe {
+        Vec::from_raw_parts(
+            vec.ptr as *mut i64,
+            vec.length as usize,
+            vec.capacity as usize,
+        )
+    };
+
+    let vec = mem::ManuallyDrop::new(vec);
+
+    println!("Rust VEC: {:?}", vec);
+
+    let n = vec[index as usize];
+
+    // println!("Indexed -> {n}");
+
+    // mem::forget(vec);
+
+    n
+}
+
 #[allow(unused)]
 pub fn main() {
     let llvm_ir_code = "
@@ -24,10 +87,25 @@ declare i32 @my_mul(i32)
 
 declare i32(i32)* @mk_jit_fn()
 
+; ptr, len, cap
+%Vec_i64 = type <{ ptr, i64, i64 }>
+
+declare %Vec_i64* @al_create_vec()
+
+declare i64 @al_index_vec(%Vec_i64*, i64)
+
 define i32 @main() {
   %1 = load i32, i32* @variable       ;21
   %2 = call i32 @my_mul(i32 %1)       ;42
-  ret i32 %2
+
+  %my_vec_ptr = call ptr @al_create_vec()
+  %my_vec = load %Vec_i64, ptr %my_vec_ptr
+
+  %el = call i64 @al_index_vec(ptr %my_vec_ptr, i64 0)
+
+  %r = trunc i64 %el to i32
+
+  ret i32 %r
 }
 ";
     let context = Context::create();
@@ -51,6 +129,13 @@ define i32 @main() {
         &module.get_function("my_mul").unwrap(),
         my_mul_impl_2 as usize,
     );
+
+    // execution_engine.add_global_mapping(
+    //     &module.get_function("create_vec").unwrap(),
+    //     al_create_vec as usize,
+    // );
+
+    println!("OUTPUT LLVM:\n{}", module.to_string());
 
     let f: JitFunction<MainFn> =
         unsafe { execution_engine.get_function("main") }.expect("can get main fn");
