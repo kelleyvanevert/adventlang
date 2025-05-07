@@ -633,14 +633,14 @@ Type memory layout
     TypeVar { var }
 
   relevant
-    Nil                       -> just     (): size =  0, align = 0x1, no Drop
-    Bool                      -> just   bool: size =  1, align = 0x1, no Drop
-    Str                       -> just String: size = 24, align = 0x8, needs Drop   (ptr, len, cap)
-    Int                       -> just    i64: size =  8, align = 0x8, no Drop
-    Float
-    Regex
-    Fn
-    List { el_ty }            -> Vec<T>
+    Nil                       -> just     (): size =  0, align = 0x1, no Drop                           1
+    Bool                      -> just   bool: size =  1, align = 0x1, no Drop                           1
+    Str                       -> just String: size = 24, align = 0x8, needs Drop   (ptr, len, cap)     24
+    Int                       -> just    i64: size =  8, align = 0x8, no Drop                           8
+    Float                     -> just    f64: size =  8, align = 0x8, no Drop                           8
+    Regex                     -> just  Regex: size = 32 (0x20), align = 0x8, needs Drop                32
+    Fn                        -> just a pointer, i.e. 8 bytes                                           8
+    List { el_ty }            -> just Vec<T>: size = 24, align = 0x8, needs Drop   (ptr, len, cap)     24
     Tuple { ...el_types }
     Nullable { ty }
 
@@ -657,6 +657,21 @@ FFI things
 
   mem::forget()
   Vec::from_raw_parts()
+
+
+Monomorphization things
+
+  If I want to use Rust's Vec (and just take the overhead of writing a wrapper and doing mem::forget() and Vec::from_raw_parts() etc., then I still have the problem of directing Rust to actually compile all the specific instances that I need. This is meta ... so ... impossible?)
+    Unless I don't actually compile all the specific types, but just the SIZES of the types. I could, technically speaking, just hardcode-monomorphize the, say, 8 different sizes (1, 2, 8, 16, 24, 32, 48, 64 bytes), and then just bitcast in LLVM-world.
+
+  Options:
+    - write hardcoded size-directed monomorphizations in Rust, bitcast back in LLVM
+    - generate the Rust code, direct the process in JS or meta-Rust somehow
+      -- can this be done with macros ?? -- NO
+      -- https://charlycst.github.io/posts/jit-ing-rust/
+    - write implementations (of Vec<T>) in LLVM directly, only use concrete things (String, Regex) in Rust
+    - "do more in C++ instead of trying to do everything in Rust"
+      -- how would this look ??
 
 
 Ownership things
