@@ -664,6 +664,21 @@ FFI things
     https://yorickpeterse.com/articles/the-mess-that-is-handling-structure-arguments-and-returns-in-llvm/
 
 
+  ---
+
+  (!) Another radical idea:
+
+  - I could, instead of passing around { ptr, i64, i64 } via sret(...) arguments for vecs and strings,
+     or trimming it down to { ptr, bitcast { i32, i32 } as an i64 } and maybe using byval, to satisfy calling conventions,
+     .. just pass around a single "domain pointer" i32/i64, an id into the GC arena of whatever system I use for heap management in Rust. Because, well, I'll need a GC system in Rust anyway.
+
+    ..So, my options are:
+
+     - passed and returned as    sret({ ptr, i64, i64 })     ->  extra dereferencing and heap allocations
+     - trimmed down to         { ptr, { i32, i32 } as i64 }  ->  calling conventions trickiness (not sure how much)
+     - domain GC id                i32/i64                   ->  
+
+
 Monomorphization things
 
   If I want to use Rust's Vec (and just take the overhead of writing a wrapper and doing mem::forget() and Vec::from_raw_parts() etc., then I still have the problem of directing Rust to actually compile all the specific instances that I need. This is meta ... so ... impossible?)

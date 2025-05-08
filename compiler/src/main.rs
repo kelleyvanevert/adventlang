@@ -15,7 +15,7 @@ fn main() {
     // crate::poc::jit::main();
 
     // run vector-passing proof-of-concept
-    crate::poc::vec::main();
+    crate::poc::vec_cc::main();
 
     // let code = "
     //     print(42)
