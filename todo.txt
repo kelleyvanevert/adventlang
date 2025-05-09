@@ -1,4 +1,6 @@
 
+https://github.com/Kixiron/rust-langdev
+
 
 fn +(a: str, b: int) {}
 
@@ -694,6 +696,16 @@ Monomorphization things
       -- how would this look ??
 
 
-Ownership things
+Garbage collection options
 
-  ...
+  - Use the "conservative garbage collector" by Boehm: https://hboehm.info/gc/
+    - I'd have to link it somehow, might be problematic.
+      The upshot: I might not need to do anything else!
+
+  - Use the LLVM intrinsics that help a garbage collector implementation: @llvm.gcroot, etc.
+    + integrate with a GC interface/implementation on the Rust side
+
+  - Add my own little helper calls here and there. Specifically, I'll need drops
+    + integrate with a GC interface/implementation on the Rust side
+
+  ^^ I'll probably just go for the last one though, because it requires the least research and is low-investment.
