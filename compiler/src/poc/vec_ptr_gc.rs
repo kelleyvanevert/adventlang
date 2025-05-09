@@ -27,24 +27,25 @@ pub struct AlVec<T> {
     vec: Vec<T>, // not really ffi safe .. but, quite sure it's 24 bytes
 }
 
-pub extern "C" fn al_create_vec<T: Copy>(
-    element_size_bits: u64,
-    should_gc_elements: bool,
-) -> *mut AlVec<T> {
-    let al_vec = AlVec {
-        info: (AL_VEC as u64) | (element_size_bits << 8) | ((should_gc_elements as u64) << 16),
-        vec: vec![],
-    };
-
-    println!(
-        "created AlVec -- {should_gc_elements} -- {element_size_bits:#x} -- {:#x}",
-        al_vec.info
+pub extern "C" fn al_create_vec(element_size_bits: u64, should_gc_elements: bool) -> *mut () {
+    assert!(
+        element_size_bits == 32 || element_size_bits == 64,
+        "Cannot create vec for elements of size {element_size_bits}"
     );
 
-    let ptr = Box::into_raw(Box::new(al_vec));
+    let info = (AL_VEC as u64) | (element_size_bits << 8) | ((should_gc_elements as u64) << 16);
+
+    println!(
+        "creating AlVec -- {should_gc_elements} -- {element_size_bits:#x} -- {:#x}",
+        info
+    );
+
+    // This is kinda funny, but, technically, we don't need to specify the right size here, because it's still empty, and we'll be casting it to the right type later, anyway
+    // (?) Excepy maybe if the alignment gets done wrong?
+    let ptr = Box::into_raw(Box::new(AlVec::<usize> { info, vec: vec![] })) as *mut ();
 
     PTRS.with_borrow_mut(|ptrs| {
-        ptrs.insert(ptr as *mut ());
+        ptrs.insert(ptr);
     });
 
     ptr
@@ -226,8 +227,7 @@ pub fn main() {
     assert_eq!(struct_size, 32, "AlVec has a different size than expected!");
 
     let llvm_ir_code = "
-declare ptr @al_create_vec_32(i64, i1)
-declare ptr @al_create_vec_64(i64, i1)
+declare ptr @al_create_vec(i64, i1)
 
 declare i32 @al_index_vec_32(ptr, i64)
 declare i64 @al_index_vec_64(ptr, i64)
@@ -240,10 +240,10 @@ declare void @al_gcunroot(ptr)
 declare void @al_gc()
 
 define i32 @main() {
-  %my_ptr_vec = call ptr @al_create_vec_64(i64 64, i1 1)
+  %my_ptr_vec = call ptr @al_create_vec(i64 64, i1 1)
   call void @al_gcroot(ptr %my_ptr_vec)
 
-  %my_vec = call ptr @al_create_vec_32(i64 32, i1 0)
+  %my_vec = call ptr @al_create_vec(i64 32, i1 0)
   call void @al_push_vec_64(ptr %my_ptr_vec, ptr %my_vec)
 
   call void @al_push_vec_32(ptr %my_vec, i32 42)
@@ -280,13 +280,8 @@ define i32 @main() {
         .expect("can create execution engine");
 
     execution_engine.add_global_mapping(
-        &module.get_function("al_create_vec_32").unwrap(),
-        al_create_vec::<u32> as usize,
-    );
-
-    execution_engine.add_global_mapping(
-        &module.get_function("al_create_vec_64").unwrap(),
-        al_create_vec::<u64> as usize,
+        &module.get_function("al_create_vec").unwrap(),
+        al_create_vec as usize,
     );
 
     execution_engine.add_global_mapping(
