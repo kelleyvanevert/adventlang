@@ -702,6 +702,9 @@ Garbage collection options
     - I'd have to link it somehow, might be problematic.
       The upshot: I might not need to do anything else!
 
+  - "Just use Rc's"
+    - it wouldn't be 100% correct, given cycles, but, I don't think I'll need cycles for most AoC challenges...
+
   - Use the LLVM intrinsics that help a garbage collector implementation: @llvm.gcroot, etc.
     + integrate with a GC interface/implementation on the Rust side
 
@@ -709,3 +712,44 @@ Garbage collection options
     + integrate with a GC interface/implementation on the Rust side
 
   ^^ I'll probably just go for the last one though, because it requires the least research and is low-investment.
+
+  ---
+
+  "Writing my own"
+
+    - I'd write a tracing collector. I'd need to:
+
+      - mark roots
+        - a non-escaping function- local pointing to a Rust object: register as root
+        - an escaping variable ptr stored in a closure:
+          - the closure ptr: register a root
+          - the variable: the GC needs to know how to get there, which means Rust needs to understand the memory layout of the closure
+
+      - drop
+        - non-escaping function locals: drop
+        - closure ptrs: drop (if they're returned as passed on, their references are copied anyway, and so still reachable)
+        - how?
+          1. add code at end of fn + right before every `ret`
+          2. always add an 'end' block, and let `ret` jump to that block, and use `phi` to select return value
+
+      - what about heap moves?
+        - will the moved object accidentally be collected? NO, because it's reachable
+        - will the old object accidentally leak? (maybe?) (I guess not, because Rust will clean up when it moves?)
+
+      - collect
+        - somehow decide on regular intervals to trace & collect ...
+
+      - trace
+        - trace vectors
+        - trace closures
+        - how?
+          - !! we need to know the memory layout + the types referenced
+            1. store full metadata, e.g. TypeHIRs
+            2. store just enough: offsets, for example:
+              - closures: { type: CLOSURE, *parent, *gc_offsets, ...locals }
+              - vectors: { type: VECTOR, element_size, length, capacity, *rust_vec }
+
+  ---
+
+  "Using a GC library"
+  https://docs.rs/safe-gc/1.1.1/safe_gc/index.html
