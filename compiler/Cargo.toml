@@ -13,5 +13,6 @@ thiserror = "2.0.12"
 compact_str = "0.9.0"
 indenter = "0.3.3"
 safer-ffi = "0.1.13"
+hexdump = "0.1.2"
 parser = { path = "../parser" }
 ast = { path = "../ast" }

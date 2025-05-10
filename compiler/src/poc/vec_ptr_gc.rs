@@ -1,4 +1,7 @@
-use std::cell::RefCell;
+use std::{
+    alloc::{Layout, alloc_zeroed, dealloc},
+    cell::RefCell,
+};
 
 use fxhash::FxHashSet;
 use inkwell::{
@@ -19,6 +22,47 @@ thread_local! {
 type MainFn = unsafe extern "C" fn() -> i32;
 
 const AL_VEC: u8 = 0x34;
+const AL_CLOSURE: u8 = 0x14;
+
+pub extern "C" fn al_create_closure(
+    parent_closure_ptr: *mut u8,
+    num_gc_elements: u8,
+    additional_space: u64, // in bytes
+) -> *mut u8 {
+    let size = 8 + 8 + (num_gc_elements as usize) * 8 + (additional_space as usize);
+    let align = 8;
+
+    let layout = Layout::from_size_align(size, align).unwrap();
+
+    let ptr = unsafe { alloc_zeroed(layout) };
+
+    // write the info
+    let info = (AL_CLOSURE as u64) | ((num_gc_elements as u64) << 8) | ((size as u64) << 32);
+    unsafe { std::ptr::write(ptr as *mut u64, info) };
+    // println!("Creating closure of size {size}");
+    // println!("  {info:#x}");
+
+    // write the parent pointer
+    unsafe { std::ptr::write(ptr.add(8) as *mut *mut u8, parent_closure_ptr) };
+
+    // let slice = unsafe { std::slice::from_raw_parts(ptr, size) };
+    // hexdump::hexdump(slice);
+
+    PTRS.with_borrow_mut(|ptrs| {
+        ptrs.insert(ptr as *mut ());
+    });
+
+    ptr
+}
+
+fn al_drop_closure(ptr: *mut u8, size: usize) {
+    let align = 8;
+    let layout = Layout::from_size_align(size, align).unwrap();
+
+    unsafe {
+        dealloc(ptr, layout);
+    }
+}
 
 #[repr(C)]
 #[derive(Debug, Clone)]
@@ -41,8 +85,8 @@ pub extern "C" fn al_create_vec(element_size_bits: u64, should_gc_elements: bool
     );
 
     // This is kinda funny, but, technically, we don't need to specify the right size here, because it's still empty, and we'll be casting it to the right type later, anyway
-    // (?) Excepy maybe if the alignment gets done wrong?
-    let ptr = Box::into_raw(Box::new(AlVec::<usize> { info, vec: vec![] })) as *mut ();
+    // * The only problem might be alignment. But now I'm just aligning it to fit a u128, so for sur it'll also fit smaller types.
+    let ptr = Box::into_raw(Box::new(AlVec::<u128> { info, vec: vec![] })) as *mut ();
 
     PTRS.with_borrow_mut(|ptrs| {
         ptrs.insert(ptr);
@@ -89,8 +133,14 @@ pub extern "C" fn al_gcunroot(ptr: *mut ()) {
 #[derive(Debug, Clone, Copy)]
 enum HeapObjectType {
     AlVec {
+        ptr: *const u8,
         element_size: u8,
         should_gc_elements: bool,
+    },
+    AlClosure {
+        ptr: *const u8,
+        num_gc_elements: usize,
+        size: usize,
     },
     Unknown {
         ty: u8,
@@ -107,8 +157,28 @@ fn determine_heap_object_type(ptr: *mut ()) -> HeapObjectType {
             let should_gc_elements = (unsafe { *(ptr.add(2)) }) == 1;
 
             HeapObjectType::AlVec {
+                ptr,
                 element_size,
                 should_gc_elements,
+            }
+        }
+        AL_CLOSURE => {
+            // struct SomeSpecificFnClosure {
+            //   info: u64
+            //      - first byte: type
+            //      - second byte: how many GC elements
+            //      - ..
+            //      - bytes 4 thu 8: size
+            //   parent_closure: ptr -> SomeOtherFnClosure,
+            //   ...gc collectible locals (ptrs)
+            //   ...other locals
+            // }
+            let num_gc_elements = unsafe { *(ptr.add(1)) } as usize;
+            let size = unsafe { *(ptr.add(4) as *mut u32) } as usize;
+            HeapObjectType::AlClosure {
+                ptr,
+                num_gc_elements,
+                size,
             }
         }
         _ => HeapObjectType::Unknown { ty },
@@ -135,6 +205,7 @@ pub extern "C" fn al_gc() {
 
         match determine_heap_object_type(ptr) {
             HeapObjectType::AlVec {
+                ptr,
                 element_size,
                 should_gc_elements,
             } => {
@@ -158,13 +229,32 @@ pub extern "C" fn al_gc() {
                     };
                     // println!("  recovered! {:#x}", al_vec.vec[0]);
 
-                    todo.extend(al_vec.vec.iter().map(|el| *el as *mut ()));
+                    todo.extend(
+                        al_vec
+                            .vec
+                            .iter()
+                            .filter(|&&el| el != 0) // filter out null-pointers
+                            .map(|&el| el as *mut ()),
+                    );
                 } else {
                     panic!(
                         "unknown element size for GC-collecible vec elements: {}",
                         element_size
                     );
                 }
+            }
+            HeapObjectType::AlClosure {
+                ptr,
+                num_gc_elements,
+                ..
+            } => {
+                let ptr = ptr as *const *mut ();
+                // the range starts at 1 because we skip the info u64
+                // the range ends at num+2 because we include the parent closure, and then also num elements
+                todo.extend((1..(num_gc_elements + 2)).filter_map(|i| {
+                    let gc_el_ptr = unsafe { *ptr.add(i) };
+                    (gc_el_ptr as usize != 0).then_some(gc_el_ptr)
+                }));
             }
             HeapObjectType::Unknown { ty } => {
                 panic!("cannot trace unknown object heap type: {}", ty);
@@ -181,25 +271,44 @@ pub extern "C" fn al_gc() {
 
     let ptrs = PTRS.with_borrow(|ptrs| ptrs.iter().cloned().collect::<Vec<_>>());
     for ptr in ptrs {
+        if removed.contains(&ptr) {
+            // prevent double-free
+            continue;
+        }
+
         if !currently_reachable.contains(&ptr) {
             println!("  will remove {:#x}", ptr as usize);
             match determine_heap_object_type(ptr) {
                 HeapObjectType::AlVec {
                     element_size: 64, ..
                 } => {
-                    let ptr = ptr as *mut AlVec<u64>;
-                    let al_vec = unsafe { Box::from_raw(ptr) };
+                    let al_vec = unsafe { Box::from_raw(ptr as *mut AlVec<u64>) };
                     drop(al_vec); // very explicit! :P
                 }
                 HeapObjectType::AlVec {
                     element_size: 32, ..
                 } => {
-                    let ptr = ptr as *mut AlVec<u32>;
-                    let al_vec = unsafe { Box::from_raw(ptr) };
+                    let al_vec = unsafe { Box::from_raw(ptr as *mut AlVec<u32>) };
                     drop(al_vec); // very explicit! :P
                 }
-                HeapObjectType::Unknown { ty } => {
-                    panic!("cannot drop unknown heap object with type: {ty}");
+                HeapObjectType::AlVec {
+                    element_size: 16, ..
+                } => {
+                    let al_vec = unsafe { Box::from_raw(ptr as *mut AlVec<u16>) };
+                    drop(al_vec); // very explicit! :P
+                }
+                HeapObjectType::AlVec {
+                    element_size: 8, ..
+                } => {
+                    let al_vec = unsafe { Box::from_raw(ptr as *mut AlVec<u8>) };
+                    drop(al_vec); // very explicit! :P
+                }
+                HeapObjectType::AlClosure {
+                    ptr,
+                    num_gc_elements,
+                    size,
+                } => {
+                    al_drop_closure(ptr as *mut u8, size);
                 }
                 o => {
                     panic!("cannot drop heap object: {:?}", o);
@@ -227,6 +336,8 @@ pub fn main() {
     assert_eq!(struct_size, 32, "AlVec has a different size than expected!");
 
     let llvm_ir_code = "
+declare ptr @al_create_closure(ptr, i8, i64)
+
 declare ptr @al_create_vec(i64, i1)
 
 declare i32 @al_index_vec_32(ptr, i64)
@@ -239,9 +350,31 @@ declare void @al_gcroot(ptr)
 declare void @al_gcunroot(ptr)
 declare void @al_gc()
 
+
+%T_main_closure = type {
+    i64, ; info
+    ptr, ; parent closure
+
+    ; 1 gc element
+    ptr,
+
+    ; 2 other elements
+    i8,
+    i8
+}
+
+define void @my_fn() {
+  ret void
+}
+
 define i32 @main() {
+  %closure = call ptr @al_create_closure(ptr null, i8 1, i64 2)
+  call void @al_gcroot(ptr %closure)
+
   %my_ptr_vec = call ptr @al_create_vec(i64 64, i1 1)
-  call void @al_gcroot(ptr %my_ptr_vec)
+
+  %field_ptr = getelementptr %T_main_closure, ptr %closure, i32 0, i32 2
+  store ptr %my_ptr_vec, ptr %field_ptr
 
   %my_vec = call ptr @al_create_vec(i64 32, i1 0)
   call void @al_push_vec_64(ptr %my_ptr_vec, ptr %my_vec)
@@ -254,9 +387,10 @@ define i32 @main() {
 
   call void @al_gc()
 
-  call void @al_gcunroot(ptr %my_ptr_vec)
+  call void @al_gcunroot(ptr %closure)
   call void @al_gc()
 
+  ;correctly causes error/segfault
   ;call i32 @al_index_vec_32(ptr %my_vec, i64 1)
 
   ret i32 %el
@@ -278,6 +412,11 @@ define i32 @main() {
     let execution_engine = module
         .create_jit_execution_engine(OptimizationLevel::Default)
         .expect("can create execution engine");
+
+    execution_engine.add_global_mapping(
+        &module.get_function("al_create_closure").unwrap(),
+        al_create_closure as usize,
+    );
 
     execution_engine.add_global_mapping(
         &module.get_function("al_create_vec").unwrap(),

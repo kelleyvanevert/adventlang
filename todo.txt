@@ -702,7 +702,7 @@ Garbage collection options
     - I'd have to link it somehow, might be problematic.
       The upshot: I might not need to do anything else!
 
-  - "Just use Rc's"
+  - "Just use Rc"
     - it wouldn't be 100% correct, given cycles, but, I don't think I'll need cycles for most AoC challenges...
 
   - Use the LLVM intrinsics that help a garbage collector implementation: @llvm.gcroot, etc.
@@ -712,6 +712,11 @@ Garbage collection options
     + integrate with a GC interface/implementation on the Rust side
 
   ^^ I'll probably just go for the last one though, because it requires the least research and is low-investment.
+
+  ---
+
+  "Using a GC library"
+  https://docs.rs/safe-gc/1.1.1/safe_gc/index.html
 
   ---
 
@@ -751,5 +756,25 @@ Garbage collection options
 
   ---
 
-  "Using a GC library"
-  https://docs.rs/safe-gc/1.1.1/safe_gc/index.html
+Type memory layout
+
+  relevant
+    nil                             8 (0)  -- for compatibility, instead of i0/void
+    bool                            8 (0/1) -- for compatibility, instead of i1
+    int                            64
+    float                          64
+
+    str,regex,fn,list         ptr (64)
+
+    ?nil = nil
+
+    ?bool                           8  -- we'll just pack the nullability into another bit
+    ?int                           64  -- I'll use the MSB to mark and check for nil
+    ?float                         64  -- I'll use a NaN pattern like f64::NAN and .is_nan()
+
+    ?{str,regex,fn,list}      ptr (64) -- it can just be a nill-pointer
+
+    I'll have to think some more about how to deal with:
+
+    tuple(...)
+    ?tuple(...)
