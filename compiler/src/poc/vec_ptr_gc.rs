@@ -79,10 +79,10 @@ pub extern "C" fn al_create_vec(element_size_bits: u64, should_gc_elements: bool
 
     let info = (AL_VEC as u64) | (element_size_bits << 8) | ((should_gc_elements as u64) << 16);
 
-    println!(
-        "creating AlVec -- {should_gc_elements} -- {element_size_bits:#x} -- {:#x}",
-        info
-    );
+    // println!(
+    //     "creating AlVec -- {should_gc_elements} -- {element_size_bits:#x} -- {:#x}",
+    //     info
+    // );
 
     // This is kinda funny, but, technically, we don't need to specify the right size here, because it's still empty, and we'll be casting it to the right type later, anyway
     // * The only problem might be alignment. But now I'm just aligning it to fit a u128, so for sur it'll also fit smaller types.
@@ -277,31 +277,34 @@ pub extern "C" fn al_gc() {
         }
 
         if !currently_reachable.contains(&ptr) {
-            println!("  will remove {:#x}", ptr as usize);
             match determine_heap_object_type(ptr) {
                 HeapObjectType::AlVec {
                     element_size: 64, ..
                 } => {
                     let al_vec = unsafe { Box::from_raw(ptr as *mut AlVec<u64>) };
                     drop(al_vec); // very explicit! :P
+                    println!("  removed vec(64) {:#x}", ptr as usize);
                 }
                 HeapObjectType::AlVec {
                     element_size: 32, ..
                 } => {
                     let al_vec = unsafe { Box::from_raw(ptr as *mut AlVec<u32>) };
                     drop(al_vec); // very explicit! :P
+                    println!("  removed vec(32) {:#x}", ptr as usize);
                 }
                 HeapObjectType::AlVec {
                     element_size: 16, ..
                 } => {
                     let al_vec = unsafe { Box::from_raw(ptr as *mut AlVec<u16>) };
                     drop(al_vec); // very explicit! :P
+                    println!("  removed vec(16) {:#x}", ptr as usize);
                 }
                 HeapObjectType::AlVec {
                     element_size: 8, ..
                 } => {
                     let al_vec = unsafe { Box::from_raw(ptr as *mut AlVec<u8>) };
                     drop(al_vec); // very explicit! :P
+                    println!("  removed vec(8) {:#x}", ptr as usize);
                 }
                 HeapObjectType::AlClosure {
                     ptr,
@@ -309,6 +312,7 @@ pub extern "C" fn al_gc() {
                     size,
                 } => {
                     al_drop_closure(ptr as *mut u8, size);
+                    println!("  removed closure {:#x}", ptr as usize);
                 }
                 o => {
                     panic!("cannot drop heap object: {:?}", o);
@@ -351,6 +355,43 @@ declare void @al_gcunroot(ptr)
 declare void @al_gc()
 
 
+%T_my_fn_closure = type {
+    i64, ; info
+    ptr, ; parent closure
+
+    ; 1 gc element
+    ptr
+
+    ; no other elements
+}
+
+define i32 @my_fn(ptr %parent_closure) {
+  %closure = call ptr @al_create_closure(ptr %parent_closure, i8 1, i64 0)
+  call void @al_gcroot(ptr %closure)
+
+  ; ...
+
+  %my_ptr_vec = call ptr @al_create_vec(i64 64, i1 1)
+
+  %field_ptr = getelementptr %T_my_fn_closure, ptr %closure, i32 0, i32 2
+  store ptr %my_ptr_vec, ptr %field_ptr
+
+  %my_vec = call ptr @al_create_vec(i64 32, i1 0)
+  call void @al_push_vec_64(ptr %my_ptr_vec, ptr %my_vec)
+
+  call void @al_push_vec_32(ptr %my_vec, i32 42)
+  call void @al_push_vec_32(ptr %my_vec, i32 143)
+  call void @al_push_vec_32(ptr %my_vec, i32 35)
+
+  %el = call i32 @al_index_vec_32(ptr %my_vec, i64 1)
+
+  ; ...
+
+  call void @al_gcunroot(ptr %closure) ; what if I want to return it? ; what if I pass it?
+
+  ret i32 %el
+}
+
 %T_main_closure = type {
     i64, ; info
     ptr, ; parent closure
@@ -363,27 +404,13 @@ declare void @al_gc()
     i8
 }
 
-define void @my_fn() {
-  ret void
-}
-
 define i32 @main() {
+  call void @al_gc() ; just to test
+
   %closure = call ptr @al_create_closure(ptr null, i8 1, i64 2)
   call void @al_gcroot(ptr %closure)
 
-  %my_ptr_vec = call ptr @al_create_vec(i64 64, i1 1)
-
-  %field_ptr = getelementptr %T_main_closure, ptr %closure, i32 0, i32 2
-  store ptr %my_ptr_vec, ptr %field_ptr
-
-  %my_vec = call ptr @al_create_vec(i64 32, i1 0)
-  call void @al_push_vec_64(ptr %my_ptr_vec, ptr %my_vec)
-
-  call void @al_push_vec_32(ptr %my_vec, i32 42)
-  call void @al_push_vec_32(ptr %my_vec, i32 143)
-  call void @al_push_vec_32(ptr %my_vec, i32 35)
-
-  %el = call i32 @al_index_vec_32(ptr %my_vec, i64 1)
+  %r = call i32 @my_fn(ptr %closure)
 
   call void @al_gc()
 
@@ -393,7 +420,7 @@ define i32 @main() {
   ;correctly causes error/segfault
   ;call i32 @al_index_vec_32(ptr %my_vec, i64 1)
 
-  ret i32 %el
+  ret i32 %r
 }
 ";
     let context = Context::create();
