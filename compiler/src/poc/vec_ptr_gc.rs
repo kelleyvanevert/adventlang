@@ -1,6 +1,7 @@
 use std::{
     alloc::{Layout, alloc_zeroed, dealloc},
     cell::RefCell,
+    ffi::CStr,
 };
 
 use fxhash::FxHashSet;
@@ -23,6 +24,7 @@ type MainFn = unsafe extern "C" fn() -> i32;
 
 const AL_VEC: u8 = 0x34;
 const AL_CLOSURE: u8 = 0x14;
+const AL_STR: u8 = 0x27;
 
 pub extern "C" fn al_create_closure(
     parent_closure_ptr: *mut u8,
@@ -66,9 +68,38 @@ fn al_drop_closure(ptr: *mut u8, size: usize) {
 
 #[repr(C)]
 #[derive(Debug, Clone)]
+pub struct AlStr {
+    info: u64,   // 8 bytes
+    str: String, // not really 100% ffi safe .. but, it's 24 bytes and works fine for now
+}
+
+fn mk_al_str(str: impl Into<String>) -> *mut () {
+    let info = AL_STR as u64;
+
+    let ptr = Box::into_raw(Box::new(AlStr {
+        info,
+        str: str.into(),
+    })) as *mut ();
+
+    PTRS.with_borrow_mut(|ptrs| {
+        ptrs.insert(ptr);
+    });
+
+    ptr
+}
+
+pub extern "C" fn al_create_str_from_literal(ptr: *mut u8) -> *mut () {
+    let str = unsafe { CStr::from_ptr(ptr as *const i8) };
+    let str = str.to_str().unwrap().to_string();
+
+    mk_al_str(str)
+}
+
+#[repr(C)]
+#[derive(Debug, Clone)]
 pub struct AlVec<T> {
     info: u64,   // 8 bytes
-    vec: Vec<T>, // not really ffi safe .. but, quite sure it's 24 bytes
+    vec: Vec<T>, // not really 100% ffi safe .. but, it's 24 bytes and works fine for now
 }
 
 pub extern "C" fn al_create_vec(element_size_bits: u64, should_gc_elements: bool) -> *mut () {
@@ -95,15 +126,11 @@ pub extern "C" fn al_create_vec(element_size_bits: u64, should_gc_elements: bool
     ptr
 }
 
-pub extern "C" fn al_index_vec<T: Copy>(ptr: *mut AlVec<T>, idx: u64) -> T {
-    let al_vec = unsafe { Box::from_raw(ptr) };
-
-    let el = al_vec.vec[idx as usize];
-
-    std::mem::forget(al_vec);
-
-    // TODO maybe add bounds checks (if that's what we want in Adventlang)
-    el
+pub extern "C" fn al_index_vec<T: Copy>(vecptr: *mut u64, idx: u64) -> T {
+    using_al_vec(vecptr, |vec: &[T]| {
+        // TODO negative indices and bounds checks
+        vec[idx as usize]
+    })
 }
 
 pub extern "C" fn al_push_vec<T: Copy>(ptr: *mut AlVec<T>, el: T) {
@@ -130,6 +157,58 @@ pub extern "C" fn al_gcunroot(ptr: *mut ()) {
     });
 }
 
+pub fn using_al_str<R, F: FnOnce(&str) -> R>(strptr: *mut u64, f: F) -> R {
+    // get str
+    let string_ref: &String = unsafe { &*(strptr.add(1) as *const String) };
+    let slice: &str = string_ref.as_str();
+
+    f(slice)
+}
+
+pub fn using_al_vec<T: Copy, R, F: FnOnce(&[T]) -> R>(vecptr: *mut u64, f: F) -> R {
+    // get str
+    let vec_ref: &Vec<T> = unsafe { &*(vecptr.add(1) as *const Vec<T>) };
+    let slice: &[T] = vec_ref.as_slice();
+
+    f(slice)
+}
+
+pub extern "C" fn al_str_in_strvec(strptr: *mut u64, vecptr: *mut u64) -> u8 {
+    let found = using_al_vec(vecptr, |vec: &[u64]| {
+        using_al_str(strptr, |needle| {
+            vec.iter()
+                .any(|&elptr| using_al_str(elptr as *mut u64, |el| el == needle))
+        })
+    });
+
+    // println!("str check? {found}");
+
+    found as u8
+}
+
+pub extern "C" fn al_str_lines(strptr: *mut u64) -> *mut u64 {
+    using_al_str(strptr, |str| {
+        let vecptr = al_create_vec(64, true) as *mut AlVec<u64>;
+
+        for line in str.lines() {
+            let strptr = mk_al_str(line);
+            al_push_vec(vecptr, strptr as u64);
+        }
+
+        vecptr as *mut u64
+    })
+}
+
+pub extern "C" fn al_str_len(strptr: *mut u64) -> u64 {
+    using_al_str(strptr, |str| str.len() as u64)
+}
+
+pub extern "C" fn al_print(strptr: *mut u64) {
+    using_al_str(strptr, |str| {
+        println!("PRINT: {str}");
+    });
+}
+
 #[derive(Debug, Clone, Copy)]
 enum HeapObjectType {
     AlVec {
@@ -141,6 +220,9 @@ enum HeapObjectType {
         ptr: *const u8,
         num_gc_elements: usize,
         size: usize,
+    },
+    AlStr {
+        ptr: *const u8,
     },
     Unknown {
         ty: u8,
@@ -181,6 +263,7 @@ fn determine_heap_object_type(ptr: *mut ()) -> HeapObjectType {
                 size,
             }
         }
+        AL_STR => HeapObjectType::AlStr { ptr },
         _ => HeapObjectType::Unknown { ty },
     }
 }
@@ -256,6 +339,9 @@ pub extern "C" fn al_gc() {
                     (gc_el_ptr as usize != 0).then_some(gc_el_ptr)
                 }));
             }
+            HeapObjectType::AlStr { .. } => {
+                // str has no nested references
+            }
             HeapObjectType::Unknown { ty } => {
                 panic!("cannot trace unknown object heap type: {}", ty);
             }
@@ -306,13 +392,14 @@ pub extern "C" fn al_gc() {
                     drop(al_vec); // very explicit! :P
                     println!("  removed vec(8) {:#x}", ptr as usize);
                 }
-                HeapObjectType::AlClosure {
-                    ptr,
-                    num_gc_elements,
-                    size,
-                } => {
+                HeapObjectType::AlClosure { ptr, size, .. } => {
                     al_drop_closure(ptr as *mut u8, size);
                     println!("  removed closure {:#x}", ptr as usize);
+                }
+                HeapObjectType::AlStr { ptr } => {
+                    let al_str = unsafe { Box::from_raw(ptr as *mut AlStr) };
+                    drop(al_str); // very explicit! :P
+                    println!("  removed str {:#x}", ptr as usize);
                 }
                 o => {
                     panic!("cannot drop heap object: {:?}", o);
@@ -339,9 +426,9 @@ pub fn main() {
     let struct_size = std::mem::size_of::<AlVec<u64>>();
     assert_eq!(struct_size, 32, "AlVec has a different size than expected!");
 
-    let llvm_ir_code = "
+    let llvm_ir_code = r#"
+declare ptr @al_create_str_from_literal(ptr)
 declare ptr @al_create_closure(ptr, i8, i64)
-
 declare ptr @al_create_vec(i64, i1)
 
 declare i32 @al_index_vec_32(ptr, i64)
@@ -350,10 +437,32 @@ declare i64 @al_index_vec_64(ptr, i64)
 declare void @al_push_vec_32(ptr, i32)
 declare void @al_push_vec_64(ptr, i64)
 
+declare i8 @al_str_in_strvec(ptr, ptr)
+declare ptr @al_str_lines(ptr)
+declare i64 @al_str_len(ptr)
+declare void @al_print(ptr)
+
 declare void @al_gcroot(ptr)
 declare void @al_gcunroot(ptr)
 declare void @al_gc()
 
+@.input = private constant [41 x i8] c"1abc2
+pqr3stu8vwx
+a1b2c3d4e5f
+treb7uchet\00"
+
+@.d0 = private constant [2 x i8] c"0\00"
+@.d1 = private constant [2 x i8] c"1\00"
+@.d2 = private constant [2 x i8] c"2\00"
+@.d3 = private constant [2 x i8] c"3\00"
+@.d4 = private constant [2 x i8] c"4\00"
+@.d5 = private constant [2 x i8] c"5\00"
+@.d6 = private constant [2 x i8] c"6\00"
+@.d7 = private constant [2 x i8] c"7\00"
+@.d8 = private constant [2 x i8] c"8\00"
+@.d9 = private constant [2 x i8] c"9\00"
+
+@.k = private constant [2 x i8] c"k\00"
 
 %T_my_fn_closure = type {
     i64, ; info
@@ -363,6 +472,34 @@ declare void @al_gc()
     ptr
 
     ; no other elements
+}
+
+%T_is_digit_closure = type {
+    i64, ; info
+    ptr  ; parent closure
+         ; no local
+}
+
+%T_solve_closure = type {
+    i64, ; info
+    ptr, ; parent closure
+
+    ; 1 gc element
+    ptr
+
+    ; no other elements
+}
+
+%T_main_closure = type {
+    i64, ; info
+    ptr, ; parent closure
+
+    ; 1 gc element
+    ptr,
+
+    ; 2 other elements
+    i8,
+    i8
 }
 
 define i32 @my_fn(ptr %parent_closure) {
@@ -392,16 +529,78 @@ define i32 @my_fn(ptr %parent_closure) {
   ret i32 %el
 }
 
-%T_main_closure = type {
-    i64, ; info
-    ptr, ; parent closure
+define i8 @is_digit(ptr %parent_closure, ptr %s) {
+    %closure = call ptr @al_create_closure(ptr %parent_closure, i8 0, i64 0)
+    call void @al_gcroot(ptr %closure)
 
-    ; 1 gc element
-    ptr,
+    %c_digits = getelementptr %T_solve_closure, ptr %parent_closure, i32 0, i32 2
+    %digits = load ptr, ptr %c_digits
 
-    ; 2 other elements
-    i8,
-    i8
+    %r = call i8 @al_str_in_strvec(ptr %s, ptr %digits)
+
+    ; work
+
+    call void @al_gcunroot(ptr %closure)
+    ret i8 0
+}
+
+define i32 @solve(ptr %parent_closure) {
+    %closure = call ptr @al_create_closure(ptr %parent_closure, i8 1, i64 0)
+    call void @al_gcroot(ptr %closure)
+
+
+    ; let digits = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+
+    %d0 = call ptr @al_create_str_from_literal(ptr @.d0)
+    %d1 = call ptr @al_create_str_from_literal(ptr @.d1)
+    %d2 = call ptr @al_create_str_from_literal(ptr @.d2)
+    %d3 = call ptr @al_create_str_from_literal(ptr @.d3)
+    %d4 = call ptr @al_create_str_from_literal(ptr @.d4)
+    %d5 = call ptr @al_create_str_from_literal(ptr @.d5)
+    %d6 = call ptr @al_create_str_from_literal(ptr @.d6)
+    %d7 = call ptr @al_create_str_from_literal(ptr @.d7)
+    %d8 = call ptr @al_create_str_from_literal(ptr @.d8)
+    %d9 = call ptr @al_create_str_from_literal(ptr @.d9)
+
+    %digits = call ptr @al_create_vec(i64 64, i1 1)
+    call void @al_push_vec_64(ptr %digits, ptr %d0)
+    call void @al_push_vec_64(ptr %digits, ptr %d1)
+    call void @al_push_vec_64(ptr %digits, ptr %d2)
+    call void @al_push_vec_64(ptr %digits, ptr %d3)
+    call void @al_push_vec_64(ptr %digits, ptr %d4)
+    call void @al_push_vec_64(ptr %digits, ptr %d5)
+    call void @al_push_vec_64(ptr %digits, ptr %d6)
+    call void @al_push_vec_64(ptr %digits, ptr %d7)
+    call void @al_push_vec_64(ptr %digits, ptr %d8)
+    call void @al_push_vec_64(ptr %digits, ptr %d9)
+
+    %c_digits = getelementptr %T_solve_closure, ptr %closure, i32 0, i32 2
+    store ptr %digits, ptr %c_digits
+
+
+    ; fn is_digit(s) {
+    ;   s :in digits
+    ; }
+
+
+    ; is_digit("6")
+    %another_d6 = call ptr @al_create_str_from_literal(ptr @.d6)
+    %is_digit_6 = call i8 @is_digit(ptr %closure, ptr %another_d6)
+
+    ; is_digit("k")
+    %k = call ptr @al_create_str_from_literal(ptr @.k)
+    %is_digit_k = call i8 @is_digit(ptr %closure, ptr %k)
+
+
+    ; print(input :lines)
+    %input = call ptr @al_create_str_from_literal(ptr @.input)
+    %lines = call ptr @al_str_lines(ptr %input)
+    %line_0 = call ptr @al_index_vec_64(ptr %lines, i64 0)
+    call void @al_print(ptr %line_0)
+
+
+    call void @al_gcunroot(ptr %closure)
+    ret i32 0
 }
 
 define i32 @main() {
@@ -411,6 +610,8 @@ define i32 @main() {
   call void @al_gcroot(ptr %closure)
 
   %r = call i32 @my_fn(ptr %closure)
+
+  %solution = call i32 @solve(ptr %closure)
 
   call void @al_gc()
 
@@ -422,7 +623,7 @@ define i32 @main() {
 
   ret i32 %r
 }
-";
+"#;
     let context = Context::create();
 
     let memory_buffer =
@@ -439,6 +640,11 @@ define i32 @main() {
     let execution_engine = module
         .create_jit_execution_engine(OptimizationLevel::Default)
         .expect("can create execution engine");
+
+    execution_engine.add_global_mapping(
+        &module.get_function("al_create_str_from_literal").unwrap(),
+        al_create_str_from_literal as usize,
+    );
 
     execution_engine.add_global_mapping(
         &module.get_function("al_create_closure").unwrap(),
@@ -469,6 +675,29 @@ define i32 @main() {
         &module.get_function("al_push_vec_64").unwrap(),
         al_push_vec::<u64> as usize,
     );
+
+    execution_engine.add_global_mapping(
+        &module.get_function("al_str_in_strvec").unwrap(),
+        al_str_in_strvec as usize,
+    );
+
+    execution_engine.add_global_mapping(
+        &module.get_function("al_str_lines").unwrap(),
+        al_str_lines as usize,
+    );
+
+    execution_engine.add_global_mapping(
+        &module.get_function("al_str_len").unwrap(),
+        al_str_len as usize,
+    );
+
+    execution_engine.add_global_mapping(
+        &module.get_function("al_str_len").unwrap(),
+        al_str_len as usize,
+    );
+
+    execution_engine
+        .add_global_mapping(&module.get_function("al_print").unwrap(), al_print as usize);
 
     execution_engine.add_global_mapping(
         &module.get_function("al_gcroot").unwrap(),
