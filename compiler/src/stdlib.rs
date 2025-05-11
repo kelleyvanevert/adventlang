@@ -3,6 +3,7 @@ use ast::{Identifier, TypeVar};
 use crate::{
     hir::{FnDeclHIR, FnTypeHIR, TypeHIR},
     inference_pass::InferencePass,
+    runtime::heap::al_print,
 };
 
 fn tv(id: &str) -> TypeVar {
@@ -21,18 +22,13 @@ pub fn register_stdlib(pass: &mut InferencePass) {
     pass.register_builtin(FnDeclHIR {
         name: Some("print".into()),
         ty: FnTypeHIR {
-            generics: vec![tv("t")],
+            generics: vec![],
             ret: TypeHIR::Nil.into(),
-            params: vec![tv_ty("T")],
+            params: vec![TypeHIR::Str],
         },
         params: vec![id("x")],
         body: None,
-        llvm_body: Some(
-            "
-                    // todo
-                "
-            .into(),
-        ),
+        builtin: Some(al_print as usize),
     });
 
     pass.register_builtin(FnDeclHIR {
@@ -44,12 +40,7 @@ pub fn register_stdlib(pass: &mut InferencePass) {
         },
         params: vec![id("a"), id("b")],
         body: None,
-        llvm_body: Some(
-            "
-                    // todo
-                "
-            .into(),
-        ),
+        builtin: None,
     });
 
     pass.register_builtin(FnDeclHIR {
@@ -61,13 +52,7 @@ pub fn register_stdlib(pass: &mut InferencePass) {
         },
         params: vec![id("a"), id("b")],
         body: None,
-        llvm_body: Some(
-            "
-                    %ret = icmp slt i64 %a, %b
-                    ret %ret
-                "
-            .into(),
-        ),
+        builtin: None,
     });
 
     pass.register_builtin(FnDeclHIR {
@@ -83,13 +68,7 @@ pub fn register_stdlib(pass: &mut InferencePass) {
         },
         params: vec![id("list"), id("index"), id("coalesce")],
         body: None,
-        llvm_body: Some(
-            "
-                    %ret = icmp slt i64 %a, %b
-                    ret %ret
-                "
-            .into(),
-        ),
+        builtin: None,
     });
 
     pass.register_builtin(FnDeclHIR {
@@ -101,11 +80,6 @@ pub fn register_stdlib(pass: &mut InferencePass) {
         },
         params: vec![id("list")],
         body: None,
-        llvm_body: Some(
-            "
-                    // todo
-                "
-            .into(),
-        ),
+        builtin: None,
     });
 }

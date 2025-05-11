@@ -280,8 +280,7 @@ pub struct FnDeclHIR {
     pub params: Vec<Identifier>,
     pub body: Option<BlockHIR>,
 
-    // TODO express this is a workable way
-    pub llvm_body: Option<String>,
+    pub builtin: Option<usize>,
 }
 
 /// The type of a single function
