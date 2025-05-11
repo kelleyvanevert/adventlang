@@ -104,11 +104,28 @@ pub extern "C" fn al_create_vec(element_size_bits: u64, ptr_elements: bool) -> *
     ptr
 }
 
-pub extern "C" fn al_index_vec<T: Copy>(vecptr: *mut u64, idx: u64) -> T {
+pub extern "C" fn al_index_vec<T: Copy>(vecptr: *mut u64, idx: i64) -> T {
     using_al_vec(vecptr, |vec: &[T]| {
-        // TODO negative indices and bounds checks
-        vec[idx as usize]
+        // TODO make this more dummy-proof, with modulo
+        // TODO add bounds check
+        if idx < 0 {
+            vec[(idx + vec.len() as i64) as usize]
+        } else {
+            vec[idx as usize]
+        }
     })
+}
+
+pub extern "C" fn al_index_vec_8(vecptr: *mut u64, idx: i64) -> u8 {
+    al_index_vec::<u8>(vecptr, idx)
+}
+
+pub extern "C" fn al_index_vec_32(vecptr: *mut u64, idx: i64) -> u32 {
+    al_index_vec::<u32>(vecptr, idx)
+}
+
+pub extern "C" fn al_index_vec_64(vecptr: *mut u64, idx: i64) -> u64 {
+    al_index_vec::<u64>(vecptr, idx)
 }
 
 pub extern "C" fn al_push_vec<T: Copy>(ptr: *mut AlVec<T>, el: T) {

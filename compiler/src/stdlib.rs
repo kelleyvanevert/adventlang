@@ -1,9 +1,10 @@
 use ast::{Identifier, TypeVar};
+use inkwell::values::{BasicValue, BasicValueEnum};
 
 use crate::{
     hir::{FnDeclHIR, FnTypeHIR, TypeHIR},
     inference_pass::InferencePass,
-    runtime::heap::al_print,
+    runtime::heap::{al_index_vec, al_index_vec_8, al_index_vec_64, al_print},
 };
 
 fn tv(id: &str) -> TypeVar {
@@ -29,6 +30,7 @@ pub fn register_stdlib(pass: &mut InferencePass) {
         params: vec![id("x")],
         body: None,
         builtin: Some(al_print as usize),
+        gen_builtin: None,
     });
 
     pass.register_builtin(FnDeclHIR {
@@ -41,6 +43,21 @@ pub fn register_stdlib(pass: &mut InferencePass) {
         params: vec![id("a"), id("b")],
         body: None,
         builtin: None,
+        gen_builtin: Some(|ctx, f| {
+            match (f.get_nth_param(0).unwrap(), f.get_nth_param(1).unwrap()) {
+                (BasicValueEnum::IntValue(a), BasicValueEnum::IntValue(b)) => {
+                    ctx.builder
+                        .build_return(Some(
+                            &ctx.builder
+                                .build_int_add(a, b, "op+")
+                                .unwrap()
+                                .as_basic_value_enum(),
+                        ))
+                        .unwrap();
+                }
+                _ => unreachable!(""),
+            };
+        }),
     });
 
     pass.register_builtin(FnDeclHIR {
@@ -53,8 +70,31 @@ pub fn register_stdlib(pass: &mut InferencePass) {
         params: vec![id("a"), id("b")],
         body: None,
         builtin: None,
+        gen_builtin: Some(|ctx, f| {
+            match (f.get_nth_param(0).unwrap(), f.get_nth_param(1).unwrap()) {
+                (BasicValueEnum::IntValue(a), BasicValueEnum::IntValue(b)) => {
+                    let cmp = ctx
+                        .builder
+                        .build_int_compare(inkwell::IntPredicate::SLT, a, b, "op<")
+                        .unwrap();
+
+                    let res = ctx
+                        .builder
+                        .build_int_cast(cmp, ctx.bool_type(), "as_bool")
+                        .unwrap();
+
+                    ctx.builder
+                        .build_return(Some(&res.as_basic_value_enum()))
+                        .unwrap();
+                }
+                _ => unreachable!(""),
+            };
+        }),
     });
 
+    // TODO also deal with byte-wide element types
+    // -- either by stamping out specific non-generics manually,
+    //     or by defining as `gen_builtin` which checks dynamically
     pass.register_builtin(FnDeclHIR {
         name: Some("op[]".into()),
         ty: FnTypeHIR {
@@ -68,7 +108,8 @@ pub fn register_stdlib(pass: &mut InferencePass) {
         },
         params: vec![id("list"), id("index"), id("coalesce")],
         body: None,
-        builtin: None,
+        builtin: Some(al_index_vec_64 as usize),
+        gen_builtin: None,
     });
 
     pass.register_builtin(FnDeclHIR {
@@ -81,5 +122,6 @@ pub fn register_stdlib(pass: &mut InferencePass) {
         params: vec![id("list")],
         body: None,
         builtin: None,
+        gen_builtin: None,
     });
 }

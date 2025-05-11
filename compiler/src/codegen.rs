@@ -25,10 +25,10 @@ pub enum BackendError {
 }
 
 pub struct CodegenContext<'ctx> {
-    context: &'ctx Context,
+    pub context: &'ctx Context,
     // modules: FxHashMap<String, Module<'ctx>>,
-    builder: Builder<'ctx>,
-    main_module: Module<'ctx>,
+    pub builder: Builder<'ctx>,
+    pub main_module: Module<'ctx>,
 
     hir_types: FxHashMap<TypeHIR, BasicTypeEnum<'ctx>>,
 }
@@ -159,12 +159,12 @@ impl<'ctx> CodegenContext<'ctx> {
         llvm_type
     }
 
-    fn bool_type(&self) -> IntType<'ctx> {
-        self.context.custom_width_int_type(1)
+    pub fn bool_type(&self) -> IntType<'ctx> {
+        self.context.i8_type()
     }
 
-    fn nil_type(&self) -> IntType<'ctx> {
-        self.context.custom_width_int_type(1)
+    pub fn nil_type(&self) -> IntType<'ctx> {
+        self.context.i8_type()
     }
 
     fn int_type(&self) -> IntType<'ctx> {

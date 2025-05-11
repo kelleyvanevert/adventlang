@@ -1,6 +1,10 @@
 use ast::{AlRegex, Float, Identifier, TypeVar};
+use inkwell::values::FunctionValue;
 
-use crate::inference_pass::{Binding, InferencePass};
+use crate::{
+    codegen::CodegenContext,
+    inference_pass::{Binding, InferencePass},
+};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct DocumentHIR {
@@ -281,6 +285,7 @@ pub struct FnDeclHIR {
     pub body: Option<BlockHIR>,
 
     pub builtin: Option<usize>,
+    pub gen_builtin: Option<fn(ctx: &mut CodegenContext, f: FunctionValue)>,
 }
 
 /// The type of a single function

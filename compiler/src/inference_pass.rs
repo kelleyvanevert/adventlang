@@ -91,6 +91,7 @@ impl InferencePass {
                 params: vec![],
                 body: None,
                 builtin: None,
+                gen_builtin: None,
             },
         );
 
@@ -253,6 +254,7 @@ impl InferencePass {
             params: params_hir.iter().map(|p| p.0.clone()).collect(),
             body: Some(body),
             builtin: None,
+            gen_builtin: None,
         }
     }
 
