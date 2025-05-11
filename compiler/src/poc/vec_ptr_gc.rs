@@ -2,6 +2,7 @@ use std::{
     alloc::{Layout, alloc_zeroed, dealloc},
     cell::RefCell,
     ffi::CStr,
+    hash::{DefaultHasher, Hasher},
 };
 
 use fxhash::FxHashSet;
@@ -102,16 +103,16 @@ pub struct AlVec<T> {
     vec: Vec<T>, // not really 100% ffi safe .. but, it's 24 bytes and works fine for now
 }
 
-pub extern "C" fn al_create_vec(element_size_bits: u64, should_gc_elements: bool) -> *mut () {
+pub extern "C" fn al_create_vec(element_size_bits: u64, ptr_elements: bool) -> *mut () {
     assert!(
         element_size_bits == 32 || element_size_bits == 64,
         "Cannot create vec for elements of size {element_size_bits}"
     );
 
-    let info = (AL_VEC as u64) | (element_size_bits << 8) | ((should_gc_elements as u64) << 16);
+    let info = (AL_VEC as u64) | (element_size_bits << 8) | ((ptr_elements as u64) << 16);
 
     // println!(
-    //     "creating AlVec -- {should_gc_elements} -- {element_size_bits:#x} -- {:#x}",
+    //     "creating AlVec -- {ptr_elements} -- {element_size_bits:#x} -- {:#x}",
     //     info
     // );
 
@@ -209,12 +210,80 @@ pub extern "C" fn al_print(strptr: *mut u64) {
     });
 }
 
+fn al_hash_collect<H: Hasher>(ptr: *mut (), state: &mut H) {
+    match determine_heap_object_type(ptr) {
+        HeapObjectType::AlClosure { .. } => {
+            unreachable!("hashing closures should ever happen")
+        }
+        HeapObjectType::AlStr { ptr } => {
+            using_al_str(ptr as *mut u64, |str| {
+                state.write(str.as_bytes());
+            });
+        }
+        HeapObjectType::AlVec {
+            ptr,
+            element_size: 64,
+            ptr_elements: false,
+        } => {
+            using_al_vec(ptr as *mut u64, |contents: &[u64]| {
+                for &el in contents {
+                    state.write_u64(el);
+                }
+            });
+        }
+        HeapObjectType::AlVec {
+            ptr,
+            element_size: 32,
+            ptr_elements: false,
+        } => {
+            using_al_vec(ptr as *mut u64, |contents: &[u32]| {
+                for &el in contents {
+                    state.write_u32(el);
+                }
+            });
+        }
+        HeapObjectType::AlVec {
+            ptr,
+            element_size: 8,
+            ptr_elements: false,
+        } => {
+            using_al_vec(ptr as *mut u64, |contents: &[u8]| {
+                for &el in contents {
+                    state.write_u8(el);
+                }
+            });
+        }
+        HeapObjectType::AlVec {
+            ptr,
+            element_size: 64,
+            ptr_elements: true,
+        } => {
+            using_al_vec(ptr as *mut u64, |contents: &[u64]| {
+                for &el in contents {
+                    al_hash_collect(el as *mut (), state);
+                }
+            });
+        }
+        o => {
+            unreachable!("cannot hash unknown heap object type: {o:?}")
+        }
+    }
+}
+
+pub extern "C" fn al_hash_heap_object(ptr: *mut ()) -> u64 {
+    let mut hasher = DefaultHasher::new();
+
+    al_hash_collect(ptr, &mut hasher);
+
+    hasher.finish()
+}
+
 #[derive(Debug, Clone, Copy)]
 enum HeapObjectType {
     AlVec {
         ptr: *const u8,
         element_size: u8,
-        should_gc_elements: bool,
+        ptr_elements: bool,
     },
     AlClosure {
         ptr: *const u8,
@@ -236,12 +305,12 @@ fn determine_heap_object_type(ptr: *mut ()) -> HeapObjectType {
     match ty {
         AL_VEC => {
             let element_size = unsafe { *(ptr.add(1)) };
-            let should_gc_elements = (unsafe { *(ptr.add(2)) }) == 1;
+            let ptr_elements = (unsafe { *(ptr.add(2)) }) == 1;
 
             HeapObjectType::AlVec {
                 ptr,
                 element_size,
-                should_gc_elements,
+                ptr_elements,
             }
         }
         AL_CLOSURE => {
@@ -290,10 +359,10 @@ pub extern "C" fn al_gc() {
             HeapObjectType::AlVec {
                 ptr,
                 element_size,
-                should_gc_elements,
+                ptr_elements,
             } => {
-                println!("    it's a vector, {element_size}, {should_gc_elements}");
-                if !should_gc_elements {
+                println!("    it's a vector, {element_size}, {ptr_elements}");
+                if !ptr_elements {
                     continue;
                 }
 
@@ -441,6 +510,7 @@ declare i8 @al_str_in_strvec(ptr, ptr)
 declare ptr @al_str_lines(ptr)
 declare i64 @al_str_len(ptr)
 declare void @al_print(ptr)
+declare i64 @al_hash_heap_object(ptr)
 
 declare void @al_gcroot(ptr)
 declare void @al_gcunroot(ptr)
@@ -698,6 +768,11 @@ define i32 @main() {
 
     execution_engine
         .add_global_mapping(&module.get_function("al_print").unwrap(), al_print as usize);
+
+    execution_engine.add_global_mapping(
+        &module.get_function("al_hash_heap_object").unwrap(),
+        al_hash_heap_object as usize,
+    );
 
     execution_engine.add_global_mapping(
         &module.get_function("al_gcroot").unwrap(),
