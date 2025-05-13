@@ -1,4 +1,5 @@
 #![feature(box_patterns)]
+#![feature(iterator_try_collect)]
 
 use std::fmt::Display;
 
@@ -130,19 +131,77 @@ impl Display for DeclarePattern {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
+pub enum AssignLocationExpr {
+    Id(Identifier),           // assign fn/closure locals
+    Index(Expr, Expr),        // assign list/tuple elements
+    Member(Expr, Identifier), // assign struct/object members
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
 pub enum AssignPattern {
-    Id(Identifier),
-    Index(Box<AssignPattern>, Expr),
+    Location(AssignLocationExpr), // single assignment
     List {
+        // syntactic sugar for "destructure, then assign"
         elements: Vec<AssignPattern>,
-        // TODO maybe also add rest spread
-        //   AFTER I also add rest spread to list literal exprs
+        splat: Option<Box<AssignPattern>>,
     },
     Tuple {
+        // syntactic sugar for "destructure, then assign"
         elements: Vec<AssignPattern>,
-        // TODO maybe also add rest spread
-        //   AFTER I also add rest spread to tuple literal exprs
     },
+}
+
+impl TryFrom<Expr> for AssignLocationExpr {
+    type Error = ();
+
+    fn try_from(expr: Expr) -> Result<Self, Self::Error> {
+        match expr {
+            Expr::Variable(id) => Ok(AssignLocationExpr::Id(id.clone())),
+            Expr::Index {
+                expr,
+                coalesce: false,
+                index,
+            } => Ok(AssignLocationExpr::Index(
+                expr.as_ref().clone(),
+                index.as_ref().clone(),
+            )),
+            Expr::Member {
+                expr,
+                coalesce: false,
+                member,
+            } => Ok(AssignLocationExpr::Member(
+                expr.as_ref().clone(),
+                member.clone(),
+            )),
+            _ => Err(()),
+        }
+    }
+}
+
+impl TryFrom<Expr> for AssignPattern {
+    type Error = ();
+
+    fn try_from(expr: Expr) -> Result<Self, Self::Error> {
+        match expr {
+            Expr::ListLiteral { elements, splat } => {
+                let elements = elements
+                    .into_iter()
+                    .map(|el| AssignPattern::try_from(el))
+                    .try_collect()?;
+
+                let splat = splat
+                    .map(|box expr| AssignPattern::try_from(expr))
+                    .transpose()
+                    .map(|a| a.map(Box::new))?;
+
+                Ok(AssignPattern::List { elements, splat })
+            }
+            Expr::TupleLiteral { elements } => {
+                todo!("implement assignpattern-try-from-expr")
+            }
+            _ => AssignLocationExpr::try_from(expr).map(AssignPattern::Location),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
@@ -234,6 +293,11 @@ pub enum Expr {
         coalesce: bool,
         index: Box<Expr>,
     },
+    Member {
+        expr: Box<Expr>,
+        coalesce: bool,
+        member: Identifier,
+    },
     Invocation {
         expr: Box<Expr>,
         postfix: bool,
@@ -272,24 +336,19 @@ pub enum Expr {
     },
 }
 
-impl From<AssignPattern> for Expr {
-    fn from(pattern: AssignPattern) -> Self {
-        match pattern {
-            AssignPattern::Id(id) => Expr::Variable(id),
-            AssignPattern::Index(box location, index) => Expr::Index {
-                expr: Expr::from(location).into(),
+impl From<AssignLocationExpr> for Expr {
+    fn from(location: AssignLocationExpr) -> Self {
+        match location {
+            AssignLocationExpr::Id(id) => Expr::Variable(id),
+            AssignLocationExpr::Index(container, index) => Expr::Index {
+                expr: container.into(),
                 coalesce: false,
                 index: index.into(),
             },
-            // AssignPattern::Index(_, None) => {
-            //     panic!("can't form expr from list push index pattern")
-            // }
-            AssignPattern::List { elements } => Expr::ListLiteral {
-                elements: elements.into_iter().map(Expr::from).collect(),
-                splat: None,
-            },
-            AssignPattern::Tuple { elements } => Expr::TupleLiteral {
-                elements: elements.into_iter().map(Expr::from).collect(),
+            AssignLocationExpr::Member(container, member) => Expr::Member {
+                expr: container.into(),
+                coalesce: false,
+                member,
             },
         }
     }

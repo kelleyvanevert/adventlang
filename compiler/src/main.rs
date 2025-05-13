@@ -26,14 +26,11 @@ fn main() {
     let code = "
         fn bla() {
             let a = 6
-            let b = 4
-            b
-
-            let [[a, b], ..c] = 5
-            b = 7
-            a + b
+            a = a
+            let a = 5
+            a = a
         }
-    
+
         print(42 + 1)
     ";
 

@@ -3,7 +3,7 @@
 
 use std::str::FromStr;
 
-use ast::{DictKey, FnDecl, FnType};
+use ast::{AssignLocationExpr, DictKey, FnDecl, FnType};
 use either::Either;
 use regex::Regex;
 
@@ -1195,39 +1195,6 @@ fn typespec(s: State) -> ParseResult<State, Type> {
     type_union_stack.parse(s)
 }
 
-fn assign_pattern(s: State) -> ParseResult<State, AssignPattern> {
-    alt((
-        map(
-            seq((
-                identifier,
-                many0(delimited(
-                    seq((ws0, tag("["), ws0)),
-                    constrained(false, expr),
-                    seq((ws0, tag("]"))),
-                )),
-            )),
-            |(id, indexes)| {
-                let mut pattern = AssignPattern::Id(id);
-
-                for index in indexes {
-                    pattern = AssignPattern::Index(pattern.into(), index);
-                }
-
-                pattern
-            },
-        ),
-        map(
-            listy("[", assign_pattern, assign_pattern, "]"),
-            |(elements, _)| AssignPattern::List { elements },
-        ),
-        map(
-            listy("(", assign_pattern, assign_pattern, ")"),
-            |(elements, _)| AssignPattern::Tuple { elements },
-        ),
-    ))
-    .parse(s)
-}
-
 fn declarable(s: State) -> ParseResult<State, Declarable> {
     map(
         seq((
@@ -1352,40 +1319,41 @@ fn declare_stmt(s: State) -> ParseResult<State, Stmt> {
     .parse(s)
 }
 
-fn assign_stmt(s: State) -> ParseResult<State, Stmt> {
-    map(
-        seq((
-            assign_pattern,
-            ws0,
-            optional(alt((
-                tag("+"),
-                tag("*"),
-                tag("^"),
-                tag("-"),
-                tag("/"),
-                tag("%"),
-                tag("<<"),
-                tag("??"),
-            ))),
-            tag("="),
-            ws0,
-            constrained(false, expr),
-        )),
-        |(location, _, op, _, _, expr)| Stmt::Assign {
-            pattern: location.clone(),
-            expr: match op {
-                None => expr.into(),
-                Some(op) => Expr::BinaryExpr {
-                    left: Expr::from(location).into(),
-                    op: op.into(),
-                    right: expr.into(),
-                }
-                .into(),
-            },
-        },
-    )
-    .parse(s)
-}
+// fn assign_stmt(s: State) -> ParseResult<State, Stmt> {
+//     map(
+//         seq((
+//             assign_pattern,
+//             ws0,
+//             optional(alt((
+//                 tag("+"),
+//                 tag("*"),
+//                 tag("^"),
+//                 tag("-"),
+//                 tag("/"),
+//                 tag("%"),
+//                 tag("<<"),
+//                 tag("??"),
+//             ))),
+//             tag("="),
+//             ws0,
+//             constrained(false, expr),
+//         )),
+//         // h[3] *= 7
+//         |(location, _, op, _, _, expr)| Stmt::Assign {
+//             pattern: location.clone(),
+//             expr: match op {
+//                 None => expr.into(),
+//                 Some(op) => Expr::BinaryExpr {
+//                     left: Expr::from(location).into(),
+//                     op: op.into(),
+//                     right: expr.into(),
+//                 }
+//                 .into(),
+//             },
+//         },
+//     )
+//     .parse(s)
+// }
 
 fn stmt(s: State) -> ParseResult<State, Stmt> {
     alt((
@@ -1393,10 +1361,28 @@ fn stmt(s: State) -> ParseResult<State, Stmt> {
         break_stmt,
         return_stmt,
         declare_stmt,
-        assign_stmt,
-        map(constrained(false, expr), |expr| Stmt::Expr {
-            expr: expr.into(),
-        }),
+        // I'm optimizing the assignment expression parsing here, by combining it with the regular expression-stmt. First, the expression is parsed, and then it's determined whether it's an assignment.
+        // This works, because assignment patterns are a strict syntactic superset of expressions, so we can convert with `try_from`.
+        // This might not work though, if assignment-stmts should better be parsed with constrained expression parsing on the left-hand side of the `=`.
+        // We'll see...
+        map_opt(
+            seq((
+                constrained(false, expr), //
+                optional(preceded(
+                    seq((ws0, tag("="), ws0)),
+                    constrained(false, expr),
+                )),
+            )),
+            |(le, ri)| match ri {
+                None => Some(Stmt::Expr { expr: le.into() }),
+                Some(ri) => AssignPattern::try_from(le)
+                    .ok()
+                    .map(|pattern| Stmt::Assign {
+                        pattern,
+                        expr: ri.into(),
+                    }),
+            },
+        ),
     ))
     .parse(s)
 }
@@ -2545,14 +2531,14 @@ let example_input = r"
             then: Block {
                 items: vec![],
                 stmts: vec![Stmt::Assign {
-                    pattern: AssignPattern::Id(id("n")),
+                    pattern: AssignPattern::Location(AssignLocationExpr::Id(id("n"))),
                     expr: Expr::Int(0).into(),
                 }],
             },
             els: Some(Block {
                 items: vec![],
                 stmts: vec![Stmt::Assign {
-                    pattern: AssignPattern::Id(id("n")),
+                    pattern: AssignPattern::Location(AssignLocationExpr::Id(id("n"))),
                     expr: Expr::BinaryExpr {
                         left: Expr::Variable(id("n")).into(),
                         op: "+".into(),
@@ -2651,7 +2637,7 @@ let example_input = r"
                     then: Block {
                         items: vec![],
                         stmts: vec![Stmt::Assign {
-                            pattern: AssignPattern::Id(id("n")),
+                            pattern: AssignPattern::Location(AssignLocationExpr::Id(id("n"))),
                             expr: Expr::Int(0).into(),
                         }],
                     },
@@ -2695,7 +2681,7 @@ let example_input = r"
                     items: vec![],
                     stmts: vec![
                         Stmt::Assign {
-                            pattern: AssignPattern::Id(id("h")),
+                            pattern: AssignPattern::Location(AssignLocationExpr::Id(id("h"))),
                             expr: binary("+", var("h"), Expr::Int(7)).into()
                         },
                         Stmt::Expr {
@@ -2725,7 +2711,7 @@ let example_input = r"
                             expr: Expr::Int(7).into()
                         },
                         Stmt::Assign {
-                            pattern: AssignPattern::Id(id("kelley")),
+                            pattern: AssignPattern::Location(AssignLocationExpr::Id(id("kelley"))),
                             expr: Expr::Int(712).into()
                         },
                         Stmt::Expr {
@@ -2933,7 +2919,7 @@ let example_input = r"
                         body: Block {
                             items: vec![],
                             stmts: vec![Stmt::Assign {
-                                pattern: AssignPattern::Id(id("h")),
+                                pattern: AssignPattern::Location(AssignLocationExpr::Id(id("h"))),
                                 expr: Expr::Int(1).into()
                             }]
                         }

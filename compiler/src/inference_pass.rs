@@ -1,8 +1,8 @@
 use std::fmt::Display;
 
 use ast::{
-    Argument, AssignPattern, Block, Declarable, DeclareGuardExpr, DeclarePattern, Document, Expr,
-    FnDecl, Identifier, Item, Stmt, StrLiteralPiece, TypeVar,
+    Argument, AssignLocationExpr, AssignPattern, Block, Declarable, DeclareGuardExpr,
+    DeclarePattern, Document, Expr, FnDecl, Identifier, Item, Stmt, StrLiteralPiece, TypeVar,
 };
 use fxhash::FxHashMap;
 
@@ -124,27 +124,8 @@ impl InferencePass {
         let mut pass = Self {
             fns: vec![],
             next_var_id: 0,
-            // builtins: FxHashMap::default(),
             doc: None,
         };
-
-        // pass.add_fn_decl(
-        //     0,
-        //     &"main".into(),
-        //     FnDeclHIR {
-        //         name: Some("<root>".into()),
-        //         ty: FnTypeHIR {
-        //             generics: vec![],
-        //             params: vec![],
-        //             ret: TypeHIR::Nil.into(),
-        //         },
-        //         params: vec![],
-        //         locals: vec![],
-        //         body: None,
-        //         builtin: None,
-        //         gen_builtin: None,
-        //     },
-        // );
 
         let mut root_scope = Scope::new(0);
 
@@ -176,28 +157,6 @@ impl InferencePass {
     pub fn get_fn_ty(&self, fn_id: usize) -> &FnTypeHIR {
         &self.fns[fn_id].ty
     }
-
-    // fn add_fn_decl(&mut self, scope: &mut Scope, name: &Identifier, decl: FnDeclHIR) -> usize {
-    //     // let fn_id = self.fns.len();
-    //     // self.fns.push(decl);
-
-    //     // let scope = self.get_fn_scope_mut(scope_id);
-
-    //     // if let Some(Binding::Var { .. }) = scope.bindings.get_mut(name) {
-    //     //     panic!("TODO: handle adding a named fn that shadows a local var");
-    //     // } else if let Some(Binding::NamedFn { fn_ids }) = scope.bindings.get_mut(name) {
-    //     //     fn_ids.push(fn_id);
-    //     // } else {
-    //     //     scope.bindings.insert(
-    //     //         name.clone(),
-    //     //         Binding::NamedFn {
-    //     //             fn_ids: vec![fn_id],
-    //     //         },
-    //     //     );
-    //     // }
-
-    //     // fn_id
-    // }
 
     fn process_block(&mut self, scope: &mut Scope, block: &Block) -> BlockHIR {
         for item in &block.items {
@@ -496,7 +455,9 @@ impl InferencePass {
                     then: Block {
                         items: vec![],
                         stmts: vec![Stmt::Assign {
-                            pattern: AssignPattern::Id(source_id.clone()),
+                            pattern: AssignPattern::Location(AssignLocationExpr::Id(
+                                source_id.clone(),
+                            )),
                             expr: fallback_expr.clone().into(),
                         }],
                     },
@@ -593,9 +554,12 @@ impl InferencePass {
                     TypeHIR::Nil
                 }
             }
-            Stmt::Assign { pattern, expr } => {
-                match pattern {
-                    AssignPattern::Id(id) => {
+            Stmt::Assign {
+                pattern: AssignPattern::Location(location),
+                expr,
+            } => {
+                match location {
+                    AssignLocationExpr::Id(id) => {
                         let Some(access) = scope.bindings.get(id) else {
                             panic!("variable {id} not found in scope");
                         };
@@ -615,15 +579,44 @@ impl InferencePass {
                             expr: expr_hir.into(),
                         });
                     }
-                    AssignPattern::Index(pattern, index_expr) => {
-                        // TODO
+                    AssignLocationExpr::Index(container, index) => {
+                        processed.push(StmtHIR::Expr {
+                            expr: self
+                                .process_expr(
+                                    scope,
+                                    &Expr::Invocation {
+                                        expr: Expr::Variable("op[]=".into()).into(),
+                                        postfix: false,
+                                        coalesce: false,
+                                        args: vec![
+                                            Argument {
+                                                name: Some("container".into()),
+                                                expr: container.clone(),
+                                            },
+                                            Argument {
+                                                name: Some("index".into()),
+                                                expr: index.clone(),
+                                            },
+                                            Argument {
+                                                name: Some("element".into()),
+                                                expr: expr.as_ref().clone(),
+                                            },
+                                        ],
+                                    },
+                                )
+                                .into(),
+                        });
                     }
-
-                    //
-                    _ => todo!("implement lowering of assign stmt"),
+                    AssignLocationExpr::Member(container, id) => {
+                        // TODO: figure out index of member `id` in struct/object type
+                        todo!("lower member assignment")
+                    }
                 }
 
                 TypeHIR::Nil
+            }
+            Stmt::Assign { pattern, expr } => {
+                todo!("implement lowering of sugared assign stmt");
             }
             Stmt::Expr { expr } => {
                 let expr_hir = self.process_expr(scope, expr);
@@ -815,66 +808,72 @@ impl InferencePass {
             }
 
             // lower
-            Expr::BinaryExpr { left, op, right } => self.process_expr(
-                scope,
-                &Expr::Invocation {
-                    expr: Expr::Variable(Identifier(format!("op{op}").into())).into(),
-                    postfix: false,
-                    coalesce: false,
-                    args: vec![
-                        Argument {
-                            name: None,
-                            expr: left.as_ref().clone(),
-                        },
-                        Argument {
-                            name: None,
-                            expr: right.as_ref().clone(),
-                        },
-                    ],
-                },
-            ),
+            Expr::BinaryExpr { left, op, right } => {
+                return self.process_expr(
+                    scope,
+                    &Expr::Invocation {
+                        expr: Expr::Variable(Identifier(format!("op{op}").into())).into(),
+                        postfix: false,
+                        coalesce: false,
+                        args: vec![
+                            Argument {
+                                name: None,
+                                expr: left.as_ref().clone(),
+                            },
+                            Argument {
+                                name: None,
+                                expr: right.as_ref().clone(),
+                            },
+                        ],
+                    },
+                );
+            }
 
             // lower
-            Expr::UnaryExpr { expr, op } => self.process_expr(
-                scope,
-                &Expr::Invocation {
-                    expr: Expr::Variable(Identifier(format!("op{op}").into())).into(),
-                    postfix: false,
-                    coalesce: false,
-                    args: vec![Argument {
-                        name: None,
-                        expr: expr.as_ref().clone(),
-                    }],
-                },
-            ),
+            Expr::UnaryExpr { expr, op } => {
+                return self.process_expr(
+                    scope,
+                    &Expr::Invocation {
+                        expr: Expr::Variable(Identifier(format!("op{op}").into())).into(),
+                        postfix: false,
+                        coalesce: false,
+                        args: vec![Argument {
+                            name: None,
+                            expr: expr.as_ref().clone(),
+                        }],
+                    },
+                );
+            }
 
             // lower
             Expr::Index {
                 expr,
                 coalesce,
                 index,
-            } => self.process_expr(
-                scope,
-                &Expr::Invocation {
-                    expr: Expr::Variable(Identifier("op[]".into())).into(),
-                    postfix: false,
-                    coalesce: false,
-                    args: vec![
-                        Argument {
-                            name: Some("expr".into()),
-                            expr: expr.as_ref().clone(),
-                        },
-                        Argument {
-                            name: Some("index".into()),
-                            expr: index.as_ref().clone(),
-                        },
-                        Argument {
-                            name: Some("coalesce".into()),
-                            expr: Expr::Bool(*coalesce),
-                        },
-                    ],
-                },
-            ),
+            } => {
+                return self.process_expr(
+                    scope,
+                    &Expr::Invocation {
+                        expr: Expr::Variable(Identifier("op[]".into())).into(),
+                        postfix: false,
+                        coalesce: false,
+                        args: vec![
+                            Argument {
+                                name: Some("expr".into()),
+                                expr: expr.as_ref().clone(),
+                            },
+                            Argument {
+                                name: Some("index".into()),
+                                expr: index.as_ref().clone(),
+                            },
+                            Argument {
+                                name: Some("coalesce".into()),
+                                expr: Expr::Bool(*coalesce),
+                            },
+                        ],
+                    },
+                );
+            }
 
             Expr::Invocation {
                 expr,

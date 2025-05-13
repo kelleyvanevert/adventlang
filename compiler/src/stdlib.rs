@@ -113,6 +113,19 @@ pub fn get_stdlib() -> Vec<FnDeclHIR> {
             gen_builtin: None,
         },
         FnDeclHIR {
+            name: Some("op[]=".into()),
+            ty: FnTypeHIR {
+                generics: vec![tv("T")],
+                ret: TypeHIR::Nil.into(),
+                params: vec![TypeHIR::List(tv_ty("T").into()), TypeHIR::Int, tv_ty("T")],
+            },
+            locals: vec![],
+            params: vec![id("list"), id("index"), id("element")],
+            body: None,
+            builtin: None,
+            gen_builtin: None,
+        },
+        FnDeclHIR {
             name: Some("len".into()),
             ty: FnTypeHIR {
                 generics: vec![tv("T")],
