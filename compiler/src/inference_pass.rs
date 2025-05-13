@@ -8,8 +8,8 @@ use fxhash::FxHashMap;
 
 use crate::{
     hir::{
-        AccessHIR, ArgumentHIR, BlockHIR, DocumentHIR, ExprHIR, FnDeclHIR, FnTypeHIR, StmtHIR,
-        StrLiteralPieceHIR, TypeHIR,
+        AccessHIR, ArgumentHIR, BlockHIR, DocumentHIR, ExprHIR, FnDeclHIR, FnTypeHIR, LocalAccess,
+        StmtHIR, StrLiteralPieceHIR, TypeHIR,
     },
     stdlib::get_stdlib,
 };
@@ -54,7 +54,7 @@ impl Scope {
         subscope.fn_id = fn_id;
 
         for (_, access) in &mut subscope.bindings {
-            if let AccessHIR::Var { ancestor_num, .. } = access {
+            if let AccessHIR::Var(LocalAccess { ancestor_num, .. }) = access {
                 *ancestor_num += 1;
             }
         }
@@ -62,20 +62,23 @@ impl Scope {
         subscope
     }
 
-    fn declare(&mut self, pass: &mut InferencePass, id: Identifier, ty: TypeHIR) {
+    fn declare(&mut self, pass: &mut InferencePass, id: Identifier, ty: TypeHIR) -> LocalAccess {
         let local_index = pass.fns[self.fn_id].locals.len();
 
         pass.fns[self.fn_id].locals.push(ty);
 
-        self.bindings.insert(
-            id.clone(),
-            AccessHIR::Var {
-                ancestor_num: 0,
-                fn_id: self.fn_id,
-                local_index,
-                id,
-            },
-        );
+        let local_access = LocalAccess {
+            ancestor_num: 0,
+            fn_id: self.fn_id,
+            local_index,
+            id: id.clone(),
+        };
+
+        let access = AccessHIR::Var(local_access.clone());
+
+        self.bindings.insert(id.clone(), access.clone());
+
+        local_access
     }
 
     fn declare_named_fn(&mut self, id: Identifier, fn_id: usize) {
@@ -293,7 +296,8 @@ impl InferencePass {
             },
         );
 
-        self.fns[fn_id].ty.ret = body.ty.into();
+        self.fns[fn_id].ty.ret = body.ty.clone().into();
+        self.fns[fn_id].body = Some(body);
 
         // TODO typecheck that the original decl's `ret` matches, if specified
         // `ret ?= body.ty`
@@ -542,10 +546,10 @@ impl InferencePass {
                     let expr_hir = self.process_expr(scope, expr);
                     let ty = expr_hir.ty(&self);
 
-                    scope.declare(self, id.clone(), ty.clone());
+                    let local_access = scope.declare(self, id.clone(), ty.clone());
 
                     processed.push(StmtHIR::Declare {
-                        id: id.clone(),
+                        local_access,
                         expr: expr_hir.into(),
                     });
 

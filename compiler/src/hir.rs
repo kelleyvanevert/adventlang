@@ -29,7 +29,7 @@ pub enum StmtHIR {
         expr: Option<ExprHIR>,
     },
     Declare {
-        id: Identifier,
+        local_access: LocalAccess,
         expr: Box<ExprHIR>,
     },
     Assign {
@@ -74,20 +74,21 @@ pub enum DictKeyHIR {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalAccess {
+    pub id: Identifier, // for debugging
+
+    // how many times to access the parent (lexical) fn scope to get there?
+    // 0 = current fn's scope, etc..
+    pub ancestor_num: usize,
+
+    pub fn_id: usize,
+    pub local_index: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AccessHIR {
-    Var {
-        id: Identifier, // for debugging
-
-        // how many times to access the parent (lexical) fn scope to get there?
-        // 0 = current fn's scope, etc..
-        ancestor_num: usize,
-
-        fn_id: usize,
-        local_index: usize,
-    },
-    Fn {
-        overload_fn_ids: Vec<usize>,
-    },
+    Var(LocalAccess),
+    Fn { overload_fn_ids: Vec<usize> },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -213,9 +214,9 @@ impl ExprHIR {
             Self::Access(AccessHIR::Fn { overload_fn_ids }) => TypeHIR::Fn {
                 overload_fn_ids: overload_fn_ids.clone(),
             },
-            Self::Access(AccessHIR::Var {
+            Self::Access(AccessHIR::Var(LocalAccess {
                 local_index, fn_id, ..
-            }) => {
+            })) => {
                 return pass.get_fn_scope(*fn_id).locals[*local_index].clone();
             }
             Self::Invocation {

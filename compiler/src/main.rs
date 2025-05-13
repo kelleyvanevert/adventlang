@@ -24,6 +24,15 @@ fn main() {
     // crate::poc::vec_ptr_gc::main();
 
     let code = "
+        fn bla() {
+            let a = 6
+            let b = 4
+            b
+
+            let [a, b, ..c] = 5
+            a + b
+        }
+    
         print(42 + 1)
     ";
 

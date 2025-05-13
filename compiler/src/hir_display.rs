@@ -3,8 +3,8 @@ use std::fmt::{Display, Write};
 use indenter::indented;
 
 use crate::hir::{
-    AccessHIR, ArgumentHIR, BlockHIR, DocumentHIR, ExprHIR, FnDeclHIR, FnTypeHIR, StmtHIR,
-    StrLiteralPieceHIR, TypeHIR,
+    AccessHIR, ArgumentHIR, BlockHIR, DocumentHIR, ExprHIR, FnDeclHIR, FnTypeHIR, LocalAccess,
+    StmtHIR, StrLiteralPieceHIR, TypeHIR,
 };
 
 impl Display for DocumentHIR {
@@ -160,10 +160,23 @@ impl Display for StmtHIR {
             }
             StmtHIR::Return { expr: None } => write!(f, "return"),
             StmtHIR::Return { expr: Some(expr) } => write!(f, "return {expr}"),
-            StmtHIR::Declare { id, expr } => write!(f, "let {id} = {expr}"),
+            StmtHIR::Declare { local_access, expr } => write!(f, "let {local_access} = {expr}"),
             StmtHIR::Assign { .. } => write!(f, "<assignment>"),
             StmtHIR::Expr { expr } => write!(f, "{expr}"),
         }
+    }
+}
+
+impl Display for LocalAccess {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let LocalAccess {
+            id,
+            fn_id,
+            local_index,
+            ..
+        } = self;
+
+        write!(f, "{id}({fn_id},{local_index})")
     }
 }
 
@@ -212,8 +225,8 @@ impl Display for ExprHIR {
             ExprHIR::Access(AccessHIR::Fn { overload_fn_ids }) => {
                 write!(f, "fn({:?})", overload_fn_ids)
             }
-            ExprHIR::Access(AccessHIR::Var { id, .. }) => {
-                write!(f, "{id}")
+            ExprHIR::Access(AccessHIR::Var(local_access)) => {
+                write!(f, "{local_access}")
             } // // ===
             // // Invocation
             // // ===
