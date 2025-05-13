@@ -160,8 +160,8 @@ impl Display for StmtHIR {
             }
             StmtHIR::Return { expr: None } => write!(f, "return"),
             StmtHIR::Return { expr: Some(expr) } => write!(f, "return {expr}"),
-            StmtHIR::Declare { local_access, expr } => write!(f, "let {local_access} = {expr}"),
-            StmtHIR::Assign { .. } => write!(f, "<assignment>"),
+            StmtHIR::AssignLocal { local_access, expr } => write!(f, "let {local_access} = {expr}"),
+            // StmtHIR::Assign { .. } => write!(f, "<assignment>"),
             StmtHIR::Expr { expr } => write!(f, "{expr}"),
         }
     }

@@ -132,7 +132,7 @@ impl Display for DeclarePattern {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
 pub enum AssignPattern {
     Id(Identifier),
-    Index(Box<AssignPattern>, Option<Box<Expr>>),
+    Index(Box<AssignPattern>, Expr),
     List {
         elements: Vec<AssignPattern>,
         // TODO maybe also add rest spread
@@ -276,14 +276,14 @@ impl From<AssignPattern> for Expr {
     fn from(pattern: AssignPattern) -> Self {
         match pattern {
             AssignPattern::Id(id) => Expr::Variable(id),
-            AssignPattern::Index(box location, Some(index)) => Expr::Index {
+            AssignPattern::Index(box location, index) => Expr::Index {
                 expr: Expr::from(location).into(),
                 coalesce: false,
-                index,
+                index: index.into(),
             },
-            AssignPattern::Index(_, None) => {
-                panic!("can't form expr from list push index pattern")
-            }
+            // AssignPattern::Index(_, None) => {
+            //     panic!("can't form expr from list push index pattern")
+            // }
             AssignPattern::List { elements } => Expr::ListLiteral {
                 elements: elements.into_iter().map(Expr::from).collect(),
                 splat: None,

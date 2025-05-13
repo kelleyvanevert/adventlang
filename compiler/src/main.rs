@@ -29,7 +29,8 @@ fn main() {
             let b = 4
             b
 
-            let [a, b, ..c] = 5
+            let [[a, b], ..c] = 5
+            b = 7
             a + b
         }
     

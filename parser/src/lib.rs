@@ -1202,7 +1202,7 @@ fn assign_pattern(s: State) -> ParseResult<State, AssignPattern> {
                 identifier,
                 many0(delimited(
                     seq((ws0, tag("["), ws0)),
-                    optional(constrained(false, expr)),
+                    constrained(false, expr),
                     seq((ws0, tag("]"))),
                 )),
             )),
@@ -1210,7 +1210,7 @@ fn assign_pattern(s: State) -> ParseResult<State, AssignPattern> {
                 let mut pattern = AssignPattern::Id(id);
 
                 for index in indexes {
-                    pattern = AssignPattern::Index(pattern.into(), index.map(Box::new));
+                    pattern = AssignPattern::Index(pattern.into(), index);
                 }
 
                 pattern

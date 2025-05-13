@@ -28,14 +28,14 @@ pub enum StmtHIR {
     Return {
         expr: Option<ExprHIR>,
     },
-    Declare {
+    AssignLocal {
         local_access: LocalAccess,
         expr: Box<ExprHIR>,
     },
-    Assign {
-        pattern: AssignPatternHIR,
-        expr: Box<ExprHIR>,
-    },
+    // AssignInList {
+    //     index_access: IndexAccess,
+    //     expr: Box<ExprHIR>,
+    // },
     Expr {
         expr: Box<ExprHIR>,
     }, // ...

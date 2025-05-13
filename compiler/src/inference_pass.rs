@@ -544,11 +544,12 @@ impl InferencePass {
                 } = pattern
                 {
                     let expr_hir = self.process_expr(scope, expr);
+
                     let ty = expr_hir.ty(&self);
 
                     let local_access = scope.declare(self, id.clone(), ty.clone());
 
-                    processed.push(StmtHIR::Declare {
+                    processed.push(StmtHIR::AssignLocal {
                         local_access,
                         expr: expr_hir.into(),
                     });
@@ -592,9 +593,37 @@ impl InferencePass {
                     TypeHIR::Nil
                 }
             }
-            Stmt::Assign { .. } => {
-                //
-                todo!("process_stmt(assign)")
+            Stmt::Assign { pattern, expr } => {
+                match pattern {
+                    AssignPattern::Id(id) => {
+                        let Some(access) = scope.bindings.get(id) else {
+                            panic!("variable {id} not found in scope");
+                        };
+
+                        let AccessHIR::Var(local_access) = access else {
+                            // haha, quicky :P
+                            // I guess this is a result of how I'm dealing with fns, but .. it also feels a bit weird
+                            panic!("cannot assign to function");
+                        };
+
+                        let local_access = local_access.clone();
+
+                        let expr_hir = self.process_expr(scope, expr);
+
+                        processed.push(StmtHIR::AssignLocal {
+                            local_access,
+                            expr: expr_hir.into(),
+                        });
+                    }
+                    AssignPattern::Index(pattern, index_expr) => {
+                        // TODO
+                    }
+
+                    //
+                    _ => todo!("implement lowering of assign stmt"),
+                }
+
+                TypeHIR::Nil
             }
             Stmt::Expr { expr } => {
                 let expr_hir = self.process_expr(scope, expr);
