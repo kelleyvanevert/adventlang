@@ -3,7 +3,7 @@
 
 use std::str::FromStr;
 
-use ast::{AssignLocationExpr, DictKey, FnDecl, FnType};
+use ast::{DictKey, FnDecl, FnType};
 use either::Either;
 use regex::Regex;
 
@@ -1570,6 +1570,8 @@ pub fn parse_document(input: &str) -> Option<Document> {
 
 #[cfg(test)]
 mod tests {
+    use ast::AssignLocationExpr;
+
     use super::*;
     use {
         ast::Identifier,
