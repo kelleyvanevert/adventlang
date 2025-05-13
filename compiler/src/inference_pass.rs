@@ -11,36 +11,13 @@ use crate::{
         AccessHIR, ArgumentHIR, BlockHIR, DocumentHIR, ExprHIR, FnDeclHIR, FnTypeHIR, StmtHIR,
         StrLiteralPieceHIR, TypeHIR,
     },
-    stdlib::register_stdlib,
+    stdlib::get_stdlib,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Binding {
     Var { ty: TypeHIR },
     NamedFn { fn_ids: Vec<usize> },
-}
-
-/**
- * Scopes are often just "cheap" lexical scopes: if, while, loop control structures creares new scopes, and just using an extra block also creates a new scope. Technically, each next variable binding creates a new scope as well. (But this last one is not 100% followed technically unless the new binding shadows a previous one in the exact same scope necessitating it.)
- *  And then sometimes it's a function's body scope.
- */
-#[derive(Debug)]
-pub struct Scope {
-    pub parent_scope: Option<usize>,
-    // pub is_fun: Option<usize>,
-    pub belongs_to_fun: usize,
-    pub bindings: FxHashMap<Identifier, Binding>,
-}
-
-impl Scope {
-    pub fn root() -> Scope {
-        Scope {
-            parent_scope: None,
-            // is_fun: None,
-            belongs_to_fun: 0,
-            bindings: FxHashMap::default(),
-        }
-    }
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
@@ -50,11 +27,82 @@ enum DeclareLocation {
     While,
 }
 
+#[derive(Debug, Eq, PartialEq, Clone)]
+struct Scope {
+    ancestors: Vec<usize>,
+    fn_id: usize,
+    bindings: FxHashMap<Identifier, AccessHIR>,
+}
+
+impl Scope {
+    fn new(fn_id: usize) -> Self {
+        Self {
+            ancestors: vec![],
+            fn_id,
+            bindings: FxHashMap::default(),
+        }
+    }
+
+    fn create_subscope(&self) -> Self {
+        self.clone()
+    }
+
+    fn create_fn_subscope(&self, fn_id: usize) -> Self {
+        let mut subscope = self.create_subscope();
+
+        subscope.ancestors.insert(0, subscope.fn_id);
+        subscope.fn_id = fn_id;
+
+        for (_, access) in &mut subscope.bindings {
+            if let AccessHIR::Var { ancestor_num, .. } = access {
+                *ancestor_num += 1;
+            }
+        }
+
+        subscope
+    }
+
+    fn declare(&mut self, pass: &mut InferencePass, id: Identifier, ty: TypeHIR) {
+        let local_index = pass.fns[self.fn_id].locals.len();
+
+        pass.fns[self.fn_id].locals.push(ty);
+
+        self.bindings.insert(
+            id.clone(),
+            AccessHIR::Var {
+                ancestor_num: 0,
+                fn_id: self.fn_id,
+                local_index,
+                id,
+            },
+        );
+    }
+
+    fn declare_named_fn(&mut self, id: Identifier, fn_id: usize) {
+        // 1. add or extend in scope
+        if let Some(AccessHIR::Fn { overload_fn_ids }) = self.bindings.get_mut(&id) {
+            overload_fn_ids.push(fn_id);
+        } else {
+            self.bindings.insert(
+                id,
+                AccessHIR::Fn {
+                    overload_fn_ids: vec![fn_id],
+                },
+            );
+        };
+
+        // 2. update type in locals map to include fn_id
+        // ---?
+        // Actually, no
+        // A named fn is only added to the scope bindings, but will be compiled to a direct function call, not an access to a fn scope local.
+        // There are situations where a pointer to a function is added as a fn scope local, i.e. when a closure is returned from another fn. But that's a different kind of situation.
+    }
+}
+
 pub struct InferencePass {
-    scopes: Vec<Scope>,
     fns: Vec<FnDeclHIR>,
     next_var_id: usize,
-    builtins: FxHashMap<String, usize>,
+    // builtins: FxHashMap<String, usize>,
     doc: Option<DocumentHIR>,
 }
 
@@ -71,34 +119,48 @@ impl Display for InferencePass {
 impl InferencePass {
     pub fn run(doc: &Document) -> Self {
         let mut pass = Self {
-            scopes: vec![Scope::root()],
             fns: vec![],
             next_var_id: 0,
-            builtins: FxHashMap::default(),
+            // builtins: FxHashMap::default(),
             doc: None,
         };
 
-        pass.add_fn_decl(
-            0,
-            &"main".into(),
-            FnDeclHIR {
-                name: Some("<root>".into()),
-                ty: FnTypeHIR {
-                    generics: vec![],
-                    params: vec![],
-                    ret: TypeHIR::Nil.into(),
-                },
-                params: vec![],
-                body: None,
-                builtin: None,
-                gen_builtin: None,
-            },
-        );
+        // pass.add_fn_decl(
+        //     0,
+        //     &"main".into(),
+        //     FnDeclHIR {
+        //         name: Some("<root>".into()),
+        //         ty: FnTypeHIR {
+        //             generics: vec![],
+        //             params: vec![],
+        //             ret: TypeHIR::Nil.into(),
+        //         },
+        //         params: vec![],
+        //         locals: vec![],
+        //         body: None,
+        //         builtin: None,
+        //         gen_builtin: None,
+        //     },
+        // );
 
-        register_stdlib(&mut pass);
+        let mut root_scope = Scope::new(0);
+
+        let stdlib = get_stdlib();
+        for decl in stdlib {
+            let id = decl
+                .name
+                .as_ref()
+                .expect("builtins can only be registered with a name")
+                .clone();
+
+            let fn_id = pass.fns.len();
+            pass.fns.push(decl);
+
+            root_scope.declare_named_fn(id.into(), fn_id);
+        }
 
         pass.doc = Some(DocumentHIR {
-            body: pass.process_block(0, &doc.body),
+            body: pass.process_block(&mut root_scope, &doc.body),
         });
 
         pass
@@ -112,56 +174,38 @@ impl InferencePass {
         &self.fns[fn_id].ty
     }
 
-    fn add_fn_decl(&mut self, scope_id: usize, name: &Identifier, decl: FnDeclHIR) -> usize {
-        let fn_id = self.fns.len();
-        self.fns.push(decl);
+    // fn add_fn_decl(&mut self, scope: &mut Scope, name: &Identifier, decl: FnDeclHIR) -> usize {
+    //     // let fn_id = self.fns.len();
+    //     // self.fns.push(decl);
 
-        let scope = self.get_scope_mut(scope_id);
+    //     // let scope = self.get_fn_scope_mut(scope_id);
 
-        if let Some(Binding::Var { .. }) = scope.bindings.get_mut(name) {
-            panic!("TODO: handle adding a named fn that shadows a local var");
-        } else if let Some(Binding::NamedFn { fn_ids }) = scope.bindings.get_mut(name) {
-            fn_ids.push(fn_id);
-        } else {
-            scope.bindings.insert(
-                name.clone(),
-                Binding::NamedFn {
-                    fn_ids: vec![fn_id],
-                },
-            );
-        }
+    //     // if let Some(Binding::Var { .. }) = scope.bindings.get_mut(name) {
+    //     //     panic!("TODO: handle adding a named fn that shadows a local var");
+    //     // } else if let Some(Binding::NamedFn { fn_ids }) = scope.bindings.get_mut(name) {
+    //     //     fn_ids.push(fn_id);
+    //     // } else {
+    //     //     scope.bindings.insert(
+    //     //         name.clone(),
+    //     //         Binding::NamedFn {
+    //     //             fn_ids: vec![fn_id],
+    //     //         },
+    //     //     );
+    //     // }
 
-        fn_id
-    }
+    //     // fn_id
+    // }
 
-    pub fn register_builtin(&mut self, decl: FnDeclHIR) {
-        let name = decl
-            .name
-            .as_ref()
-            .expect("builtins can only be registered with a name")
-            .clone();
-
-        let fn_id = self.add_fn_decl(0, &Identifier(name.clone().into()), decl);
-
-        self.builtins.insert(name, fn_id);
-    }
-
-    pub fn process(&mut self, doc: &Document) -> DocumentHIR {
-        DocumentHIR {
-            body: self.process_block(0, &doc.body),
-        }
-    }
-
-    fn process_block(&mut self, scope_id: usize, block: &Block) -> BlockHIR {
+    fn process_block(&mut self, scope: &mut Scope, block: &Block) -> BlockHIR {
         for item in &block.items {
-            self.process_item(scope_id, item);
+            self.process_item(scope, item);
         }
 
         let mut stmts: Vec<StmtHIR> = vec![];
         let mut ty = TypeHIR::Nil;
 
         for stmt in &block.stmts {
-            ty = self.process_stmt(scope_id, stmt, &mut stmts);
+            ty = self.process_stmt(scope, stmt, &mut stmts);
         }
 
         BlockHIR { ty, stmts }
@@ -185,7 +229,7 @@ impl InferencePass {
 
     fn process_fn_decl(
         &mut self,
-        scope_id: usize,
+        scope: &mut Scope,
         name: Option<String>,
         FnDecl {
             generics,
@@ -193,18 +237,26 @@ impl InferencePass {
             params,
             body,
         }: &FnDecl,
-    ) -> FnDeclHIR {
+    ) -> usize {
         let fn_id = self.fns.len();
 
-        let fn_scope_id = self.scopes.len();
-        self.scopes.push(Scope {
-            parent_scope: Some(scope_id),
-            // is_fun: Some(fn_id),
-            belongs_to_fun: fn_id,
-            bindings: FxHashMap::default(),
+        let ret_ty_placeholder = TypeHIR::TypeVar(self.fresh_typevar());
+
+        self.fns.push(FnDeclHIR {
+            name: name.clone(),
+            ty: FnTypeHIR {
+                generics: generics.clone(),
+                ret: ret_ty_placeholder.into(), // TODO
+                params: vec![],                 // TODO
+            },
+            params: vec![], // TODO
+            locals: vec![],
+            body: None, // TODO
+            builtin: None,
+            gen_builtin: None,
         });
 
-        let mut params_hir = vec![];
+        let mut fn_scope = scope.create_fn_subscope(fn_id);
 
         let mut declaration_unpacking_stmts = vec![];
 
@@ -212,16 +264,16 @@ impl InferencePass {
             let id = self.fresh_var();
             let ty = TypeHIR::TypeVar(self.fresh_typevar());
 
-            params_hir.push((id.clone(), ty.clone())); // ???
+            // for what?
+            self.fns[fn_id].ty.params.push(ty.clone());
 
-            {
-                self.get_scope_mut(fn_scope_id)
-                    .bindings
-                    .insert(id.clone(), Binding::Var { ty: ty.clone() });
-            }
+            // for what?
+            self.fns[fn_id].params.push(id.clone());
+
+            fn_scope.declare(self, id.clone(), ty.clone());
 
             self.lower_declarable(
-                fn_scope_id,
+                &mut fn_scope,
                 DeclareLocation::Body,
                 param,
                 id,
@@ -230,7 +282,7 @@ impl InferencePass {
         }
 
         let body = self.process_block(
-            fn_scope_id,
+            &mut fn_scope,
             &Block {
                 items: body.items.clone(),
                 stmts: {
@@ -241,29 +293,20 @@ impl InferencePass {
             },
         );
 
+        self.fns[fn_id].ty.ret = body.ty.into();
+
         // TODO typecheck that the original decl's `ret` matches, if specified
         // `ret ?= body.ty`
 
-        FnDeclHIR {
-            name,
-            ty: FnTypeHIR {
-                generics: generics.clone(),
-                ret: body.ty.clone().into(),
-                params: params_hir.iter().map(|p| p.1.clone()).collect(),
-            },
-            params: params_hir.iter().map(|p| p.0.clone()).collect(),
-            body: Some(body),
-            builtin: None,
-            gen_builtin: None,
-        }
+        fn_id
     }
 
-    fn process_item(&mut self, scope_id: usize, item: &Item) {
+    fn process_item(&mut self, scope: &mut Scope, item: &Item) {
         match item {
             Item::NamedFn { name, decl } => {
-                let decl_hir = self.process_fn_decl(scope_id, Some(name.0.clone().into()), decl);
+                let fn_id = self.process_fn_decl(scope, Some(name.0.clone().into()), decl);
 
-                self.add_fn_decl(scope_id, name, decl_hir);
+                scope.declare_named_fn(name.clone(), fn_id);
             }
         }
     }
@@ -280,7 +323,7 @@ impl InferencePass {
      */
     fn lower_declare_pattern(
         &mut self,
-        scope_id: usize,
+        scope: &mut Scope,
         loc: DeclareLocation,
         pattern: &DeclarePattern,
         source_id: Identifier,
@@ -390,7 +433,7 @@ impl InferencePass {
                     });
 
                     self.lower_declarable(
-                        scope_id,
+                        scope,
                         loc,
                         sub_declarable,
                         sub_source_id.clone(),
@@ -430,7 +473,7 @@ impl InferencePass {
 
     fn lower_declarable(
         &mut self,
-        scope_id: usize,
+        scope: &mut Scope,
         loc: DeclareLocation,
         Declarable { pattern, fallback }: &Declarable,
         source_id: Identifier,
@@ -459,12 +502,12 @@ impl InferencePass {
             });
         }
 
-        self.lower_declare_pattern(scope_id, loc, pattern, source_id, unpacking);
+        self.lower_declare_pattern(scope, loc, pattern, source_id, unpacking);
     }
 
     fn process_stmt(
         &mut self,
-        scope_id: usize,
+        scope: &mut Scope,
         stmt: &Stmt,
         processed: &mut Vec<StmtHIR>,
     ) -> TypeHIR {
@@ -473,7 +516,7 @@ impl InferencePass {
                 // todo check that label is valid
                 processed.push(StmtHIR::Break {
                     label: label.clone(),
-                    expr: expr.as_ref().map(|expr| self.process_expr(scope_id, expr)),
+                    expr: expr.as_ref().map(|expr| self.process_expr(scope, expr)),
                 });
                 TypeHIR::Nil
             }
@@ -486,7 +529,7 @@ impl InferencePass {
             }
             Stmt::Return { expr } => {
                 processed.push(StmtHIR::Return {
-                    expr: expr.as_ref().map(|expr| self.process_expr(scope_id, expr)),
+                    expr: expr.as_ref().map(|expr| self.process_expr(scope, expr)),
                 });
                 TypeHIR::Nil
             }
@@ -496,12 +539,10 @@ impl InferencePass {
                     ty,
                 } = pattern
                 {
-                    let expr_hir = self.process_expr(scope_id, expr);
+                    let expr_hir = self.process_expr(scope, expr);
                     let ty = expr_hir.ty(&self);
 
-                    self.get_scope_mut(scope_id)
-                        .bindings
-                        .insert(id.clone(), Binding::Var { ty });
+                    scope.declare(self, id.clone(), ty.clone());
 
                     processed.push(StmtHIR::Declare {
                         id: id.clone(),
@@ -532,7 +573,7 @@ impl InferencePass {
 
                     // 2. try to unpack it (if it fails it will `break` out of the do-{} block)
                     self.lower_declare_pattern(
-                        scope_id,
+                        scope,
                         DeclareLocation::Body,
                         pattern,
                         source_id,
@@ -541,7 +582,7 @@ impl InferencePass {
 
                     // 3. now, process all unpacking stmts
                     for stmt in unpacking_stmts {
-                        self.process_stmt(scope_id, &stmt, processed);
+                        self.process_stmt(scope, &stmt, processed);
                     }
 
                     TypeHIR::Nil
@@ -552,7 +593,7 @@ impl InferencePass {
                 todo!("process_stmt(assign)")
             }
             Stmt::Expr { expr } => {
-                let expr_hir = self.process_expr(scope_id, expr);
+                let expr_hir = self.process_expr(scope, expr);
                 let ty = expr_hir.ty(&self);
 
                 processed.push(StmtHIR::Expr {
@@ -560,67 +601,6 @@ impl InferencePass {
                 });
 
                 ty
-            }
-        }
-    }
-
-    fn lookup(&self, scope_id: usize, id: &Identifier) -> Option<AccessHIR> {
-        let Some((located_scope_id, ancestor_num, binding)) = self._lookup(scope_id, id, 0) else {
-            return None;
-        };
-
-        match binding {
-            Binding::Var { .. } => Some(AccessHIR::Var {
-                ancestor_num,
-                scope_id: located_scope_id,
-                name: id.clone(),
-            }),
-            Binding::NamedFn { .. } => {
-                let mut overload_fn_ids = vec![];
-
-                // this variable was resolved to a (named) fn -- but then, let's go
-                //  and collect all the overloads in ancestor lexical scopes
-                self.collect_ancestor_overloads(scope_id, id, &mut overload_fn_ids);
-
-                Some(AccessHIR::Fn { overload_fn_ids })
-            }
-        }
-    }
-
-    fn collect_ancestor_overloads(
-        &self,
-        scope_id: usize,
-        id: &Identifier,
-        overload_fn_ids: &mut Vec<usize>,
-    ) {
-        let scope = self.get_scope(scope_id);
-
-        if let Some(Binding::NamedFn { fn_ids }) = scope.bindings.get(id) {
-            overload_fn_ids.extend_from_slice(&fn_ids);
-        }
-
-        if let Some(parent_scope_id) = scope.parent_scope {
-            self.collect_ancestor_overloads(parent_scope_id, id, overload_fn_ids);
-        }
-    }
-
-    fn _lookup(
-        &self,
-        scope_id: usize,
-        id: &Identifier,
-        mut ancestor_num: usize,
-    ) -> Option<(usize, usize, &Binding)> {
-        let current_scope = self.get_scope(scope_id);
-
-        match (current_scope.parent_scope, current_scope.bindings.get(id)) {
-            (_, Some(b)) => Some((scope_id, ancestor_num, b)),
-            (None, None) => None,
-            (Some(parent_scope_id), None) => {
-                if self.get_scope(parent_scope_id).belongs_to_fun != current_scope.belongs_to_fun {
-                    // println!("_lookup {id} found ancestor {scope_id} -> {parent_scope_id}");
-                    ancestor_num += 1;
-                }
-                return self._lookup(parent_scope_id, id, ancestor_num);
             }
         }
     }
@@ -658,7 +638,7 @@ impl InferencePass {
         }
     }
 
-    fn process_expr(&mut self, scope_id: usize, expr: &Expr) -> ExprHIR {
+    fn process_expr(&mut self, scope: &mut Scope, expr: &Expr) -> ExprHIR {
         match expr {
             Expr::StrLiteral { pieces } => {
                 return ExprHIR::StrLiteral {
@@ -667,7 +647,7 @@ impl InferencePass {
                         .map(|piece| match piece {
                             StrLiteralPiece::Fragment(s) => StrLiteralPieceHIR::Fragment(s.into()),
                             StrLiteralPiece::Interpolation(expr) => {
-                                StrLiteralPieceHIR::Interpolation(self.process_expr(scope_id, expr))
+                                StrLiteralPieceHIR::Interpolation(self.process_expr(scope, expr))
                             }
                         })
                         .collect(),
@@ -682,11 +662,11 @@ impl InferencePass {
             Expr::Float(f) => ExprHIR::Float(f.clone()),
 
             Expr::Variable(id) => {
-                let Some(access) = self.lookup(scope_id, id) else {
+                let Some(access) = scope.bindings.get(id) else {
                     panic!("variable {id} not found in scope");
                 };
 
-                ExprHIR::Access(access)
+                ExprHIR::Access(access.clone())
 
                 // check types
                 // - if type resolves to a TypeHIR::Fn { overload_fn_ids },
@@ -706,13 +686,7 @@ impl InferencePass {
                 then,
                 els,
             } => {
-                let if_scope_id = self.scopes.len();
-                self.scopes.push(Scope {
-                    parent_scope: Some(scope_id),
-                    // is_fun: None,
-                    belongs_to_fun: self.get_scope(scope_id).belongs_to_fun,
-                    bindings: FxHashMap::default(),
-                });
+                let mut if_scope = scope.create_subscope();
 
                 // lower this one first
                 let mut unpacking_stmts = vec![];
@@ -730,7 +704,7 @@ impl InferencePass {
 
                 // 2. try to unpack it (if it fails it will `break` out of the do-{} block)
                 self.lower_declare_pattern(
-                    if_scope_id,
+                    &mut if_scope,
                     DeclareLocation::If,
                     pattern,
                     match_id,
@@ -743,7 +717,7 @@ impl InferencePass {
                 });
 
                 self.process_expr(
-                    if_scope_id,
+                    &mut if_scope,
                     &Expr::If {
                         pattern: None,
                         cond: Expr::DoWhile {
@@ -768,22 +742,18 @@ impl InferencePass {
                 then,
                 els,
             } => {
-                let if_scope_id = self.scopes.len();
-                self.scopes.push(Scope {
-                    parent_scope: Some(scope_id),
-                    // is_fun: None,
-                    belongs_to_fun: self.get_scope(scope_id).belongs_to_fun,
-                    bindings: FxHashMap::default(),
-                });
+                let mut if_scope = scope.create_subscope();
 
                 // TODO: check that it's a boolean
-                let cond_hir = self.process_expr(if_scope_id, cond);
+                let cond_hir = self.process_expr(&mut if_scope, cond);
                 if cond_hir.ty(&self) != TypeHIR::Bool {
                     panic!("if-cond is not a bool");
                 }
 
-                let then_hir = self.process_block(if_scope_id, then);
-                let els_hir = els.as_ref().map(|els| self.process_block(if_scope_id, els));
+                let then_hir = self.process_block(&mut if_scope, then);
+                let els_hir = els
+                    .as_ref()
+                    .map(|els| self.process_block(&mut if_scope, els));
 
                 let res_ty = match &els_hir {
                     None => TypeHIR::Nil,
@@ -813,7 +783,7 @@ impl InferencePass {
 
             // lower
             Expr::BinaryExpr { left, op, right } => self.process_expr(
-                scope_id,
+                scope,
                 &Expr::Invocation {
                     expr: Expr::Variable(Identifier(format!("op{op}").into())).into(),
                     postfix: false,
@@ -833,7 +803,7 @@ impl InferencePass {
 
             // lower
             Expr::UnaryExpr { expr, op } => self.process_expr(
-                scope_id,
+                scope,
                 &Expr::Invocation {
                     expr: Expr::Variable(Identifier(format!("op{op}").into())).into(),
                     postfix: false,
@@ -851,7 +821,7 @@ impl InferencePass {
                 coalesce,
                 index,
             } => self.process_expr(
-                scope_id,
+                scope,
                 &Expr::Invocation {
                     expr: Expr::Variable(Identifier("op[]".into())).into(),
                     postfix: false,
@@ -879,7 +849,7 @@ impl InferencePass {
                 args,
                 ..
             } => {
-                let expr_hir = self.process_expr(scope_id, expr);
+                let expr_hir = self.process_expr(scope, expr);
                 let ty = expr_hir.ty(&self);
 
                 let TypeHIR::Fn { overload_fn_ids } = ty else {
@@ -892,24 +862,24 @@ impl InferencePass {
                     .iter()
                     .map(|Argument { name, expr }| ArgumentHIR {
                         name: name.clone(),
-                        expr: self.process_expr(scope_id, expr),
+                        expr: self.process_expr(scope, expr),
                     })
                     .collect::<Vec<_>>();
 
                 let resolved_fn_id = self.select_overload(&overload_fn_ids, &args_hir);
 
+                let resolved_fn_name = self.fns[resolved_fn_id].name.clone();
+
                 ExprHIR::Invocation {
                     coalesce: *coalesce,
                     resolved_fn_id,
+                    resolved_fn_name,
                     args: args_hir,
                 }
             }
 
             Expr::AnonymousFn { decl } => {
-                let decl_hir = self.process_fn_decl(scope_id, None, decl);
-
-                let fn_id = self.fns.len();
-                self.fns.push(decl_hir);
+                let fn_id = self.process_fn_decl(scope, None, decl);
 
                 ExprHIR::Access(AccessHIR::Fn {
                     overload_fn_ids: vec![fn_id],
@@ -926,12 +896,10 @@ impl InferencePass {
 
                 let elements_hir = elements
                     .iter()
-                    .map(|el| self.process_expr(scope_id, el))
+                    .map(|el| self.process_expr(scope, el))
                     .collect::<Vec<_>>();
 
-                let splat_hir = splat
-                    .as_ref()
-                    .map(|splat| self.process_expr(scope_id, splat));
+                let splat_hir = splat.as_ref().map(|splat| self.process_expr(scope, splat));
 
                 let mut element_types = elements_hir
                     .iter()
@@ -997,7 +965,7 @@ impl InferencePass {
             Expr::TupleLiteral { elements } => {
                 let elements_hir = elements
                     .iter()
-                    .map(|el| self.process_expr(scope_id, el))
+                    .map(|el| self.process_expr(scope, el))
                     .collect::<Vec<_>>();
 
                 ExprHIR::TupleLiteral {
@@ -1038,12 +1006,12 @@ impl InferencePass {
         // },
     }
 
-    pub fn get_scope(&self, id: usize) -> &Scope {
-        &self.scopes[id]
+    pub fn get_fn_scope(&self, id: usize) -> &FnDeclHIR {
+        &self.fns[id]
     }
 
-    pub fn get_scope_mut(&mut self, id: usize) -> &mut Scope {
-        &mut self.scopes[id]
+    pub fn get_fn_scope_mut(&mut self, id: usize) -> &mut FnDeclHIR {
+        &mut self.fns[id]
     }
 }
 

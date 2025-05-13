@@ -20,14 +20,14 @@ fn main() {
     // // run vector-passing proof-of-concept #2
     // crate::poc::vec_cc::main();
 
-    // run vector-passing proof-of-concept #3
-    crate::poc::vec_ptr_gc::main();
+    // // run vector-passing proof-of-concept #3
+    // crate::poc::vec_ptr_gc::main();
 
-    // let code = "
-    //     print(42)
-    // ";
+    let code = "
+        print(42 + 1)
+    ";
 
-    // let doc = parse_document(&code).expect("could not parse");
-    // let pass = InferencePass::run(&doc);
-    // println!("{pass}");
+    let doc = parse_document(&code).expect("could not parse");
+    let pass = InferencePass::run(&doc);
+    println!("{pass}");
 }

@@ -20,6 +20,12 @@ impl<'a> From<&'a str> for Identifier {
     }
 }
 
+impl From<String> for Identifier {
+    fn from(id: String) -> Self {
+        Identifier(id.into())
+    }
+}
+
 impl Display for Identifier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)

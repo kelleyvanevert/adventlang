@@ -1,10 +1,7 @@
 use ast::{AlRegex, Float, Identifier, TypeVar};
 use inkwell::values::FunctionValue;
 
-use crate::{
-    codegen::CodegenContext,
-    inference_pass::{Binding, InferencePass},
-};
+use crate::{codegen::CodegenContext, inference_pass::InferencePass};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct DocumentHIR {
@@ -79,11 +76,14 @@ pub enum DictKeyHIR {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AccessHIR {
     Var {
+        id: Identifier, // for debugging
+
         // how many times to access the parent (lexical) fn scope to get there?
         // 0 = current fn's scope, etc..
         ancestor_num: usize,
-        scope_id: usize,
-        name: Identifier,
+
+        fn_id: usize,
+        local_index: usize,
     },
     Fn {
         overload_fn_ids: Vec<usize>,
@@ -138,7 +138,8 @@ pub enum ExprHIR {
     // The difference is mostly is the expression, which will be a `Builtin` or otherwise..
     Invocation {
         coalesce: bool,
-        resolved_fn_id: usize, // See comment todo.txt #FNREF
+        resolved_fn_id: usize,            // See comment todo.txt #FNREF
+        resolved_fn_name: Option<String>, // for debugging
         // generic fn instantiation?
         args: Vec<ArgumentHIR>,
         //
@@ -213,22 +214,9 @@ impl ExprHIR {
                 overload_fn_ids: overload_fn_ids.clone(),
             },
             Self::Access(AccessHIR::Var {
-                ancestor_num,
-                scope_id,
-                name,
+                local_index, fn_id, ..
             }) => {
-                let binding = pass
-                    .get_scope(*scope_id)
-                    .bindings
-                    .get(name)
-                    .expect("scope to contain var {name}");
-
-                match binding {
-                    Binding::Var { ty } => ty.clone(),
-                    Binding::NamedFn { .. } => {
-                        panic!("var access to be actual var instead of (named) fn")
-                    }
-                }
+                return pass.get_fn_scope(*fn_id).locals[*local_index].clone();
             }
             Self::Invocation {
                 coalesce,
@@ -275,15 +263,21 @@ pub enum AssignPatternHIR {
     },
 }
 
-/// The representation/content of a single function, e.g. as it would be written in code
+/// The representation/content of a single function, e.g. as it would be written in code,
+///  including whatever is necessary to generate LLVM IR
+/// (Except it might still be generically parametrized -- in which case multiple instantiations will be stamped out)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FnDeclHIR {
-    pub name: Option<String>,
+    pub name: Option<String>, // just for debugging
 
     pub ty: FnTypeHIR,
-    pub params: Vec<Identifier>,
-    pub body: Option<BlockHIR>,
+    pub params: Vec<Identifier>, // for matching up at call sites, not for codegen
 
+    // for codegen
+    pub locals: Vec<TypeHIR>,
+
+    // one of three
+    pub body: Option<BlockHIR>,
     pub builtin: Option<usize>,
     pub gen_builtin: Option<fn(ctx: &mut CodegenContext, f: FunctionValue)>,
 }

@@ -212,8 +212,8 @@ impl Display for ExprHIR {
             ExprHIR::Access(AccessHIR::Fn { overload_fn_ids }) => {
                 write!(f, "fn({:?})", overload_fn_ids)
             }
-            ExprHIR::Access(AccessHIR::Var { name, .. }) => {
-                write!(f, "{name}")
+            ExprHIR::Access(AccessHIR::Var { id, .. }) => {
+                write!(f, "{id}")
             } // // ===
             // // Invocation
             // // ===
@@ -222,9 +222,14 @@ impl Display for ExprHIR {
             ExprHIR::Invocation {
                 coalesce,
                 resolved_fn_id,
+                resolved_fn_name,
                 args,
             } => {
-                write!(f, "fn${resolved_fn_id}")?;
+                if let Some(name) = resolved_fn_name {
+                    write!(f, "{name}")?;
+                } else {
+                    write!(f, "${resolved_fn_id}")?;
+                }
                 if *coalesce {
                     write!(f, "?")?;
                 }
