@@ -107,6 +107,7 @@ pub struct InferencePass {
     next_var_id: usize,
     // builtins: FxHashMap<String, usize>,
     doc: Option<DocumentHIR>,
+    stdlib: FxHashMap<String, usize>,
 }
 
 impl Display for InferencePass {
@@ -125,6 +126,7 @@ impl InferencePass {
             fns: vec![],
             next_var_id: 0,
             doc: None,
+            stdlib: Default::default(),
         };
 
         let mut root_scope = Scope::new(0);
@@ -140,6 +142,8 @@ impl InferencePass {
             let fn_id = pass.fns.len();
             pass.fns.push(decl);
 
+            pass.stdlib.insert(id.clone(), fn_id);
+
             root_scope.declare_named_fn(id.into(), fn_id);
         }
 
@@ -148,6 +152,13 @@ impl InferencePass {
         });
 
         pass
+    }
+
+    pub fn builtin(&self, name: &str) -> usize {
+        *self
+            .stdlib
+            .get(name)
+            .expect(&format!("builtin `{name}` to exist"))
     }
 
     pub fn doc(&self) -> &DocumentHIR {
@@ -470,6 +481,176 @@ impl InferencePass {
         self.lower_declare_pattern(scope, loc, pattern, source_id, unpacking);
     }
 
+    fn lower_assign_pattern(
+        &mut self,
+        scope: &mut Scope,
+        pattern: &AssignPattern,
+        source_id: Identifier,
+        processed: &mut Vec<StmtHIR>,
+    ) {
+        match pattern {
+            AssignPattern::Location(location) => {
+                match location {
+                    AssignLocationExpr::Id(id) => {
+                        let Some(access) = scope.bindings.get(id) else {
+                            panic!("variable {id} not found in scope");
+                        };
+
+                        let AccessHIR::Var(target_local_access) = access else {
+                            // haha, quicky :P
+                            // I guess this is a result of how I'm dealing with fns, but .. it also feels a bit weird
+                            panic!("cannot assign to function");
+                        };
+
+                        let Some(source) = scope.bindings.get(&source_id).cloned() else {
+                            panic!("Could not find desugaring source in scope: {source_id}");
+                        };
+
+                        processed.push(StmtHIR::AssignLocal {
+                            local_access: target_local_access.clone(),
+                            expr: ExprHIR::Access(source).into(),
+                        });
+                    }
+                    AssignLocationExpr::Index(container, index) => {
+                        let Some(source) = scope.bindings.get(&source_id).cloned() else {
+                            panic!("Could not find desugaring source in scope: {source_id}");
+                        };
+
+                        processed.push(StmtHIR::Expr {
+                            expr: ExprHIR::Invocation {
+                                coalesce: false,
+                                resolved_fn_id: self.builtin("op[]="),
+                                resolved_fn_name: None,
+                                args: vec![
+                                    ArgumentHIR {
+                                        name: Some("container".into()),
+                                        expr: self.process_expr(scope, container),
+                                    },
+                                    ArgumentHIR {
+                                        name: Some("index".into()),
+                                        expr: self.process_expr(scope, index),
+                                    },
+                                    ArgumentHIR {
+                                        name: Some("value".into()),
+                                        expr: ExprHIR::Access(source),
+                                    },
+                                ],
+                            }
+                            .into(),
+                        });
+                    }
+                    AssignLocationExpr::Member(container, id) => {
+                        // TODO: figure out index of member `id` in struct/object type
+                        todo!("lower member assignment")
+                    }
+                }
+            }
+            AssignPattern::List { elements, splat } => {
+                processed.push(StmtHIR::Expr {
+                    expr: self
+                        .process_expr(
+                            scope,
+                            &Expr::If {
+                                pattern: None,
+                                cond: Box::new(Expr::BinaryExpr {
+                                    left: Expr::Invocation {
+                                        expr: Expr::Variable("len".into()).into(),
+                                        postfix: false,
+                                        coalesce: false,
+                                        args: vec![Argument {
+                                            name: None,
+                                            expr: Expr::Variable(source_id.clone()).into(),
+                                        }],
+                                    }
+                                    .into(),
+                                    op: "<".into(),
+                                    right: Expr::Int(elements.len() as i64).into(),
+                                }),
+                                then: Block {
+                                    items: vec![],
+                                    stmts: vec![Stmt::Expr {
+                                        expr: Expr::Failure(format!(
+                                            "unpacking list declarable failed: not enough elements in list"
+                                        ))
+                                        .into(),
+                                    }],
+                                },
+                                els: None,
+                            },
+                        )
+                        .into(),
+                });
+
+                // lower each item assignable
+                for (i, sub_pattern) in elements.iter().enumerate() {
+                    let sub_source_id = self.fresh_var();
+
+                    self.process_stmt(
+                        scope,
+                        &Stmt::Declare {
+                            pattern: DeclarePattern::Declare {
+                                guard: DeclareGuardExpr::Unguarded(sub_source_id.clone()),
+                                ty: None,
+                            },
+                            expr: Expr::Index {
+                                expr: Expr::Variable(source_id.clone()).into(),
+                                coalesce: false,
+                                index: Expr::Int(i as i64).into(),
+                            }
+                            .into(),
+                        },
+                        processed,
+                    );
+
+                    self.lower_assign_pattern(scope, sub_pattern, sub_source_id.clone(), processed);
+                }
+
+                // possibly also assign the rest
+                if let Some(box splat_pattern) = splat {
+                    let splat_source_id = self.fresh_var();
+
+                    self.process_stmt(
+                        scope,
+                        &Stmt::Declare {
+                            pattern: DeclarePattern::Declare {
+                                guard: DeclareGuardExpr::Unguarded(splat_source_id.clone()),
+                                ty: None, // ??
+                            },
+                            expr: Expr::Invocation {
+                                expr: Expr::Variable("slice".into()).into(),
+                                postfix: false,
+                                coalesce: false,
+                                args: vec![
+                                    Argument {
+                                        name: None,
+                                        expr: Expr::Variable(source_id.clone()).into(),
+                                    },
+                                    Argument {
+                                        name: None,
+                                        expr: Expr::Int(elements.len() as i64).into(),
+                                    },
+                                ],
+                            }
+                            .into(),
+                        },
+                        processed,
+                    );
+
+                    self.lower_assign_pattern(
+                        scope,
+                        splat_pattern,
+                        splat_source_id.clone(),
+                        processed,
+                    );
+                }
+            }
+            AssignPattern::Tuple { elements } => {
+                //
+                todo!("implement tuple sugared assignment lowering");
+            }
+        }
+    }
+
     fn process_stmt(
         &mut self,
         scope: &mut Scope,
@@ -554,69 +735,24 @@ impl InferencePass {
                     TypeHIR::Nil
                 }
             }
-            Stmt::Assign {
-                pattern: AssignPattern::Location(location),
-                expr,
-            } => {
-                match location {
-                    AssignLocationExpr::Id(id) => {
-                        let Some(access) = scope.bindings.get(id) else {
-                            panic!("variable {id} not found in scope");
-                        };
+            Stmt::Assign { pattern, expr } => {
+                // First, evaluate and store value into fresh local, for unpacking
 
-                        let AccessHIR::Var(local_access) = access else {
-                            // haha, quicky :P
-                            // I guess this is a result of how I'm dealing with fns, but .. it also feels a bit weird
-                            panic!("cannot assign to function");
-                        };
+                let expr_hir = self.process_expr(scope, expr);
+                let expr_ty = expr_hir.ty(self);
 
-                        let local_access = local_access.clone();
+                let source_id = self.fresh_var();
 
-                        let expr_hir = self.process_expr(scope, expr);
+                let local_access = scope.declare(self, source_id.clone(), expr_ty);
 
-                        processed.push(StmtHIR::AssignLocal {
-                            local_access,
-                            expr: expr_hir.into(),
-                        });
-                    }
-                    AssignLocationExpr::Index(container, index) => {
-                        processed.push(StmtHIR::Expr {
-                            expr: self
-                                .process_expr(
-                                    scope,
-                                    &Expr::Invocation {
-                                        expr: Expr::Variable("op[]=".into()).into(),
-                                        postfix: false,
-                                        coalesce: false,
-                                        args: vec![
-                                            Argument {
-                                                name: Some("container".into()),
-                                                expr: container.clone(),
-                                            },
-                                            Argument {
-                                                name: Some("index".into()),
-                                                expr: index.clone(),
-                                            },
-                                            Argument {
-                                                name: Some("element".into()),
-                                                expr: expr.as_ref().clone(),
-                                            },
-                                        ],
-                                    },
-                                )
-                                .into(),
-                        });
-                    }
-                    AssignLocationExpr::Member(container, id) => {
-                        // TODO: figure out index of member `id` in struct/object type
-                        todo!("lower member assignment")
-                    }
-                }
+                processed.push(StmtHIR::AssignLocal {
+                    local_access: local_access.clone(),
+                    expr: expr_hir.clone().into(),
+                });
+
+                self.lower_assign_pattern(scope, pattern, source_id, processed);
 
                 TypeHIR::Nil
-            }
-            Stmt::Assign { pattern, expr } => {
-                todo!("implement lowering of sugared assign stmt");
             }
             Stmt::Expr { expr } => {
                 let expr_hir = self.process_expr(scope, expr);

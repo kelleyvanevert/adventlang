@@ -1,3 +1,5 @@
+#![feature(box_patterns)]
+
 use inference_pass::InferencePass;
 use parser::parse_document;
 
@@ -26,9 +28,8 @@ fn main() {
     let code = "
         fn bla() {
             let a = 6
-            a = a
-            let a = 5
-            a = a
+
+            [a[a], a] = a
         }
 
         print(42 + 1)

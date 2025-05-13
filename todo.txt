@@ -783,3 +783,19 @@ Type memory layout
 ===
 
 How to unify recursive functions
+
+
+===
+
+Really, I should not mix type checking & inferencing with desugaring...
+
+I think what I should actually do is:
+
+  source  --- parse -->        (concrete) syntax tree   -- syntax as written
+          --- desugar -->      HIR                      -- desugared syntax
+          --- check/infer -->  MIR                      -- well structured and typed code with
+                                                            all the necessary information for codegen
+          --- codegen -->      LLVM IR
+          --- compile -->      (binary or whatever)
+
+... and what would be really fancy, is if I also pass along source spans, to make errors nicer and whatnot, but for now, this is really enough as is stands :P
