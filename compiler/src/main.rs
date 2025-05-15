@@ -5,9 +5,11 @@ use parser::parse_document;
 
 mod codegen;
 mod codegen_types;
+mod desugar_pass;
 mod hir;
 mod hir_display;
 mod inference_pass;
+mod mir;
 mod poc;
 mod runtime;
 mod stdlib;

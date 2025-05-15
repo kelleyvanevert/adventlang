@@ -759,20 +759,22 @@ Garbage collection options
 Type memory layout
 
   relevant
-    nil                             8 (0)  -- for compatibility, instead of i0/void
-    bool                            8 (0/1) -- for compatibility, instead of i1
-    int                            64
-    float                          64
+    nil                              8 (0)  -- for compatibility, instead of i0/void
+    bool                             8 (0/1) -- for compatibility, instead of i1
+    int                             64
+    float                           64
 
-    str,regex,fn,list         ptr (64)
+    str,regex,fn,list         ptr  (64)
+
+    closure                2x ptr (128)
 
     ?nil = nil
 
-    ?bool                           8  -- we'll just pack the nullability into another bit
-    ?int                           64  -- I'll use the MSB to mark and check for nil
-    ?float                         64  -- I'll use a NaN pattern like f64::NAN and .is_nan()
+    ?bool                            8  -- we'll just pack the nullability into another bit
+    ?int                            64  -- I'll use the MSB to mark and check for nil
+    ?float                          64  -- I'll use a NaN pattern like f64::NAN and .is_nan()
 
-    ?{str,regex,fn,list}      ptr (64) -- it can just be a nill-pointer
+    ?{str,regex,fn,list}      ptr  (64) -- it can just be a nill-pointer
 
     I'll have to think some more about how to deal with:
 
@@ -799,3 +801,43 @@ I think what I should actually do is:
           --- compile -->      (binary or whatever)
 
 ... and what would be really fancy, is if I also pass along source spans, to make errors nicer and whatnot, but for now, this is really enough as is stands :P
+
+
+SOURCE
+
+  fn bla() {
+    let n = 6
+
+    fn mk(m) {
+      n += 1
+      n + m
+    }
+
+    mk
+  }
+
+  fn main() {
+    let f = bla()
+    let r = f(2) -- 9
+
+    r + f(10) -- 9 + 18 = 27
+  }
+
+HIR
+
+  fn mk()
+
+  fn bla() {
+    define closure
+    closure.n = 6
+
+    (mk, &closure)
+  }
+
+  fn main() {
+    define closure
+    closure.f = bla()
+    closure.r = f.0(f.1, 2)
+
+    closure.r + f.0(f.1, 10)
+  }
