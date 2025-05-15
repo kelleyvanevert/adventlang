@@ -1374,6 +1374,7 @@ fn stmt(s: State) -> ParseResult<State, Stmt> {
                         tag("%"),
                         tag("<<"),
                         tag("??"),
+                        tag("[]"),
                     ))),
                     tag("="),
                     ws0,
