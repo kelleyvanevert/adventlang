@@ -1,19 +1,7 @@
-#![feature(box_patterns)]
-#![feature(iterator_try_collect)]
-
 use std::fmt::Display;
 
-use compact_str::CompactString;
-pub use numeric::Float;
-pub use regex::AlRegex;
-pub use types::{FnType, Type, TypeVar};
-
-mod numeric;
-mod regex;
-mod types;
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Identifier(pub CompactString);
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Identifier(pub String);
 
 impl<'a> From<&'a str> for Identifier {
     fn from(id: &'a str) -> Self {
@@ -33,7 +21,7 @@ impl Display for Identifier {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Declarable {
     pub pattern: DeclarePattern,
     pub fallback: Option<Expr>,
@@ -49,7 +37,7 @@ impl Display for Declarable {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeclarePattern {
     Declare {
         guard: DeclareGuardExpr,
@@ -130,14 +118,14 @@ impl Display for DeclarePattern {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AssignLocationExpr {
     Id(Identifier),           // assign fn/closure locals
     Index(Expr, Expr),        // assign list/tuple elements
     Member(Expr, Identifier), // assign struct/object members
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AssignPattern {
     Location(AssignLocationExpr), // single assignment
     List {
@@ -204,19 +192,19 @@ impl TryFrom<Expr> for AssignPattern {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StrLiteralPiece {
     Fragment(String),
     Interpolation(Expr),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Argument {
     pub name: Option<Identifier>,
     pub expr: Expr,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DeclareGuardExpr {
     Unguarded(Identifier),
     Some(Identifier),
@@ -241,13 +229,13 @@ impl Display for DeclareGuardExpr {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DictKey {
     Identifier(Identifier),
     Expr(Expr),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FnDecl {
     pub generics: Vec<TypeVar>,
     pub ret: Option<Type>,
@@ -255,27 +243,25 @@ pub struct FnDecl {
     pub body: Block,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expr {
     Failure(String),
     StrLiteral {
         pieces: Vec<StrLiteralPiece>,
     },
     NilLiteral,
-    RegexLiteral {
-        regex: AlRegex,
-    },
+    RegexLiteral(String),
     Bool(bool),
     Int(i64),
-    Float(Float),
+    Float(String),
     Variable(Identifier),
     UnaryExpr {
         expr: Box<Expr>,
-        op: CompactString,
+        op: String,
     },
     BinaryExpr {
         left: Box<Expr>,
-        op: CompactString,
+        op: String,
         right: Box<Expr>,
     },
     ListLiteral {
@@ -354,12 +340,12 @@ impl From<AssignLocationExpr> for Expr {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Item {
     NamedFn { name: Identifier, decl: FnDecl },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Stmt {
     Break {
         label: Option<Identifier>,
@@ -384,82 +370,132 @@ pub enum Stmt {
     }, // ...
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Block {
     pub items: Vec<Item>,
     pub stmts: Vec<Stmt>,
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Document {
     pub body: Block,
 }
 
-#[cfg(test)]
-mod tests {
-    use std::cmp::Ordering;
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TypeVar(pub String);
 
-    use super::{Type::*, *};
-
-    fn cmp_ty(a: Type, b: Type) -> Option<Ordering> {
-        a.partial_cmp(&b)
+impl Display for TypeVar {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
+}
 
-    #[test]
-    fn types_po() {
-        assert_eq!(cmp_ty(Bool, Nil), None);
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Type {
+    Nil,
+    Bool,
+    Str,
+    Int,
+    Float,
+    Num,
+    Regex,
+    Fun(Option<FnType>), // underspecified ("fn"), or specified (e.g. "fn<T>([T]) -> T")
+    List(Option<Box<Type>>), // underspecified ("list"), or specified (e.g. "[int]"")
+    Tuple(Option<Vec<Type>>), // underspecified ("tuple"), or specified (e.g. "(int, bool)")
+    Dict(Option<(Box<Type>, Box<Type>)>), // underspecified ("dict"), or specified (e.g. "{ [int]: str }")
+    Nullable(Box<Type>),                  // ?int
+    TypeVar(TypeVar),                     // x, y, z
+}
 
-        // assert_eq!(cmp_ty(Any, Bool), Some(Ordering::Greater));
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FnType {
+    pub generics: Vec<TypeVar>,
+    pub params: Vec<Type>,
+    pub ret: Box<Type>,
+}
 
-        assert_eq!(cmp_ty(Bool, Bool), Some(Ordering::Equal));
+impl Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Type::Nil => write!(f, "nil"),
+            Type::Bool => write!(f, "bool"),
+            Type::Str => write!(f, "str"),
+            Type::Int => write!(f, "int"),
+            Type::Float => write!(f, "float"),
+            Type::Num => write!(f, "num"),
+            Type::Regex => write!(f, "regex"),
+            Type::TypeVar(v) => write!(f, "{v}"),
+            Type::Fun(signature) => {
+                write!(f, "fn")?;
 
-        // assert_eq!(
-        //     cmp_ty(Union(vec![Bool, Nil]), Bool),
-        //     Some(Ordering::Greater)
-        // );
+                if let Some(FnType {
+                    generics,
+                    params,
+                    ret,
+                }) = signature
+                {
+                    write!(f, "fn")?;
+                    if generics.len() > 0 {
+                        write!(f, "<")?;
+                        let mut i = 0;
+                        for var in generics {
+                            if i > 0 {
+                                write!(f, ", ")?;
+                            }
+                            write!(f, "{var}")?;
+                            i += 1;
+                        }
+                        write!(f, ">")?;
+                    }
+                    if params.len() > 0 {
+                        write!(f, "(")?;
+                        let mut i = 0;
+                        for param in params {
+                            if i > 0 {
+                                write!(f, ", ")?;
+                            }
+                            write!(f, "{param}")?;
+                            i += 1;
+                        }
+                        write!(f, ")")?;
+                    }
+                    if ret.as_ref() != &Type::Nil {
+                        write!(f, " -> {ret}")?;
+                    }
+                }
 
-        // assert_eq!(
-        //     cmp_ty(Union(vec![Bool, Fun(None)]), Bool),
-        //     Some(Ordering::Greater)
-        // );
+                write!(f, "")
+            }
+            Type::List(None) => write!(f, "list"),
+            Type::List(Some(t)) => write!(f, "[{t}]"),
+            Type::Tuple(None) => write!(f, "tuple"),
+            Type::Tuple(Some(ts)) => {
+                write!(f, "(")?;
+                let mut i = 0;
+                for t in ts {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{t}")?;
+                    i += 1;
+                }
+                if ts.len() == 1 {
+                    // to make clear that it's a tuple, not just some extra parentheses
+                    write!(f, ",")?;
+                }
+                write!(f, ")")
+            }
+            Type::Dict(p) => {
+                write!(f, "dict")?;
+                if let Some((k, v)) = p {
+                    write!(f, "[{}, {}]", k, v)?;
+                }
 
-        // assert_eq!(
-        //     cmp_ty(Union(vec![Bool, Union(vec![Bool, Fun(None)])]), Bool),
-        //     Some(Ordering::Greater)
-        // );
-
-        assert_eq!(cmp_ty(Tuple(Some(vec![])), Bool), None);
-
-        // assert_eq!(
-        //     cmp_ty(Tuple(Some(vec![Any])), Tuple(Some(vec![Bool]))),
-        //     Some(Ordering::Greater)
-        // );
-
-        // assert_eq!(
-        //     cmp_ty(Tuple(Some(vec![Any, Num])), Tuple(Some(vec![Bool, Num]))),
-        //     Some(Ordering::Greater)
-        // );
-
-        // assert_eq!(
-        //     cmp_ty(
-        //         Tuple(Some(vec![Union(vec![Bool, Num]), Num])),
-        //         Tuple(Some(vec![Bool, Num]))
-        //     ),
-        //     Some(Ordering::Greater)
-        // );
-
-        assert_eq!(
-            cmp_ty(Tuple(None), Tuple(Some(vec![Bool, Num]))),
-            Some(Ordering::Greater)
-        );
-
-        assert_eq!(cmp_ty(Tuple(None), Tuple(None)), Some(Ordering::Equal));
-
-        assert_eq!(cmp_ty(Tuple(Some(vec![Num, Bool])), Bool), None);
-
-        // assert_eq!(
-        //     cmp_ty(Union(vec![Tuple(Some(vec![Num, Bool])), Bool]), Bool),
-        //     Some(Ordering::Greater)
-        // );
+                Ok(())
+            }
+            Type::Nullable(t) => {
+                write!(f, "?({t})")
+            }
+        }
     }
 }

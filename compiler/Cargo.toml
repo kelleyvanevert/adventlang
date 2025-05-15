@@ -15,4 +15,4 @@ indenter = "0.3.3"
 safer-ffi = "0.1.13"
 hexdump = "0.1.2"
 parser = { path = "../parser" }
-ast = { path = "../ast" }
+# ast = { path = "../ast" }
