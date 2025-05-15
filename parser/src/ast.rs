@@ -185,7 +185,12 @@ impl TryFrom<Expr> for AssignPattern {
                 Ok(AssignPattern::List { elements, splat })
             }
             Expr::TupleLiteral { elements } => {
-                todo!("implement assignpattern-try-from-expr")
+                let elements = elements
+                    .into_iter()
+                    .map(|el| AssignPattern::try_from(el))
+                    .try_collect()?;
+
+                Ok(AssignPattern::Tuple { elements })
             }
             _ => AssignLocationExpr::try_from(expr).map(AssignPattern::Location),
         }
