@@ -2,8 +2,7 @@
 #![feature(box_patterns)]
 #![feature(iterator_try_collect)]
 
-mod ast;
+pub mod ast;
 mod parser;
 
-pub use ast::*;
 pub use parser::*;

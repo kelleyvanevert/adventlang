@@ -434,9 +434,7 @@ fn if_expr(s: State) -> ParseResult<State, Expr> {
             els: match further {
                 Some(Either::Left(if_expr)) => Some(Block {
                     items: vec![],
-                    stmts: vec![Stmt::Expr {
-                        expr: if_expr.into(),
-                    }],
+                    stmts: vec![Stmt::Expr { expr: if_expr }],
                 }),
                 Some(Either::Right(else_block)) => Some(else_block),
                 _ => None,
@@ -642,10 +640,7 @@ fn argument(s: State) -> ParseResult<State, Argument> {
             optional(terminated(identifier, seq((ws0, char('='), ws0)))),
             constrained(false, expr),
         )),
-        |(name, expr)| Argument {
-            name,
-            expr: expr.into(),
-        },
+        |(name, expr)| Argument { name, expr },
     )
     .parse(s)
 }
@@ -653,10 +648,7 @@ fn argument(s: State) -> ParseResult<State, Argument> {
 fn invocation_args(s: State) -> ParseResult<State, Vec<Argument>> {
     let constrained = s.constrained;
 
-    let trailing_anon_fn = map(anonymous_fn, |anon| Argument {
-        name: None,
-        expr: anon.into(),
-    });
+    let trailing_anon_fn = map(anonymous_fn, |expr| Argument { name: None, expr });
 
     if let Some((s, (args, _))) = listy("(", argument, argument, ")").parse(s.clone()) {
         let mut seen_named_arg = false;
@@ -1042,7 +1034,7 @@ fn break_stmt(s: State) -> ParseResult<State, Stmt> {
         )),
         |(_, label, expr)| Stmt::Break {
             label: label.into(),
-            expr: expr.into(),
+            expr,
         },
     )
     .parse(s)
@@ -1061,7 +1053,7 @@ fn continue_stmt(s: State) -> ParseResult<State, Stmt> {
 fn return_stmt(s: State) -> ParseResult<State, Stmt> {
     map(
         seq((tag("return"), slws1, constrained(false, expr))),
-        |(_, _, expr)| Stmt::Return { expr: expr.into() },
+        |(_, _, expr)| Stmt::Return { expr: Some(expr) },
     )
     .parse(s)
 }
@@ -1306,10 +1298,7 @@ fn declare_stmt(s: State) -> ParseResult<State, Stmt> {
             ws0,
             constrained(false, expr),
         )),
-        |(_, _, pattern, _, _, _, expr)| Stmt::Declare {
-            pattern,
-            expr: expr.into(),
-        },
+        |(_, _, pattern, _, _, _, expr)| Stmt::Declare { pattern, expr },
     )
     .parse(s)
 }
@@ -1382,20 +1371,19 @@ fn stmt(s: State) -> ParseResult<State, Stmt> {
                 ))),
             )),
             |(le, ri)| match ri {
-                None => Some(Stmt::Expr { expr: le.into() }),
+                None => Some(Stmt::Expr { expr: le }),
                 Some((_, op, _, _, expr)) => {
                     AssignPattern::try_from(le.clone())
                         .ok()
                         .map(|pattern| Stmt::Assign {
                             pattern,
                             expr: match op {
-                                None => expr.into(),
+                                None => expr,
                                 Some(op) => Expr::BinaryExpr {
                                     left: Expr::from(le).into(),
                                     op: op.into(),
                                     right: expr.into(),
-                                }
-                                .into(),
+                                },
                             },
                         })
                 }
@@ -1691,7 +1679,7 @@ mod tests {
                 params: params.into_iter().map(declarable).collect(),
                 body: Block {
                     items: vec![],
-                    stmts: vec![Stmt::Expr { expr: expr.into() }],
+                    stmts: vec![Stmt::Expr { expr }],
                 },
             },
         }
@@ -1699,7 +1687,7 @@ mod tests {
 
     fn simple_invocation_regular(name: &str, exprs: Vec<Expr>) -> Expr {
         Expr::Invocation {
-            expr: Expr::Variable(Identifier(name.into())).into(),
+            expr: Expr::Variable(name.into()).into(),
             postfix: false,
             coalesce: false,
             args: exprs
@@ -1711,7 +1699,7 @@ mod tests {
 
     fn simple_invocation_postfix(name: &str, exprs: Vec<Expr>) -> Expr {
         Expr::Invocation {
-            expr: Expr::Variable(Identifier(name.into())).into(),
+            expr: Expr::Variable(name.into()).into(),
             postfix: true,
             coalesce: false,
             args: exprs
@@ -1727,11 +1715,11 @@ mod tests {
             cond: cond.into(),
             then: Block {
                 items: vec![],
-                stmts: vec![Stmt::Expr { expr: then.into() }],
+                stmts: vec![Stmt::Expr { expr: then }],
             },
             els: Some(Block {
                 items: vec![],
-                stmts: vec![Stmt::Expr { expr: els.into() }],
+                stmts: vec![Stmt::Expr { expr: els }],
             }),
         }
     }
@@ -2061,7 +2049,6 @@ let example_input = r"
 .|....-|.\
 ..//.|....
 ")
-                    .into()
                 }
             ))
         );
@@ -2162,9 +2149,7 @@ let example_input = r"
                     cond: Expr::Variable(id("kelley")).into(),
                     then: Block {
                         items: vec![],
-                        stmts: vec![Stmt::Expr {
-                            expr: Expr::Int(21).into()
-                        }]
+                        stmts: vec![Stmt::Expr { expr: int(21) }]
                     },
                     els: None,
                 }
@@ -2179,9 +2164,7 @@ let example_input = r"
                     cond: Expr::Variable(id("kelley")).into(),
                     then: Block {
                         items: vec![],
-                        stmts: vec![Stmt::Expr {
-                            expr: Expr::Int(21).into()
-                        }]
+                        stmts: vec![Stmt::Expr { expr: int(21) }]
                     },
                     els: None,
                 }
@@ -2198,12 +2181,12 @@ let example_input = r"
                         coalesce: false,
                         args: vec![Argument {
                             name: None,
-                            expr: Expr::Int(12).into()
+                            expr: int(12)
                         }]
                     }
                     .into(),
                     op: "+".into(),
-                    right: Expr::Int(21).into()
+                    right: int(21).into()
                 }
             ))
         );
@@ -2218,12 +2201,12 @@ let example_input = r"
                         coalesce: false,
                         args: vec![Argument {
                             name: Some(id("bla")),
-                            expr: Expr::Int(12).into()
+                            expr: int(12)
                         }]
                     }
                     .into(),
                     op: "+".into(),
-                    right: Expr::Int(21).into()
+                    right: int(21).into()
                 }
             ))
         );
@@ -2238,13 +2221,13 @@ let example_input = r"
                 binary(
                     "+",
                     Expr::Invocation {
-                        expr: Expr::Variable(id("kelley")).into(),
+                        expr: var("kelley").into(),
                         postfix: false,
                         coalesce: false,
                         args: vec![
                             Argument {
                                 name: Some(id("bla")),
-                                expr: Expr::Int(12).into()
+                                expr: int(12)
                             },
                             Argument {
                                 name: None,
@@ -2311,7 +2294,7 @@ let example_input = r"
                 " ?",
                 Stmt::Declare {
                     pattern: declare_id("h"),
-                    expr: int(7).into()
+                    expr: int(7),
                 }
             ))
         );
@@ -2321,7 +2304,7 @@ let example_input = r"
                 " ?",
                 Stmt::Declare {
                     pattern: declare_id("h"),
-                    expr: int(-7).into()
+                    expr: int(-7),
                 }
             ))
         );
@@ -2331,7 +2314,7 @@ let example_input = r"
                 " ?",
                 Stmt::Declare {
                     pattern: declare_id("h"),
-                    expr: unary("!", int(-7)).into()
+                    expr: unary("!", int(-7)),
                 }
             ))
         );
@@ -2420,7 +2403,7 @@ let example_input = r"
                 "",
                 Stmt::Declare {
                     pattern: declare_id("v"),
-                    expr: Expr::RegexLiteral("[0-9]+".to_string()).into(),
+                    expr: Expr::RegexLiteral("[0-9]+".to_string()),
                 }
             ))
         );
@@ -2430,7 +2413,7 @@ let example_input = r"
                 "",
                 Stmt::Declare {
                     pattern: declare_id("v"),
-                    expr: Expr::RegexLiteral("[0-9\\/]+".to_string()).into(),
+                    expr: Expr::RegexLiteral("[0-9\\/]+".to_string()),
                 }
             ))
         );
@@ -2440,7 +2423,7 @@ let example_input = r"
                 "",
                 Stmt::Declare {
                     pattern: declare_id("v"),
-                    expr: Expr::RegexLiteral("[!@^&*#+%$=\\/]".to_string()).into(),
+                    expr: Expr::RegexLiteral("[!@^&*#+%$=\\/]".to_string()),
                 }
             ))
         );
@@ -2492,7 +2475,7 @@ let example_input = r"
                 "",
                 Stmt::Declare {
                     pattern: declare_id("v"),
-                    expr: str("world").into()
+                    expr: str("world"),
                 }
             ))
         );
@@ -2525,7 +2508,6 @@ let example_input = r"
                             StrLiteralPiece::Fragment("ld".into()),
                         ]
                     }
-                    .into()
                 }
             ))
         );
@@ -2535,14 +2517,14 @@ let example_input = r"
             cond: Expr::BinaryExpr {
                 left: Expr::Variable(id("d")).into(),
                 op: "==".into(),
-                right: Expr::Int(0).into(),
+                right: int(0).into(),
             }
             .into(),
             then: Block {
                 items: vec![],
                 stmts: vec![Stmt::Assign {
                     pattern: AssignPattern::Location(AssignLocationExpr::Id(id("n"))),
-                    expr: Expr::Int(0).into(),
+                    expr: int(0),
                 }],
             },
             els: Some(Block {
@@ -2553,8 +2535,7 @@ let example_input = r"
                         left: Expr::Variable(id("n")).into(),
                         op: "+".into(),
                         right: Expr::Variable(id("d")).into(),
-                    }
-                    .into(),
+                    },
                 }],
             }),
         };
@@ -2586,7 +2567,7 @@ let example_input = r"
                             stmts: vec![
                                 Stmt::Declare {
                                     pattern: declare_id("n"),
-                                    expr: Expr::Variable(id("start")).into()
+                                    expr: Expr::Variable(id("start")),
                                 },
                                 Stmt::Expr {
                                     expr: Expr::AnonymousFn {
@@ -2597,12 +2578,11 @@ let example_input = r"
                                             body: Block {
                                                 items: vec![],
                                                 stmts: vec![Stmt::Expr {
-                                                    expr: if_block.clone().into()
+                                                    expr: if_block.clone()
                                                 }]
                                             }
                                         }
                                     }
-                                    .into()
                                 }
                             ]
                         }
@@ -2641,20 +2621,20 @@ let example_input = r"
                     cond: Expr::BinaryExpr {
                         left: Expr::Variable(id("d")).into(),
                         op: "==".into(),
-                        right: Expr::Int(0).into(),
+                        right: int(0).into(),
                     }
                     .into(),
                     then: Block {
                         items: vec![],
                         stmts: vec![Stmt::Assign {
                             pattern: AssignPattern::Location(AssignLocationExpr::Id(id("n"))),
-                            expr: Expr::Int(0).into(),
+                            expr: int(0),
                         }],
                     },
                     els: Some(Block {
                         items: vec![],
                         stmts: vec![Stmt::Expr {
-                            expr: if_block.clone().into()
+                            expr: if_block.clone(),
                         }],
                     }),
                 }
@@ -2673,7 +2653,7 @@ let example_input = r"
                     items: vec![],
                     stmts: vec![Stmt::Declare {
                         pattern: declare_id("h"),
-                        expr: Expr::Int(7).into()
+                        expr: int(7),
                     }]
                 }
             ))
@@ -2687,7 +2667,7 @@ let example_input = r"
                     items: vec![],
                     stmts: vec![Stmt::Assign {
                         pattern: assign_id("h"),
-                        expr: int(5).into(),
+                        expr: int(5),
                     }]
                 }
             ))
@@ -2701,7 +2681,7 @@ let example_input = r"
                     items: vec![],
                     stmts: vec![Stmt::Assign {
                         pattern: assign_id("h"),
-                        expr: binary("+", var("h"), int(5)).into()
+                        expr: binary("+", var("h"), int(5)),
                     }]
                 }
             ))
@@ -2721,11 +2701,9 @@ let example_input = r"
                     stmts: vec![
                         Stmt::Assign {
                             pattern: AssignPattern::Location(AssignLocationExpr::Id(id("h"))),
-                            expr: binary("+", var("h"), Expr::Int(7)).into()
+                            expr: binary("+", var("h"), Expr::Int(7)),
                         },
-                        Stmt::Expr {
-                            expr: Expr::Int(5).into()
-                        }
+                        Stmt::Expr { expr: int(5) }
                     ]
                 }
             ))
@@ -2747,15 +2725,13 @@ let example_input = r"
                                 guard: DeclareGuardExpr::Unguarded(id("h")),
                                 ty: Some(Type::Int)
                             },
-                            expr: Expr::Int(7).into()
+                            expr: int(7),
                         },
                         Stmt::Assign {
                             pattern: AssignPattern::Location(AssignLocationExpr::Id(id("kelley"))),
-                            expr: Expr::Int(712).into()
+                            expr: int(712),
                         },
-                        Stmt::Expr {
-                            expr: Expr::Int(5).into()
-                        }
+                        Stmt::Expr { expr: int(5) }
                     ]
                 }
             ))
@@ -2779,7 +2755,7 @@ let example_input = r"
                     }],
                     stmts: vec![Stmt::Declare {
                         pattern: declare_id("h"),
-                        expr: Expr::Int(7).into()
+                        expr: int(7),
                     }]
                 }
             ))
@@ -2798,12 +2774,8 @@ let example_input = r"
                             body: Block {
                                 items: vec![],
                                 stmts: vec![
-                                    Stmt::Expr {
-                                        expr: Expr::Int(7).into()
-                                    },
-                                    Stmt::Expr {
-                                        expr: Expr::Int(1).into()
-                                    }
+                                    Stmt::Expr { expr: int(7) },
+                                    Stmt::Expr { expr: int(1) }
                                 ]
                             }
                         }
@@ -2826,7 +2798,6 @@ let example_input = r"
                             stmts: vec![]
                         }
                     }
-                    .into()
                 }
             ))
         );
@@ -2851,11 +2822,11 @@ let example_input = r"
                         stmts: vec![
                             Stmt::Declare {
                                 pattern: declare_id("v"),
-                                expr: str("world").into()
+                                expr: str("world"),
                             },
                             Stmt::Declare {
                                 pattern: declare_id("h"),
-                                expr: Expr::Int(2).into()
+                                expr: int(2),
                             },
                             Stmt::Expr {
                                 expr: Expr::AnonymousFn {
@@ -2878,12 +2849,10 @@ let example_input = r"
                                                         ),
                                                     ]
                                                 }
-                                                .into()
                                             }]
                                         }
                                     }
                                 }
-                                .into()
                             }
                         ]
                     }
@@ -2959,7 +2928,7 @@ let example_input = r"
                             items: vec![],
                             stmts: vec![Stmt::Assign {
                                 pattern: AssignPattern::Location(AssignLocationExpr::Id(id("h"))),
-                                expr: Expr::Int(1).into()
+                                expr: int(1)
                             }]
                         }
                     }
@@ -3041,7 +3010,7 @@ let example_input = r"
                     assert!(matches!(
                         &stmts[1],
                         &Stmt::Expr {
-                            expr: box Expr::AnonymousFn { .. }
+                            expr: Expr::AnonymousFn { .. }
                         }
                     ));
                 }
@@ -3219,9 +3188,7 @@ let example_input = r"
                         label: None,
                         body: Block {
                             items: vec![],
-                            stmts: vec![Stmt::Expr {
-                                expr: var("bla").into()
-                            }],
+                            stmts: vec![Stmt::Expr { expr: var("bla") }],
                         },
                         cond: None
                     },

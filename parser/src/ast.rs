@@ -364,14 +364,14 @@ pub enum Stmt {
     },
     Declare {
         pattern: DeclarePattern,
-        expr: Box<Expr>,
+        expr: Expr,
     },
     Assign {
         pattern: AssignPattern,
-        expr: Box<Expr>,
+        expr: Expr,
     },
     Expr {
-        expr: Box<Expr>,
+        expr: Expr,
     }, // ...
 }
 
