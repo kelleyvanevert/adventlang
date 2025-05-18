@@ -41,6 +41,9 @@ pub enum Stmt {
     }, // ...
 }
 
+// a[b][c]
+// (access local a)
+
 // impl Stmt {
 //     pub fn ty(&self, pass: &InferencePass) -> Type {
 //         match self {
