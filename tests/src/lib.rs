@@ -26,7 +26,7 @@ mod tests {
     #[test_case("2024_day06")]
     #[test_case("2024_day07")]
     #[test_case("2024_day08")]
-    fn test_parse_aoc_2023_day01(name: &str) {
+    fn test_parse_aoc(name: &str) {
         let content =
             std::fs::read_to_string(format!("./aoc/{name}.al")).expect("can read aoc file");
 
