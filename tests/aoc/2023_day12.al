@@ -61,7 +61,7 @@ fn arrangements(pieces, ns, indent) {
   }
 
   // find next number
-  let (i, n) = ns :enumerate :fold (nil, 0), |(i, n), (j, m)| {
+  let (i, n) = ns :enumerate :fold (nil, 0) 'with |(i, n), (j, m)| {
     if m > n { (j, m) } else { (i, n) }
   }
 

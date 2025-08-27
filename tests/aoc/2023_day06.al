@@ -36,7 +36,7 @@ fn solve(input: str) {
 
     races
         :map race
-        :fold 1, |a, b| { a * b }
+        :fold 1 'with |a, b| { a * b }
 }
 
 fn bonus(input: str) {

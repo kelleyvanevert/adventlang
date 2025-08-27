@@ -96,7 +96,7 @@ fn bonus(input: str) {
           looping[j] = i
           if all(looping) {
             print("    ..and ALL are looping now -> shortcut");
-            return looping :fold 1, lcm
+            return looping :fold 1 'with lcm
           }
         }
       }

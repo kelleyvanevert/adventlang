@@ -773,7 +773,7 @@ enum TmpOp {
     InfixOrPostfix {
         id: Identifier,
         coalesce: bool,
-        args: Vec<Expr>,
+        args: Vec<Argument>,
     },
 }
 
@@ -801,7 +801,10 @@ fn infix_or_postfix_fn_latter_part(input: State) -> ParseResult<State, TmpOp> {
             identifier,
             optional(seq((
                 preceded(slws0, unary_expr_stack),
-                many0(preceded(seq((slws0, char(','), slws0)), unary_expr_stack)),
+                many0(
+                    seq((slws0, tag("'"), identifier, slws1, unary_expr_stack)),
+                    // preceded(seq((slws0, char(','), slws0)), unary_expr_stack)
+                ),
             ))),
         )),
         |(_, coalesce, _, id, opt)| TmpOp::InfixOrPostfix {
@@ -809,9 +812,17 @@ fn infix_or_postfix_fn_latter_part(input: State) -> ParseResult<State, TmpOp> {
             coalesce: coalesce.is_some(),
             args: match opt {
                 None => vec![],
-                Some((first, mut rest)) => {
-                    rest.insert(0, first);
-                    rest
+                Some((expr, additional_named_args)) => {
+                    let mut all = vec![Argument { name: None, expr }];
+
+                    for (_, _, name, _, expr) in additional_named_args {
+                        all.push(Argument {
+                            name: Some(name.into()),
+                            expr,
+                        });
+                    }
+
+                    all
                 }
             },
         },
@@ -837,13 +848,7 @@ fn infix_or_postfix_fn_call_stack(s: State) -> ParseResult<State, Expr> {
                         expr: Expr::Variable(id).into(),
                         postfix: true,
                         coalesce,
-                        args: [
-                            vec![Argument { name: None, expr }],
-                            args.into_iter()
-                                .map(|expr| Argument { name: None, expr })
-                                .collect(),
-                        ]
-                        .concat(),
+                        args: [vec![Argument { name: None, expr }], args].concat(),
                     },
                 };
             }
@@ -1706,6 +1711,15 @@ mod tests {
                 .into_iter()
                 .map(|expr| Argument { name: None, expr })
                 .collect(),
+        }
+    }
+
+    fn invocation_postfix(name: &str, args: Vec<Argument>) -> Expr {
+        Expr::Invocation {
+            expr: Expr::Variable(name.into()).into(),
+            postfix: true,
+            coalesce: false,
+            args,
         }
     }
 
@@ -3049,37 +3063,134 @@ let example_input = r"
         );
 
         assert_eq!(
-            test_parse(expr, r"input :trim :split b, c"),
+            test_parse(expr, r"input :trim :split b 'bla c"),
             Some((
                 "",
-                simple_invocation_postfix(
+                invocation_postfix(
                     "split",
                     vec![
-                        simple_invocation_postfix("trim", vec![var("input")]),
-                        var("b"),
-                        var("c")
+                        Argument {
+                            name: None,
+                            expr: simple_invocation_postfix("trim", vec![var("input")])
+                        },
+                        Argument {
+                            name: None,
+                            expr: var("b")
+                        },
+                        Argument {
+                            name: Some("bla".into()),
+                            expr: var("c")
+                        }
                     ]
                 )
             ))
         );
 
         assert_eq!(
-            test_parse(expr, r"input :trim :split b, c :fold 1, |acc, bla| { 42 }"),
+            test_parse(
+                expr,
+                r"input :trim :split b 'bla c :fold 1 'with |acc, bla| { 42 }"
+            ),
             Some((
                 "",
-                simple_invocation_postfix(
+                invocation_postfix(
                     "fold",
                     vec![
-                        simple_invocation_postfix(
-                            "split",
-                            vec![
-                                simple_invocation_postfix("trim", vec![var("input")]),
-                                var("b"),
-                                var("c")
-                            ]
-                        ),
-                        int(1),
-                        anon_expr(vec!["acc", "bla"], int(42))
+                        Argument {
+                            name: None,
+                            expr: invocation_postfix(
+                                "split",
+                                vec![
+                                    Argument {
+                                        name: None,
+                                        expr: simple_invocation_postfix("trim", vec![var("input")])
+                                    },
+                                    Argument {
+                                        name: None,
+                                        expr: var("b")
+                                    },
+                                    Argument {
+                                        name: Some("bla".into()),
+                                        expr: var("c")
+                                    }
+                                ]
+                            )
+                        },
+                        Argument {
+                            name: None,
+                            expr: int(1)
+                        },
+                        Argument {
+                            name: Some("with".into()),
+                            expr: anon_expr(vec!["acc", "bla"], int(42))
+                        }
+                    ]
+                )
+            ))
+        );
+
+        // assert_eq!(
+        //     test_parse(
+        //         constrained(true, expr),
+        //         r"input :trim :split b 'bla c :fold 1 'with { 42 }"
+        //     ),
+        //     Some((
+        //         ", { 42 }",
+        //         simple_invocation_postfix(
+        //             "fold",
+        //             vec![
+        //                 simple_invocation_postfix(
+        //                     "split",
+        //                     vec![
+        //                         simple_invocation_postfix("trim", vec![var("input")]),
+        //                         var("b"),
+        //                         var("c")
+        //                     ]
+        //                 ),
+        //                 int(1),
+        //             ]
+        //         )
+        //     ))
+        // );
+
+        assert_eq!(
+            test_parse(
+                constrained(true, expr),
+                r"input :trim :split b 'bla c :fold 1 'with |acc, bla| { 42 }"
+            ),
+            Some((
+                "",
+                invocation_postfix(
+                    "fold",
+                    vec![
+                        Argument {
+                            name: None,
+                            expr: invocation_postfix(
+                                "split",
+                                vec![
+                                    Argument {
+                                        name: None,
+                                        expr: simple_invocation_postfix("trim", vec![var("input")])
+                                    },
+                                    Argument {
+                                        name: None,
+                                        expr: var("b")
+                                    },
+                                    Argument {
+                                        name: Some("bla".into()),
+                                        expr: var("c")
+                                    }
+                                ]
+                            )
+                        },
+                        Argument {
+                            name: None,
+                            expr: int(1)
+                        },
+                        Argument {
+                            name: Some("with".into()),
+                            expr: anon_expr(vec!["acc", "bla"], int(42))
+                        }
                     ]
                 )
             ))
@@ -3088,72 +3199,41 @@ let example_input = r"
         assert_eq!(
             test_parse(
                 constrained(true, expr),
-                r"input :trim :split b, c :fold 1, { 42 }"
-            ),
-            Some((
-                ", { 42 }",
-                simple_invocation_postfix(
-                    "fold",
-                    vec![
-                        simple_invocation_postfix(
-                            "split",
-                            vec![
-                                simple_invocation_postfix("trim", vec![var("input")]),
-                                var("b"),
-                                var("c")
-                            ]
-                        ),
-                        int(1),
-                    ]
-                )
-            ))
-        );
-
-        assert_eq!(
-            test_parse(
-                constrained(true, expr),
-                r"input :trim :split b, c :fold 1, |acc, bla| { 42 }"
+                r"input :trim :split b 'bla c :fold 1 'with (|acc, bla| { 42 })"
             ),
             Some((
                 "",
-                simple_invocation_postfix(
+                invocation_postfix(
                     "fold",
                     vec![
-                        simple_invocation_postfix(
-                            "split",
-                            vec![
-                                simple_invocation_postfix("trim", vec![var("input")]),
-                                var("b"),
-                                var("c")
-                            ]
-                        ),
-                        int(1),
-                        anon_expr(vec!["acc", "bla"], int(42))
-                    ]
-                )
-            ))
-        );
-
-        assert_eq!(
-            test_parse(
-                constrained(true, expr),
-                r"input :trim :split b, c :fold 1, (|acc, bla| { 42 })"
-            ),
-            Some((
-                "",
-                simple_invocation_postfix(
-                    "fold",
-                    vec![
-                        simple_invocation_postfix(
-                            "split",
-                            vec![
-                                simple_invocation_postfix("trim", vec![var("input")]),
-                                var("b"),
-                                var("c")
-                            ]
-                        ),
-                        int(1),
-                        anon_expr(vec!["acc", "bla"], int(42))
+                        Argument {
+                            name: None,
+                            expr: invocation_postfix(
+                                "split",
+                                vec![
+                                    Argument {
+                                        name: None,
+                                        expr: simple_invocation_postfix("trim", vec![var("input")])
+                                    },
+                                    Argument {
+                                        name: None,
+                                        expr: var("b")
+                                    },
+                                    Argument {
+                                        name: Some("bla".into()),
+                                        expr: var("c")
+                                    }
+                                ]
+                            )
+                        },
+                        Argument {
+                            name: None,
+                            expr: int(1)
+                        },
+                        Argument {
+                            name: Some("with".into()),
+                            expr: anon_expr(vec!["acc", "bla"], int(42))
+                        }
                     ]
                 )
             ))

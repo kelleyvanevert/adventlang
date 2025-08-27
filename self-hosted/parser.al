@@ -4,7 +4,7 @@
 fn regex(re: regex) {
   |input| {
     if let (m, _) = input :match re {
-      ((input :slice len(m)), m)
+      (input :slice len(m), m)
     }
   }
 }
@@ -29,7 +29,7 @@ fn pmap(parser, f) {
 
 fn pseq(parsers) {
   |input| {
-    parsers :fold (input, []), |m, parser| {
+    parsers :fold (input, []) 'with |m, parser| {
       if let (rem, results) = m {
         if let (rem2, r) = parser(rem) {
           results []= r
@@ -51,7 +51,7 @@ fn terminated(p1, p2) {
 fn tag(str) {
   |input| {
     if input :starts_with str {
-      ((input :slice len(str)), str)
+      (input :slice len(str), str)
     }
   }
 }

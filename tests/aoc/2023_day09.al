@@ -37,7 +37,7 @@ fn lookback(values) {
     i += 1
   }
 
-  seqs :map |seq| { seq[0] } :reverse :fold 0, |m, n| { n - m }
+  seqs :map |seq| { seq[0] } :reverse :fold 0 'with |m, n| { n - m }
 }
 
 fn bonus(input: str) {

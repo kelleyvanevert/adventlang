@@ -111,7 +111,7 @@ fn bonus(input: str) {
             ?:[0]
             ?? -1
 
-          corrected = corrected :insert (place_after+1), n
+          corrected = corrected :insert n 'at (place_after+1)
         }
       }
 
