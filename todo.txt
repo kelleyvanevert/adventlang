@@ -841,3 +841,40 @@ HIR
 
     closure.r + f.0(f.1, 10)
   }
+
+
+---
+
+
+fn add(a: int, b: int) {
+  ...
+}
+
+
+fn main() {
+  fn add(.., ..) {}
+
+  let p = add
+
+  p("a", "b") -- p no longer overloaded
+}
+
+- named fns vs locals that happen to contain functions
+  - when functions are declared (or, maybe later, imported),
+    they're considered fn overloading candidates
+  - when locals are declared, they're just functions
+
+  -> when updating the passed-along `Scope`, these two
+      can be distinguished, like I was already doing before
+
+- (both of these, at runtime, must still include in their
+   representation a pointer to their parent scope)
+
+- access
+  - when a variable is accessed, it will always be a regular
+    local acccess, also when it's applied
+  - when a function in invoked, depending on the callable expr:
+    - if it's a local, it's just a regular access
+       -> happens automatically due to how the `Scope` was updated
+    - if it's a named fn (or import), it's a candidate list,
+       and all other candidates are also added

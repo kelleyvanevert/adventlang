@@ -1,76 +1,67 @@
-use ast::{AlRegex, Float, Identifier, TypeVar};
-use inkwell::values::FunctionValue;
+use std::fmt::{Display, Write};
 
-use crate::{codegen::CodegenContext, inference_pass::InferencePass};
+pub use parser::ast::{FnType, Identifier, Type, TypeVar};
 
-#[derive(Debug, PartialEq, Eq)]
-pub struct DocumentHIR {
-    pub body: BlockHIR,
-}
+use indenter::indented;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BlockHIR {
-    pub ty: TypeHIR,
-    // pub items: Vec<ItemHIR>,
-    pub stmts: Vec<StmtHIR>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum StmtHIR {
-    Pass,
-    Break {
-        label: Option<Identifier>,
-        expr: Option<ExprHIR>,
-    },
-    Continue {
-        label: Option<Identifier>,
-    },
-    Return {
-        expr: Option<ExprHIR>,
-    },
-    AssignLocal {
-        local_access: LocalAccess,
-        expr: Box<ExprHIR>,
-    },
-    // AssignInList {
-    //     index_access: IndexAccess,
-    //     expr: Box<ExprHIR>,
-    // },
-    Expr {
-        expr: Box<ExprHIR>,
-    }, // ...
-}
-
-// impl StmtHIR {
-//     pub fn ty(&self, pass: &InferencePass) -> TypeHIR {
-//         match self {
-//             Self::Pass => TypeHIR::Nil,
-//             Self::Break { .. } => TypeHIR::Nil, // ?
-//             Self::Continue { .. } => TypeHIR::Nil,
-//             Self::Return { .. } => TypeHIR::Nil,
-//             Self::Declare { .. } => TypeHIR::Nil,
-//             Self::Assign { .. } => TypeHIR::Nil,
-//             Self::Expr { expr } => expr.ty(pass),
-//         }
-//     }
-// }
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum StrLiteralPieceHIR {
+pub enum StrLiteralPiece {
     Fragment(String),
-    Interpolation(ExprHIR),
+    Interpolation(Expr),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ArgumentHIR {
-    pub name: Option<Identifier>,
-    pub expr: ExprHIR,
+pub struct FnDecl {
+    pub name: Option<String>,
+    pub generics: Vec<TypeVar>,
+    pub ret: Option<Type>,
+    pub params: Vec<Identifier>,
+    pub locals: Vec<Option<Type>>,
+    pub body: Option<Block>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DictKeyHIR {
-    Identifier(Identifier),
-    Expr(ExprHIR),
+impl Display for FnDecl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "fn ")?;
+
+        if let Some(name) = &self.name {
+            write!(f, "{}", name)?;
+        }
+
+        if self.generics.len() > 0 {
+            write!(f, "<")?;
+            let mut i = 0;
+            for v in &self.generics {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{v}")?;
+                i += 1;
+            }
+            write!(f, ">")?;
+        }
+        {
+            write!(f, "(")?;
+            let mut i = 0;
+            for (id, t) in self.params.iter().zip(&self.params) {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{id}: {t}")?;
+                i += 1;
+            }
+            write!(f, ")")?;
+        }
+        if self.ret.is_some() {
+            write!(f, " -> {}", self.ret.as_ref().unwrap())?;
+        }
+
+        match &self.body {
+            None => write!(f, " <builtin>")?,
+            Some(block) => write!(f, " {block}")?,
+        }
+        write!(f, "")
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,237 +72,311 @@ pub struct LocalAccess {
     // 0 = current fn's scope, etc..
     pub ancestor_num: usize,
 
+    // "identity" (e.g. for type checking)
     pub fn_id: usize,
     pub local_index: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AccessHIR {
-    Var(LocalAccess),
-    Fn { overload_fn_ids: Vec<usize> },
+impl Display for LocalAccess {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.id)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ExprHIR {
-    // ===
-    // Runtime necessities
-    // ===
-    Failure(String),
+pub enum Access {
+    Local(LocalAccess),
+    NamedFn { candidates: Vec<usize> },
+}
 
-    // ===
-    // All the various literals...
-    // ===
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Argument {
+    pub name: Option<Identifier>,
+    pub expr: Expr,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DictKey {
+    Identifier(Identifier),
+    Expr(Expr),
+}
+
+// f = add
+// assign(access local f, access named fn { candidates: [&add] })
+//
+// f = |a, b| { a + b }
+// assign(access local f, anonymous fn)
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Expr {
+    Failure(String),
     StrLiteral {
-        pieces: Vec<StrLiteralPieceHIR>,
+        pieces: Vec<StrLiteralPiece>,
     },
     NilLiteral,
-    RegexLiteral {
-        regex: AlRegex,
-    },
+    RegexLiteral(String),
     Bool(bool),
     Int(i64),
-    Float(Float),
-    ListLiteral {
-        el_ty: TypeHIR,
-        elements: Vec<ExprHIR>,
-        splat: Option<Box<ExprHIR>>,
-    },
-    TupleLiteral {
-        elements: Vec<ExprHIR>,
-    },
-    // DictLiteral {
-    //     key_ty: TypeHIR,
-    //     val_ty: TypeHIR,
-    //     elements: Vec<(DictKeyHIR, ExprHIR)>,
-    // },
-
-    // ===
-    // `Expr::Variable` breaks down into five cases:
-    // ===
-    // NamedFn {}, // ???
-    // AnonFn {}, // ???
-    Access(AccessHIR),
-
-    // ===
+    Float(String),
+    AnonymousFn(usize),
+    //
+    // Variable(Identifier),
+    Access(Access),
+    //
+    // UnaryExpr
+    // BinaryExpr
     // Invocation
-    // ===
-    // Note: unary, binary, indexing, and regular fn applications are all compiled to an invocation
-    // The difference is mostly is the expression, which will be a `Builtin` or otherwise..
+    // Note: we can't yet elide argument names and amount, by matching up with the callable, because we might not know yet (because it's type-directed)
     Invocation {
         coalesce: bool,
-        resolved_fn_id: usize,            // See comment todo.txt #FNREF
-        resolved_fn_name: Option<String>, // for debugging
-        // generic fn instantiation?
-        args: Vec<ArgumentHIR>,
-        //
-        // in order to compute the type, the overload matching needs to happen here,
-        // -- which essentially means that the fn expr cannot be fully runtime-dependent
-        //  (turing's halting problem). We have two options:
-        //
-        // (1) only allow the expression to resolve to 1 fn type
-        // (2) determine a fixed amount of fn types to be runtime-resolvable,
-        //   and set this expression as a UNION of the resulting types.
-
-        // For now, we should probably just stick to the first, because ...
-        //  I think that's probably already quite hard to do.
+        callable: Box<Expr>,
+        args: Vec<Argument>,
     },
-
-    // ===
-    // Control structure
-    // ===
+    //
+    ListLiteral {
+        elements: Vec<Expr>,
+        splat: Option<Box<Expr>>,
+    },
+    TupleLiteral {
+        elements: Vec<Expr>,
+    },
+    DictLiteral {
+        elements: Vec<(DictKey, Expr)>,
+    },
+    Index {
+        expr: Box<Expr>,
+        coalesce: bool,
+        index: Box<Expr>,
+    },
+    Member {
+        expr: Box<Expr>,
+        coalesce: bool,
+        member: Identifier,
+    },
     If {
-        ty: TypeHIR,
-        // pattern: Option<DeclarePatternHIR>, /// ????
-        cond: Box<ExprHIR>,
-        then: BlockHIR,
-        els: Option<BlockHIR>,
+        cond: Box<Expr>,
+        then: Block,
+        els: Block,
     },
-    While {
-        ty: TypeHIR,
-        label: Option<Identifier>,
-        // pattern: Option<DeclarePatternHIR>, /// ????
-        cond: Box<ExprHIR>,
-        body: BlockHIR,
-    },
-    DoWhile {
-        ty: TypeHIR,
-        label: Option<Identifier>,
-        body: BlockHIR,
-        cond: Option<Box<ExprHIR>>,
-    },
+    //
+    // DoWhile
+    // While
+    // For
     Loop {
-        ty: TypeHIR,
-        label: Option<Identifier>,
-        body: BlockHIR,
-    },
-    For {
-        ty: TypeHIR,
-        label: Option<Identifier>,
-        // pattern: DeclarePatternHIR, // <- lowered away, will be unpacked in body
-        range: Box<ExprHIR>,
-        body: BlockHIR,
+        label: Identifier,
+        body: Block,
     },
 }
 
-impl ExprHIR {
-    pub fn ty(&self, pass: &InferencePass) -> TypeHIR {
+impl Display for Expr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Failure(..) => TypeHIR::Never,
-            Self::StrLiteral { .. } => TypeHIR::Str,
-            Self::NilLiteral => TypeHIR::Nil,
-            Self::RegexLiteral { .. } => TypeHIR::Regex,
-            Self::Bool(_) => TypeHIR::Bool,
-            Self::Int(_) => TypeHIR::Int,
-            Self::Float(_) => TypeHIR::Float,
-            // Self::EmptyList { el_ty } => TypeHIR::List(el_ty.clone().into()),
-            Self::ListLiteral { el_ty, .. } => TypeHIR::List(el_ty.clone().into()),
-            Self::TupleLiteral { elements } => {
-                TypeHIR::Tuple(elements.iter().map(|el| el.ty(pass)).collect())
-            }
-            // Self::DictLiteral { key_ty, val_ty, .. } => {
-            //     TypeHIR::Dict(Some((key_ty.clone().into(), val_ty.clone().into())))
-            // }
-            Self::Access(AccessHIR::Fn { overload_fn_ids }) => TypeHIR::Fn {
-                overload_fn_ids: overload_fn_ids.clone(),
-            },
-            Self::Access(AccessHIR::Var(LocalAccess {
-                local_index, fn_id, ..
-            })) => {
-                return pass.get_fn_scope(*fn_id).locals[*local_index].clone();
-            }
-            Self::Invocation {
-                coalesce,
-                resolved_fn_id,
-                ..
-            } => {
-                let ret_ty = pass.get_fn_ty(*resolved_fn_id).ret.as_ref().clone();
-
-                if *coalesce {
-                    TypeHIR::Nullable(ret_ty.into())
-                } else {
-                    ret_ty
+            Expr::Failure(message) => write!(f, "fail({message})"),
+            Expr::StrLiteral { pieces } => {
+                write!(f, "\"")?;
+                for piece in pieces {
+                    match piece {
+                        StrLiteralPiece::Fragment(s) => write!(f, "{s}")?,
+                        StrLiteralPiece::Interpolation(expr) => write!(f, "{{{expr}}}")?,
+                    }
                 }
+                write!(f, "\"")
             }
-            Self::If { ty, .. } => ty.clone(),
-            Self::While { ty, .. } => ty.clone(),
-            Self::DoWhile { ty, .. } => ty.clone(),
-            Self::Loop { ty, .. } => ty.clone(),
-            Self::For { ty, .. } => ty.clone(),
+            Expr::NilLiteral => write!(f, "()"),
+            Expr::RegexLiteral { .. } => write!(f, "<regex>"),
+            Expr::Bool(b) => write!(f, "{b}"),
+            Expr::Int(n) => write!(f, "{n}"),
+            Expr::Float(n) => write!(f, "{n}"),
+            Expr::ListLiteral {
+                elements, splat, ..
+            } => {
+                write!(f, "[")?;
+                for el in elements {
+                    write!(f, "{el}, ")?;
+                }
+                if let Some(splat) = splat {
+                    write!(f, "...{splat}")?;
+                }
+                write!(f, "]")
+            }
+            Expr::TupleLiteral { elements } => {
+                write!(f, "(")?;
+                for el in elements {
+                    write!(f, "{el}, ")?;
+                }
+                write!(f, ")")
+            }
+            Expr::DictLiteral { .. } => panic!("TODO print dictLiteral"),
+            Expr::AnonymousFn(fn_id) => {
+                write!(f, "fn#{fn_id}")
+            }
+            Expr::Access(Access::Local(local)) => {
+                write!(f, "{}", local)
+            }
+            Expr::Access(Access::NamedFn { candidates }) => {
+                write!(
+                    f,
+                    "fn_{}",
+                    candidates
+                        .iter()
+                        .map(|n| n.to_string())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                )
+            }
+            Expr::Invocation {
+                coalesce,
+                callable,
+                args,
+            } => {
+                write!(f, "{callable}")?;
+                if *coalesce {
+                    write!(f, "?")?;
+                }
+                write!(f, "(")?;
+                let mut i = 0;
+                for Argument { name, expr } in args {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    if let Some(name) = name {
+                        write!(f, "{name} = ")?;
+                    }
+                    write!(f, "{expr}")?;
+                    i += 1;
+                }
+                write!(f, ")")
+            }
+            Expr::Index {
+                expr,
+                coalesce,
+                index,
+            } => {
+                write!(f, "{expr}{}[{index}]", if *coalesce { "?" } else { "" })
+            }
+            Expr::Member {
+                expr,
+                coalesce,
+                member,
+            } => {
+                todo!("display hir expr member")
+            }
+            Expr::If {
+                cond, then, els, ..
+            } => {
+                write!(f, "if {cond} {then}")?;
+                write!(f, " else {els}")?;
+                write!(f, "")
+            }
+            Expr::Loop { label, body } => {
+                write!(f, "'{label}: {body}")
+            }
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DeclareGuardExprHIR {
-    Unguarded(Identifier),
-    Some(Identifier),
-    // TODO more things, like simple comparisons etc.
+pub enum Stmt {
+    Pass,
+    Break {
+        label: Option<Identifier>,
+        expr: Option<Expr>,
+    },
+    Continue {
+        label: Option<Identifier>,
+    },
+    Return {
+        expr: Expr,
+    },
+    Declare {
+        local: LocalAccess,
+        ty: Option<Type>,
+    },
+    AssignLocal {
+        local: LocalAccess,
+        expr: Expr,
+    },
+    AssignInList {
+        local: LocalAccess,
+        index: Expr,
+        expr: Expr,
+    },
+    AssignMember {
+        local: LocalAccess,
+        id: Identifier,
+        expr: Expr,
+    },
+    Expr {
+        expr: Expr,
+    }, // ...
+}
+
+impl Display for Stmt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Stmt::Pass => write!(f, "pass"),
+            Stmt::Break { label, expr } => {
+                write!(f, "break")?;
+                if let Some(label) = label {
+                    write!(f, " '{label}")?;
+                }
+                if let Some(expr) = expr {
+                    write!(f, " with {expr}")?;
+                }
+                write!(f, "")
+            }
+            Stmt::Continue { label } => {
+                write!(f, "continue")?;
+                if let Some(label) = label {
+                    write!(f, " '{label}")?;
+                }
+                // if let Some(expr) = expr {
+                //     write!(f, " with {expr}")?;
+                // }
+                write!(f, "")
+            }
+            Stmt::Return { expr } => write!(f, "return {expr}"),
+            Stmt::Declare { local, ty } => {
+                write!(f, "declare {local}")?;
+                if let Some(ty) = ty {
+                    write!(f, ": {ty}")?;
+                }
+                write!(f, "")
+            }
+            Stmt::AssignLocal { local, expr } => write!(f, "{local} = {expr}"),
+            Stmt::AssignInList { local, index, expr } => write!(f, "{local}[{index}] = {expr}"),
+            Stmt::AssignMember { local, id, expr } => write!(f, "{local}.{id} = {expr}"),
+            Stmt::Expr { expr } => write!(f, "{expr}"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AssignPatternHIR {
-    Id(Identifier),
-    Index(Box<AssignPatternHIR>, Option<Box<ExprHIR>>),
-    List {
-        elements: Vec<AssignPatternHIR>,
-        // TODO maybe also add rest spread
-        //   AFTER I also add rest spread to list literal exprs
-    },
-    Tuple {
-        elements: Vec<AssignPatternHIR>,
-        // TODO maybe also add rest spread
-        //   AFTER I also add rest spread to tuple literal exprs
-    },
+pub struct Block {
+    // removed during desugaring
+    // (possibly for debugging I could also retain a link)
+    // pub items: Vec<Item>,
+    //
+    pub stmts: Vec<Stmt>,
 }
 
-/// The representation/content of a single function, e.g. as it would be written in code,
-///  including whatever is necessary to generate LLVM IR
-/// (Except it might still be generically parametrized -- in which case multiple instantiations will be stamped out)
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FnDeclHIR {
-    pub name: Option<String>, // just for debugging
-
-    pub ty: FnTypeHIR,
-    pub params: Vec<Identifier>, // for matching up at call sites, not for codegen
-
-    // for codegen
-    pub locals: Vec<TypeHIR>,
-
-    // one of three
-    pub body: Option<BlockHIR>,
-    pub builtin: Option<usize>,
-    pub gen_builtin: Option<fn(ctx: &mut CodegenContext, f: FunctionValue)>,
+impl Display for Block {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{{\n")?;
+        for stmt in &self.stmts {
+            write!(indented(f), "{stmt}\n")?;
+        }
+        write!(f, "}}")
+    }
 }
 
-/// The type of a single function
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FnTypeHIR {
-    pub generics: Vec<TypeVar>,
-    pub params: Vec<TypeHIR>,
-    pub ret: Box<TypeHIR>,
+#[derive(Debug, PartialEq, Eq)]
+pub struct Document {
+    pub body: Block,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum TypeHIR {
-    Never,
-
-    Nil,
-    Bool,
-    Str,
-    Int,
-    Float,
-    Num,
-    Regex,
-    Fn {
-        // the "trick" here, is that the type is used to
-        //  determine which concrete overload to use,
-        //  so we actually pass on the `fn_id` ;)
-        overload_fn_ids: Vec<usize>,
-    },
-    List(Box<TypeHIR>),
-    Tuple(Vec<TypeHIR>),
-    // Dict(Option<(Box<Type>, Box<Type>)>),
-    // // Union(Vec<Type>),
-    Nullable(Box<TypeHIR>),
-    TypeVar(TypeVar),
+impl Display for Document {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.body)
+    }
 }

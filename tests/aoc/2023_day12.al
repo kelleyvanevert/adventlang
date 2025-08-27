@@ -40,7 +40,7 @@ fn hash(pieces: [str], ns: [int]) {
 }
 
 let should_memoize = false
-let cache: dict[any, int] = @{}
+let cache: dict[_, int] = @{}
 
 fn arrangements(pieces, ns, indent) {
   let h = (pieces, ns)
