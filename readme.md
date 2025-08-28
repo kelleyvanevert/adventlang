@@ -6,6 +6,10 @@ _Note: This is a WORK IN PROGRESS. For the previous, working version of this lan
 
 ![](./assets/adventlang_logo.png)
 
+I must say, it's a bit insulting that GitHub thinks Adventlang most resembles Perl 🤔
+
+![](./assets/github-perl.png)
+
 ## Grammar
 
 It's a C-style (or more like, just basically Rust) syntax. There's parentheses, you can omit semicolons at the end of lines, most everything is an expression, etc., and then _one thing_: function application can be done infix and postfix with the ":apply syntax", which makes the language fun and easy to use for AdventOfCode problem solving. Like a swiss army knife of data transformations! For example:
@@ -111,7 +115,7 @@ do-while-expr ::=
   "{" block-contents "}"
   [ "while" expr ]
 
-while-expr ::= 
+while-expr ::=
   [ "'" identifier ":" ]
   "while" maybe-parenthesized([ "let" declare-pattern "=" ] expr)
   "{" block-contents "}"
