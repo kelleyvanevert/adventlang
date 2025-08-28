@@ -113,7 +113,7 @@ do-while-expr ::=
 
 while-expr ::= 
   [ "'" identifier ":" ]
-  "while" [ "let" declare-pattern "=" ] expr
+  "while" maybe-parenthesized([ "let" declare-pattern "=" ] expr)
   "{" block-contents "}"
 
 loop-expr ::=
