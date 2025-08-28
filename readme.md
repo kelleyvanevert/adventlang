@@ -94,6 +94,7 @@ expr ::=
   | expr [ "?" ] ":" "[" expr "]"
   | expr [ "?" ] ":" identifier [ expr ] { "'" identifier expr }
   | expr infix-op expr
+  | "(" expr ")"
 
 argument ::= [ identifier "=" ] expr
 
