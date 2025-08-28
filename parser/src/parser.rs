@@ -122,19 +122,19 @@ fn label(s: State) -> ParseResult<State, Identifier> {
     preceded(tag("'"), raw_identifier).parse(s)
 }
 
-fn slws0(s: State) -> ParseResult<State, &str> {
+fn slws0(s: State<'_>) -> ParseResult<State<'_>, &str> {
     regex(r"^[ \t]*").parse(s)
 }
 
-fn ws0(s: State) -> ParseResult<State, &str> {
+fn ws0(s: State<'_>) -> ParseResult<State<'_>, &str> {
     regex(r"^\s*").parse(s)
 }
 
-fn ws1(s: State) -> ParseResult<State, &str> {
+fn ws1(s: State<'_>) -> ParseResult<State<'_>, &str> {
     regex(r"^\s+").parse(s)
 }
 
-fn slws1(s: State) -> ParseResult<State, &str> {
+fn slws1(s: State<'_>) -> ParseResult<State<'_>, &str> {
     regex(r"^[ \t]+").parse(s)
 }
 
