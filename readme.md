@@ -8,7 +8,7 @@ _Note: This is a WORK IN PROGRESS. For the previous, working version of this lan
 
 ## Grammar
 
-It's a C-style (or more like, just basically Rust) syntax. There's parentheses, you can omit semicolons at the end of lines, most everything is an expression, etc., and then _one thing_: function application can be done infix and postfix with the ":apply syntax", which makes the whole language very easy to use for AdventOfCode problem solving. For example:
+It's a C-style (or more like, just basically Rust) syntax. There's parentheses, you can omit semicolons at the end of lines, most everything is an expression, etc., and then _one thing_: function application can be done infix and postfix with the ":apply syntax", which makes the language fun and easy to use for AdventOfCode problem solving. Like a swiss army knife of data transformations! For example:
 
 ```al
 let total = input :trim :lines :map |line| { line :split "-" :map int :sum } :sum
