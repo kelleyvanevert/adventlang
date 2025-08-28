@@ -26,7 +26,7 @@ jobs:
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
     - uses: KyleMayes/install-llvm-action@v2.0.7
       with:
-        version: "18.0"
+        version: "18"
         directory: "/opt/homebrew/opt/llvm@18"
     - uses: actions-rust-lang/setup-rust-toolchain@v1
     - name: Build
