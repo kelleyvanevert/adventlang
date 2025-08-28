@@ -8,7 +8,7 @@ _Note: This is a WORK IN PROGRESS. For the previous, working version of this lan
 
 I must say, it's a bit insulting that GitHub thinks Adventlang most resembles Perl 🤔
 
-![](./assets/github-perl.png)
+![](./assets/github-perl-2.png)
 
 ## Grammar
 
