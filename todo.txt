@@ -878,3 +878,11 @@ fn main() {
        -> happens automatically due to how the `Scope` was updated
     - if it's a named fn (or import), it's a candidate list,
        and all other candidates are also added
+
+
+===
+
+
+https://thunderseethe.dev/posts/type-inference/
+
+also: https://cheats.rs/
