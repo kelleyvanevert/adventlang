@@ -831,15 +831,15 @@ HIR
     define closure
     closure.n = 6
 
-    (mk, &closure)
+    { impl: mk, env: &closure }
   }
 
   fn main() {
     define closure
     closure.f = bla()
-    closure.r = f.0(f.1, 2)
+    closure.r = f.impl(f.env, 2)
 
-    closure.r + f.0(f.1, 10)
+    closure.r + f.impl(f.env, 10)
   }
 
 
