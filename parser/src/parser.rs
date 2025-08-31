@@ -1,11 +1,17 @@
 use either::Either;
 use parser_combinators::{
-    generic::{ParseResult, Parser, check, delimited, many0, map, optional, preceded, seq},
-    text::{ParseNode, TextParseState, expand_span, map_node, regex, tag},
+    generic::{
+        ParseResult, Parser, alt, check, delimited, many0, many1, map, map_state, optional,
+        preceded, seq, terminated, value,
+    },
+    text::{
+        ParseNode, TextParseState, as_node, char, escaped_char, expand_span, map_node, regex,
+        slws0, slws1, tag, update_meta, ws0, ws1,
+    },
 };
 use regex::Regex;
 
-use crate::ast::{Identifier, TypeVar};
+use crate::ast::{Argument, AstKind, Expr, Identifier, IntoAstNode, StrLiteralPiece, TypeVar};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct StateMeta {
@@ -13,7 +19,8 @@ struct StateMeta {
 }
 
 type State<'a> = TextParseState<'a, StateMeta>;
-type Res<'a, T> = ParseResult<State<'a>, ParseNode<T>>;
+type Res<'a, T> = ParseResult<State<'a>, T>;
+type NodeRes<'a, T> = ParseResult<State<'a>, ParseNode<T>>;
 // type P<'a, T> = dyn Parser<State<'a>, Output = Res<'a, T>>;
 
 fn initial_parse_state<'a>(input: &'a str) -> State<'a> {
@@ -21,7 +28,7 @@ fn initial_parse_state<'a>(input: &'a str) -> State<'a> {
 }
 
 fn raw_identifier(s: State) -> Res<Identifier> {
-    map_node(regex(r"^[_a-zA-Z][_a-zA-Z0-9]*"), |id| {
+    map(regex(r"^[_a-zA-Z][_a-zA-Z0-9]*"), |id| {
         Identifier(id.into())
     })
     .parse(s)
@@ -32,13 +39,13 @@ fn identifier(s: State) -> Res<Identifier> {
         ![
             "fn", "if", "else", "then", "while", "do", "for", "let", "loop", "true", "false",
         ]
-        .contains(&id.data.0.as_str())
+        .contains(&id.0.as_str())
     })
     .parse(s)
 }
 
 fn raw_type_var(s: State) -> Res<TypeVar> {
-    map_node(regex(r"^[_a-zA-Z][_a-zA-Z0-9]*"), |id| TypeVar(id.into())).parse(s)
+    map(regex(r"^[_a-zA-Z][_a-zA-Z0-9]*"), |id| TypeVar(id.into())).parse(s)
 }
 
 fn type_var(s: State) -> Res<TypeVar> {
@@ -46,71 +53,79 @@ fn type_var(s: State) -> Res<TypeVar> {
         ![
             "any", "nil", "bool", "str", "int", "float", "num", "regex", "tuple", "list",
         ]
-        .contains(&id.data.0.as_str())
+        .contains(&id.0.as_str())
     })
     .parse(s)
 }
 
-fn label(s: State) -> Res<Identifier> {
-    expand_span(preceded(tag("'"), raw_identifier)).parse(s)
+fn label(s: State) -> NodeRes<Identifier> {
+    as_node(preceded(tag("'"), raw_identifier)).parse(s)
 }
 
-// #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-// enum StrFrag<'a> {
-//     Literal(&'a str),
-//     EscapedChar(char),
-//     EscapedWs,
-// }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StrFrag<'a> {
+    Literal(&'a str),
+    EscapedChar(char),
+    EscapedWs,
+}
 
-// fn str_lit_frag(s: State) -> ParseResult<State, String> {
-//     map(
-//         many1(alt((
-//             map(regex(r#"^[^"{\\]+"#), StrFrag::Literal),
-//             map(escaped_char, StrFrag::EscapedChar),
-//             value(StrFrag::EscapedWs, preceded(char('\\'), ws1)),
-//         ))),
-//         |pieces| {
-//             let mut build = "".to_string();
-//             for piece in pieces {
-//                 match piece {
-//                     StrFrag::EscapedChar(c) => build.push(c),
-//                     StrFrag::Literal(l) => build += l,
-//                     StrFrag::EscapedWs => {}
-//                 }
-//             }
-//             build
-//         },
-//     )
-//     .parse(s)
-// }
+fn str_lit_frag(s: State) -> Res<String> {
+    map(
+        many1(alt((
+            map(regex(r#"^[^"{\\]+"#), StrFrag::Literal),
+            map(escaped_char, StrFrag::EscapedChar),
+            value(StrFrag::EscapedWs, preceded(char('\\'), ws1)),
+        ))),
+        |pieces| {
+            let mut build = "".to_string();
+            for piece in pieces {
+                match piece {
+                    StrFrag::EscapedChar(c) => build.push(c),
+                    StrFrag::Literal(l) => build += l,
+                    StrFrag::EscapedWs => {}
+                }
+            }
+            build
+        },
+    )
+    .parse(s)
+}
 
-// fn raw_str_literal(s: State) -> ParseResult<State, Expr> {
-//     map(
-//         delimited(tag(r#"r""#), regex(r#"^[^"]*"#), char('"')),
-//         |s| Expr::StrLiteral {
-//             pieces: vec![StrLiteralPiece::Fragment(s.into())],
-//         },
-//     )
-//     .parse(s)
-// }
+fn raw_str_literal(s: State) -> NodeRes<Expr> {
+    as_node(map(
+        delimited(tag(r#"r""#), as_node(regex(r#"^[^"]*"#)), char('"')),
+        |s| Expr::StrLiteral {
+            pieces: vec![
+                s.into_ast_node(|s| AstKind::StrLiteralPiece(StrLiteralPiece::Fragment(s.into()))),
+            ],
+        },
+    ))
+    .parse(s)
+}
 
-// fn str_literal(s: State) -> ParseResult<State, Expr> {
-//     map(
-//         delimited(
-//             char('"'),
-//             many0(alt((
-//                 map(str_lit_frag, StrLiteralPiece::Fragment),
-//                 map(
-//                     seq((char('{'), ws0, constrained(false, expr), ws0, char('}'))),
-//                     |(_, _, expr, _, _)| StrLiteralPiece::Interpolation(expr),
-//                 ),
-//             ))),
-//             char('"'),
-//         ),
-//         |pieces| Expr::StrLiteral { pieces },
-//     )
-//     .parse(s)
-// }
+fn str_literal(s: State) -> NodeRes<Expr> {
+    map(
+        delimited(
+            char('"'),
+            many0(alt((
+                map(str_lit_frag, StrLiteralPiece::Fragment),
+                map(
+                    seq((
+                        char('{'),
+                        ws0,
+                        update_meta(StateMeta { constrained: false }, expr),
+                        ws0,
+                        char('}'),
+                    )),
+                    |(_, _, expr, _, _)| StrLiteralPiece::Interpolation(expr),
+                ),
+            ))),
+            char('"'),
+        ),
+        |pieces| Expr::StrLiteral { pieces },
+    )
+    .parse(s)
+}
 
 // // ugly, I know
 // fn regex_contents(s: State) -> ParseResult<State, String> {
@@ -464,362 +479,346 @@ fn label(s: State) -> Res<Identifier> {
 //     .parse(s)
 // }
 
-// fn invocation_args(s: State) -> ParseResult<State, Vec<Argument>> {
-//     let constrained = s.constrained;
+fn invocation_args(s: State) -> NodeRes<Vec<Argument>> {
+    todo!()
+    // let constrained = s.constrained;
 
-//     let trailing_anon_fn = map(anonymous_fn, |expr| Argument { name: None, expr });
+    // let trailing_anon_fn = map(anonymous_fn, |expr| Argument { name: None, expr });
 
-//     if let Some((s, (args, _))) = listy("(", argument, argument, ")").parse(s.clone()) {
-//         let mut seen_named_arg = false;
-//         for arg in &args {
-//             if seen_named_arg && arg.name.is_none() {
-//                 // unnamed args cannot follow named args
-//                 return None;
-//             } else if arg.name.is_some() {
-//                 seen_named_arg = true;
-//             }
-//         }
+    // if let Some((s, (args, _))) = listy("(", argument, argument, ")").parse(s.clone()) {
+    //     let mut seen_named_arg = false;
+    //     for arg in &args {
+    //         if seen_named_arg && arg.name.is_none() {
+    //             // unnamed args cannot follow named args
+    //             return None;
+    //         } else if arg.name.is_some() {
+    //             seen_named_arg = true;
+    //         }
+    //     }
 
-//         if !constrained && let Some((s, arg)) = preceded(slws0, trailing_anon_fn).parse(s.clone()) {
-//             let mut args = args;
-//             args.push(arg);
-//             Some((s, args))
-//         } else {
-//             Some((s, args))
-//         }
-//     } else {
-//         if constrained {
-//             None
-//         } else {
-//             map(trailing_anon_fn, |arg| vec![arg]).parse(s)
-//         }
-//     }
-// }
+    //     if !constrained && let Some((s, arg)) = preceded(slws0, trailing_anon_fn).parse(s.clone()) {
+    //         let mut args = args;
+    //         args.push(arg);
+    //         Some((s, args))
+    //     } else {
+    //         Some((s, args))
+    //     }
+    // } else {
+    //     if constrained {
+    //         None
+    //     } else {
+    //         map(trailing_anon_fn, |arg| vec![arg]).parse(s)
+    //     }
+    // }
+}
 
-// fn expr_index_or_method_stack(s: State) -> ParseResult<State, Expr> {
-//     map(
-//         seq((
-//             expr_leaf,
-//             many0(alt((
-//                 map(
-//                     seq((
-//                         delimited(ws0, optional(char('?')), ws0),
-//                         delimited(
-//                             seq((char('['), ws0)),
-//                             constrained(false, expr),
-//                             seq((ws0, char(']'))),
-//                         ),
-//                     )),
-//                     Either::Left,
-//                 ),
-//                 map(
-//                     seq((
-//                         preceded(ws0, optional(char('?'))),
-//                         preceded(seq((ws0, char('.'))), identifier),
-//                     )),
-//                     Either::Right,
-//                 ),
-//             ))),
-//         )),
-//         |(mut expr, indices)| {
-//             for index in indices {
-//                 match index {
-//                     Either::Left((coalesce, index)) => {
-//                         expr = Expr::Index {
-//                             expr: expr.into(),
-//                             coalesce: coalesce.is_some(),
-//                             index: index.into(),
-//                         };
-//                     }
-//                     Either::Right((coalesce, id)) => {
-//                         expr = Expr::Index {
-//                             expr: expr.into(),
-//                             coalesce: coalesce.is_some(),
-//                             index: Expr::StrLiteral {
-//                                 pieces: vec![StrLiteralPiece::Fragment(id.0.to_string())],
-//                             }
-//                             .into(),
-//                         };
-//                     }
-//                 }
-//             }
-//             expr
-//         },
-//     )
-//     .parse(s)
-// }
+fn expr_index_or_method_stack(s: State) -> NodeRes<Expr> {
+    todo!()
+    // map(
+    //     seq((
+    //         expr_leaf,
+    //         many0(alt((
+    //             map(
+    //                 seq((
+    //                     delimited(ws0, optional(char('?')), ws0),
+    //                     delimited(
+    //                         seq((char('['), ws0)),
+    //                         constrained(false, expr),
+    //                         seq((ws0, char(']'))),
+    //                     ),
+    //                 )),
+    //                 Either::Left,
+    //             ),
+    //             map(
+    //                 seq((
+    //                     preceded(ws0, optional(char('?'))),
+    //                     preceded(seq((ws0, char('.'))), identifier),
+    //                 )),
+    //                 Either::Right,
+    //             ),
+    //         ))),
+    //     )),
+    //     |(mut expr, indices)| {
+    //         for index in indices {
+    //             match index {
+    //                 Either::Left((coalesce, index)) => {
+    //                     expr = Expr::Index {
+    //                         expr: expr.into(),
+    //                         coalesce: coalesce.is_some(),
+    //                         index: index.into(),
+    //                     };
+    //                 }
+    //                 Either::Right((coalesce, id)) => {
+    //                     expr = Expr::Index {
+    //                         expr: expr.into(),
+    //                         coalesce: coalesce.is_some(),
+    //                         index: Expr::StrLiteral {
+    //                             pieces: vec![StrLiteralPiece::Fragment(id.0.to_string())],
+    //                         }
+    //                         .into(),
+    //                     };
+    //                 }
+    //             }
+    //         }
+    //         expr
+    //     },
+    // )
+    // .parse(s)
+}
 
-// fn expr_call_stack(s: State) -> ParseResult<State, Expr> {
-//     map(
-//         seq((
-//             expr_index_or_method_stack,
-//             many0(preceded(slws0, invocation_args)),
-//         )),
-//         |(mut expr, invocations)| {
-//             for args in invocations {
-//                 expr = Expr::Invocation {
-//                     expr: expr.into(),
-//                     postfix: false,
-//                     coalesce: false, //TODO
-//                     args,
-//                 }
-//             }
-//             expr
-//         },
-//     )
-//     .parse(s)
-// }
+fn expr_call_stack(s: State) -> NodeRes<Expr> {
+    map_state(
+        seq((
+            expr_index_or_method_stack,
+            many0(preceded(slws0, invocation_args)),
+        )),
+        |mut state, (mut expr, invocations)| {
+            for args in invocations {
+                (state, expr) = state.produce_node_with_span(
+                    (expr.span.0, args.span.1),
+                    Expr::Invocation {
+                        expr: expr.into_ast_node(|expr| AstKind::Expr(expr)).into(),
+                        postfix: false,
+                        coalesce: false, //TODO
+                        args,
+                    },
+                );
+            }
 
-// fn unary_expr_stack(s: State) -> ParseResult<State, Expr> {
-//     map(
-//         seq((many0(terminated(tag("!"), ws0)), expr_call_stack)),
-//         |(ops, mut expr)| {
-//             for op in ops.into_iter().rev() {
-//                 expr = Expr::UnaryExpr {
-//                     expr: expr.into(),
-//                     op: op.into(),
-//                 }
-//             }
-//             expr
-//         },
-//     )
-//     .parse(s)
-// }
+            Some((state, expr))
+        },
+    )
+    .parse(s)
+}
 
-// #[derive(Debug, Clone)]
-// enum TmpOp {
-//     IndexSugar(bool, Expr),
-//     InfixOrPostfix {
-//         id: Identifier,
-//         coalesce: bool,
-//         args: Vec<Argument>,
-//     },
-// }
+fn unary_expr_stack(s: State) -> NodeRes<Expr> {
+    map_state(
+        seq((many0(terminated(tag("!"), ws0)), expr_call_stack)),
+        |mut state, (ops, mut expr)| {
+            for op in ops.into_iter().rev() {
+                (state, expr) = state.produce_node_with_span(
+                    (op.span.0, expr.span.1),
+                    Expr::UnaryExpr {
+                        expr: expr.into_ast_node(|expr| AstKind::Expr(expr)).into(),
+                        op: op.into_ast_node(|op| AstKind::Op(op.to_string())).into(),
+                    },
+                );
+            }
+            Some((state, expr))
+        },
+    )
+    .parse(s)
+}
 
-// fn postfix_index_sugar(input: State) -> ParseResult<State, TmpOp> {
-//     map(
-//         seq((
-//             ws0,
-//             optional(char('?')),
-//             ws0,
-//             tag(":["),
-//             constrained(false, expr),
-//             char(']'),
-//         )),
-//         |(_, coalesce, _, _, expr, _)| TmpOp::IndexSugar(coalesce.is_some(), expr),
-//     )
-//     .parse(input)
-// }
+#[derive(Debug, Clone)]
+enum TmpOp {
+    IndexSugar(bool, ParseNode<Expr>),
+    InfixOrPostfix {
+        id: ParseNode<Identifier>,
+        coalesce: bool,
+        args: Vec<Argument>,
+    },
+}
 
-// fn infix_or_postfix_fn_latter_part(input: State) -> ParseResult<State, TmpOp> {
-//     map(
-//         seq((
-//             ws0,
-//             optional(seq((char('?'), ws0))),
-//             char(':'),
-//             identifier,
-//             optional(seq((
-//                 preceded(slws0, unary_expr_stack),
-//                 many0(
-//                     seq((slws0, tag("'"), identifier, slws1, unary_expr_stack)),
-//                     // preceded(seq((slws0, char(','), slws0)), unary_expr_stack)
-//                 ),
-//             ))),
-//         )),
-//         |(_, coalesce, _, id, opt)| TmpOp::InfixOrPostfix {
-//             id,
-//             coalesce: coalesce.is_some(),
-//             args: match opt {
-//                 None => vec![],
-//                 Some((expr, additional_named_args)) => {
-//                     let mut all = vec![Argument { name: None, expr }];
+fn postfix_index_sugar(input: State) -> Res<TmpOp> {
+    map(
+        seq((
+            ws0,
+            optional(char('?')),
+            ws0,
+            tag(":["),
+            update_meta(StateMeta { constrained: false }, expr),
+            char(']'),
+        )),
+        |(_, coalesce, _, _, expr, _)| TmpOp::IndexSugar(coalesce.is_some(), expr),
+    )
+    .parse(input)
+}
 
-//                     for (_, _, name, _, expr) in additional_named_args {
-//                         all.push(Argument {
-//                             name: Some(name.into()),
-//                             expr,
-//                         });
-//                     }
+fn infix_or_postfix_fn_latter_part(input: State) -> Res<TmpOp> {
+    map(
+        seq((
+            ws0,
+            optional(seq((char('?'), ws0))),
+            char(':'),
+            as_node(identifier),
+            optional(seq((
+                preceded(slws0, unary_expr_stack),
+                many0(
+                    seq((
+                        slws0,
+                        tag("'"),
+                        as_node(identifier),
+                        slws1,
+                        unary_expr_stack,
+                    )),
+                    // preceded(seq((slws0, char(','), slws0)), unary_expr_stack)
+                ),
+            ))),
+        )),
+        |(_, coalesce, _, id, opt)| TmpOp::InfixOrPostfix {
+            id,
+            coalesce: coalesce.is_some(),
+            args: match opt {
+                None => vec![],
+                Some((expr, additional_named_args)) => {
+                    let expr = expr.into_ast_node(|expr| AstKind::Expr(expr));
 
-//                     all
-//                 }
-//             },
-//         },
-//     )
-//     .parse(input)
-// }
+                    let mut all = vec![Argument { name: None, expr }];
 
-// fn infix_or_postfix_fn_call_stack(s: State) -> ParseResult<State, Expr> {
-//     map(
-//         seq((
-//             unary_expr_stack,
-//             many0(alt((postfix_index_sugar, infix_or_postfix_fn_latter_part))),
-//         )),
-//         |(mut expr, ops)| {
-//             for op in ops {
-//                 expr = match op {
-//                     TmpOp::IndexSugar(coalesce, index) => Expr::Index {
-//                         expr: expr.into(),
-//                         coalesce,
-//                         index: index.into(),
-//                     },
-//                     TmpOp::InfixOrPostfix { id, coalesce, args } => Expr::Invocation {
-//                         expr: Expr::Variable(id).into(),
-//                         postfix: true,
-//                         coalesce,
-//                         args: [vec![Argument { name: None, expr }], args].concat(),
-//                     },
-//                 };
-//             }
-//             expr
-//         },
-//     )
-//     .parse(s)
-// }
+                    for (_, _, name, _, expr) in additional_named_args {
+                        let name = name.into_ast_node(|id| AstKind::Identifier(id));
+                        all.push(Argument {
+                            name: Some(name),
+                            expr: expr.into_ast_node(|expr| AstKind::Expr(expr)),
+                        });
+                    }
 
-// fn mul_expr_stack(s: State) -> ParseResult<State, Expr> {
-//     map(
-//         seq((
-//             infix_or_postfix_fn_call_stack,
-//             many0(seq((
-//                 ws0,
-//                 alt((tag("*"), tag("/"), tag("%"))),
-//                 ws0,
-//                 infix_or_postfix_fn_call_stack,
-//             ))),
-//         )),
-//         |(mut expr, ops)| {
-//             for (_, op, _, right) in ops {
-//                 expr = Expr::BinaryExpr {
-//                     left: expr.into(),
-//                     op: op.into(),
-//                     right: right.into(),
-//                 }
-//             }
-//             expr
-//         },
-//     )
-//     .parse(s)
-// }
+                    all
+                }
+            },
+        },
+    )
+    .parse(input)
+}
 
-// fn add_expr_stack(s: State) -> ParseResult<State, Expr> {
-//     map(
-//         seq((
-//             mul_expr_stack,
-//             many0(seq((
-//                 ws0,
-//                 alt((tag("+"), tag("-"), tag("<<"))),
-//                 ws0,
-//                 mul_expr_stack,
-//             ))),
-//         )),
-//         |(mut expr, ops)| {
-//             for (_, op, _, right) in ops {
-//                 expr = Expr::BinaryExpr {
-//                     left: expr.into(),
-//                     op: op.into(),
-//                     right: right.into(),
-//                 }
-//             }
-//             expr
-//         },
-//     )
-//     .parse(s)
-// }
+fn infix_or_postfix_fn_call_stack(s: State) -> NodeRes<Expr> {
+    map(
+        seq((
+            unary_expr_stack,
+            many0(alt((postfix_index_sugar, infix_or_postfix_fn_latter_part))),
+        )),
+        |(mut expr, ops)| {
+            for op in ops {
+                expr = match op {
+                    TmpOp::IndexSugar(coalesce, index) => Expr::Index {
+                        expr: expr.into(),
+                        coalesce,
+                        index: index.into(),
+                    },
+                    TmpOp::InfixOrPostfix { id, coalesce, args } => Expr::Invocation {
+                        expr: Expr::Variable(id).into(),
+                        postfix: true,
+                        coalesce,
+                        args: [vec![Argument { name: None, expr }], args].concat(),
+                    },
+                };
+            }
+            expr
+        },
+    )
+    .parse(s)
+}
 
-// fn equ_expr_stack(s: State) -> ParseResult<State, Expr> {
-//     map(
-//         seq((
-//             add_expr_stack,
-//             many0(seq((
-//                 ws0,
-//                 alt((
-//                     tag("!="),
-//                     tag(">="),
-//                     tag("<="),
-//                     tag("=="),
-//                     tag("<"),
-//                     tag(">"),
-//                     tag("^"),
-//                 )),
-//                 ws0,
-//                 add_expr_stack,
-//             ))),
-//         )),
-//         |(mut expr, ops)| {
-//             for (_, op, _, right) in ops {
-//                 expr = Expr::BinaryExpr {
-//                     left: expr.into(),
-//                     op: op.into(),
-//                     right: right.into(),
-//                 }
-//             }
-//             expr
-//         },
-//     )
-//     .parse(s)
-// }
+fn mul_expr_stack(s: State) -> NodeRes<Expr> {
+    binop_expr_stack(
+        infix_or_postfix_fn_call_stack,
+        alt((
+            //
+            tag("*"),
+            tag("/"),
+            tag("%"),
+        )),
+        infix_or_postfix_fn_call_stack,
+    )
+    .parse(s)
+}
 
-// fn and_expr_stack(s: State) -> ParseResult<State, Expr> {
-//     map(
-//         seq((
-//             equ_expr_stack,
-//             many0(seq((
-//                 ws0,
-//                 alt((
-//                     tag("&&"),
-//                     //
-//                 )),
-//                 ws0,
-//                 equ_expr_stack,
-//             ))),
-//         )),
-//         |(mut expr, ops)| {
-//             for (_, op, _, right) in ops {
-//                 expr = Expr::BinaryExpr {
-//                     left: expr.into(),
-//                     op: op.into(),
-//                     right: right.into(),
-//                 }
-//             }
-//             expr
-//         },
-//     )
-//     .parse(s)
-// }
+fn add_expr_stack(s: State) -> NodeRes<Expr> {
+    binop_expr_stack(
+        mul_expr_stack,
+        alt((
+            //
+            tag("+"),
+            tag("-"),
+            tag("<<"),
+        )),
+        mul_expr_stack,
+    )
+    .parse(s)
+}
 
-// fn or_expr_stack(s: State) -> ParseResult<State, Expr> {
-//     map(
-//         seq((
-//             and_expr_stack,
-//             many0(seq((
-//                 ws0,
-//                 alt((
-//                     tag("||"),
-//                     tag("??"),
-//                     //
-//                 )),
-//                 ws0,
-//                 and_expr_stack,
-//             ))),
-//         )),
-//         |(mut expr, ops)| {
-//             for (_, op, _, right) in ops {
-//                 expr = Expr::BinaryExpr {
-//                     left: expr.into(),
-//                     op: op.into(),
-//                     right: right.into(),
-//                 }
-//             }
-//             expr
-//         },
-//     )
-//     .parse(s)
-// }
+fn equ_expr_stack(s: State) -> NodeRes<Expr> {
+    binop_expr_stack(
+        add_expr_stack,
+        alt((
+            //
+            tag("!="),
+            tag(">="),
+            tag("<="),
+            tag("=="),
+            tag("<"),
+            tag(">"),
+            tag("^"),
+        )),
+        add_expr_stack,
+    )
+    .parse(s)
+}
 
-// fn expr(s: State) -> ParseResult<State, Expr> {
-//     alt((if_expr, or_expr_stack)).parse(s)
-// }
+fn and_expr_stack(s: State) -> NodeRes<Expr> {
+    binop_expr_stack(
+        equ_expr_stack,
+        alt((
+            //
+            tag("&&"),
+        )),
+        equ_expr_stack,
+    )
+    .parse(s)
+}
+
+fn or_expr_stack(s: State) -> NodeRes<Expr> {
+    binop_expr_stack(
+        and_expr_stack,
+        alt((
+            //
+            tag("||"),
+            tag("??"),
+        )),
+        and_expr_stack,
+    )
+    .parse(s)
+}
+
+// Just pass the same function to `parse_expr_le` and `parse_expr_ri` -- I'm not sure how to reuse it
+fn binop_expr_stack<'a, PExpr, POp>(
+    parse_expr_le: PExpr,
+    parse_op: POp,
+    parse_expr_ri: PExpr,
+) -> impl Parser<State<'a>, Output = ParseNode<Expr>>
+where
+    POp: Parser<State<'a>, Output = ParseNode<&'a str>>,
+    PExpr: Parser<State<'a>, Output = ParseNode<Expr>>,
+{
+    map_state(
+        seq((
+            parse_expr_le,
+            many0(seq((ws0, parse_op, ws0, parse_expr_ri))),
+        )),
+        |mut state, (mut expr, ops)| {
+            for (_, op, _, right) in ops {
+                (state, expr) = state.produce_node_with_span(
+                    (expr.span.0, right.span.1),
+                    Expr::BinaryExpr {
+                        left: expr.into_ast_node(|expr| AstKind::Expr(expr)).into(),
+                        op: op.into_ast_node(|op| AstKind::Op(op.to_string())).into(),
+                        right: right.into_ast_node(|expr| AstKind::Expr(expr)).into(),
+                    },
+                );
+            }
+            Some((state, expr))
+        },
+    )
+}
+
+fn expr(s: State) -> NodeRes<Expr> {
+    alt((
+        // if_expr,
+        or_expr_stack,
+    ))
+    .parse(s)
+}
 
 // fn parameter_list(mut s: State) -> ParseResult<State, Vec<Declarable>> {
 //     if let Some((rem, id)) = declarable.parse(s.clone()) {

@@ -3,10 +3,78 @@ use std::fmt::Display;
 use parser_combinators::text::ParseNode;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AstNode {
+    pub id: usize,
+    pub span: (usize, usize),
+    pub kind: AstKind,
+}
+
+pub trait IntoAstNode<T> {
+    fn into_ast_node(self, f: impl FnOnce(T) -> AstKind) -> AstNode;
+}
+
+impl<T> IntoAstNode<T> for ParseNode<T> {
+    fn into_ast_node(self, f: impl FnOnce(T) -> AstKind) -> AstNode {
+        AstNode {
+            id: self.id,
+            span: self.span,
+            kind: f(self.data),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AstKind {
     Identifier(Identifier),
     TypeVar(TypeVar),
     Type(Type),
+    Expr(Expr),
+    StrLiteralPiece(StrLiteralPiece),
+    Op(String),
+}
+
+impl AstNode {
+    pub fn as_identifier(&self) -> &Identifier {
+        match &self.kind {
+            AstKind::Identifier(x) => x,
+            _ => panic!(),
+        }
+    }
+
+    pub fn as_typevar(&self) -> &TypeVar {
+        match &self.kind {
+            AstKind::TypeVar(x) => x,
+            _ => panic!(),
+        }
+    }
+
+    pub fn as_type(&self) -> &Type {
+        match &self.kind {
+            AstKind::Type(x) => x,
+            _ => panic!(),
+        }
+    }
+
+    pub fn as_expr(&self) -> &Expr {
+        match &self.kind {
+            AstKind::Expr(x) => x,
+            _ => panic!(),
+        }
+    }
+
+    pub fn as_str_literal_piece(&self) -> &StrLiteralPiece {
+        match &self.kind {
+            AstKind::StrLiteralPiece(x) => x,
+            _ => panic!(),
+        }
+    }
+
+    pub fn as_op<'a>(&'a self) -> &'a str {
+        match &self.kind {
+            AstKind::Op(x) => x,
+            _ => panic!(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -206,17 +274,17 @@ impl Display for Identifier {
 //     }
 // }
 
-// #[derive(Debug, Clone, PartialEq, Eq)]
-// pub enum StrLiteralPiece {
-//     Fragment(String),
-//     Interpolation(Expr),
-// }
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum StrLiteralPiece {
+    Fragment(String),
+    Interpolation(Expr),
+}
 
-// #[derive(Debug, Clone, PartialEq, Eq)]
-// pub struct Argument {
-//     pub name: Option<Identifier>,
-//     pub expr: Expr,
-// }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Argument {
+    pub name: Option<AstNode>,
+    pub expr: AstNode,
+}
 
 // #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 // pub enum DeclareGuardExpr {
@@ -257,84 +325,84 @@ impl Display for Identifier {
 //     pub body: Block,
 // }
 
-// #[derive(Debug, Clone, PartialEq, Eq)]
-// pub enum Expr {
-//     Failure(String),
-//     StrLiteral {
-//         pieces: Vec<StrLiteralPiece>,
-//     },
-//     NilLiteral,
-//     RegexLiteral(String),
-//     Bool(bool),
-//     Int(i64),
-//     Float(String),
-//     Variable(Identifier),
-//     UnaryExpr {
-//         expr: Box<Expr>,
-//         op: String,
-//     },
-//     BinaryExpr {
-//         left: Box<Expr>,
-//         op: String,
-//         right: Box<Expr>,
-//     },
-//     ListLiteral {
-//         elements: Vec<Expr>,
-//         splat: Option<Box<Expr>>,
-//     },
-//     TupleLiteral {
-//         elements: Vec<Expr>,
-//     },
-//     DictLiteral {
-//         elements: Vec<(DictKey, Expr)>,
-//     },
-//     Index {
-//         expr: Box<Expr>,
-//         coalesce: bool,
-//         index: Box<Expr>,
-//     },
-//     Member {
-//         expr: Box<Expr>,
-//         coalesce: bool,
-//         member: Identifier,
-//     },
-//     Invocation {
-//         expr: Box<Expr>,
-//         postfix: bool,
-//         coalesce: bool,
-//         args: Vec<Argument>,
-//     },
-//     AnonymousFn {
-//         decl: FnDecl,
-//     },
-//     If {
-//         pattern: Option<DeclarePattern>,
-//         cond: Box<Expr>,
-//         then: Block,
-//         els: Option<Block>,
-//     },
-//     While {
-//         label: Option<Identifier>,
-//         pattern: Option<DeclarePattern>,
-//         cond: Box<Expr>,
-//         body: Block,
-//     },
-//     DoWhile {
-//         label: Option<Identifier>,
-//         body: Block,
-//         cond: Option<Box<Expr>>,
-//     },
-//     Loop {
-//         label: Option<Identifier>,
-//         body: Block,
-//     },
-//     For {
-//         label: Option<Identifier>,
-//         pattern: DeclarePattern,
-//         range: Box<Expr>,
-//         body: Block,
-//     },
-// }
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Expr {
+    Failure(String),
+    StrLiteral {
+        pieces: Vec<AstNode>,
+    },
+    NilLiteral,
+    RegexLiteral(String),
+    Bool(bool),
+    Int(i64),
+    Float(String),
+    Variable(Identifier),
+    UnaryExpr {
+        expr: Box<AstNode>,
+        op: Box<AstNode>,
+    },
+    BinaryExpr {
+        left: Box<AstNode>,
+        op: Box<AstNode>,
+        right: Box<AstNode>,
+    },
+    ListLiteral {
+        elements: Vec<AstNode>,
+        splat: Option<Box<AstNode>>,
+    },
+    TupleLiteral {
+        elements: Vec<AstNode>,
+    },
+    // DictLiteral {
+    //     elements: Vec<(DictKey, AstNode)>,
+    // },
+    Index {
+        expr: Box<AstNode>,
+        coalesce: bool,
+        index: Box<AstNode>,
+    },
+    Member {
+        expr: Box<AstNode>,
+        coalesce: bool,
+        member: Identifier,
+    },
+    Invocation {
+        expr: Box<AstNode>,
+        postfix: bool,
+        coalesce: bool,
+        args: Vec<AstNode>,
+    },
+    //     AnonymousFn {
+    //         decl: FnDecl,
+    //     },
+    //     If {
+    //         pattern: Option<DeclarePattern>,
+    //         cond: Box<Expr>,
+    //         then: Block,
+    //         els: Option<Block>,
+    //     },
+    //     While {
+    //         label: Option<Identifier>,
+    //         pattern: Option<DeclarePattern>,
+    //         cond: Box<Expr>,
+    //         body: Block,
+    //     },
+    //     DoWhile {
+    //         label: Option<Identifier>,
+    //         body: Block,
+    //         cond: Option<Box<Expr>>,
+    //     },
+    //     Loop {
+    //         label: Option<Identifier>,
+    //         body: Block,
+    //     },
+    //     For {
+    //         label: Option<Identifier>,
+    //         pattern: DeclarePattern,
+    //         range: Box<Expr>,
+    //         body: Block,
+    //     },
+}
 
 // impl From<AssignLocationExpr> for Expr {
 //     fn from(location: AssignLocationExpr) -> Self {

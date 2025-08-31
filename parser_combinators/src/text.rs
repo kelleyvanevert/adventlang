@@ -3,11 +3,13 @@
 //!
 //! - Its state/input is `TextParseState<M>`, which takes care of tracking source location and creating incremental unique IDs.
 //! - Its primary result/output type is `ParseNode<T>`, which wraps the resulting data with its source location and ID.
+//!
 
 use regex::Regex;
 
 use crate::generic::{
     ParseResult, Parser, alt, delimited, many0, map, map_opt, map_state, optional, preceded, seq,
+    value,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -26,10 +28,11 @@ pub struct ParseNode<T> {
 }
 
 type State<'a, M> = TextParseState<'a, M>;
-type Res<'a, M, T> = ParseResult<State<'a, M>, ParseNode<T>>;
+type Res<'a, M, T> = ParseResult<State<'a, M>, T>;
+type NodeRes<'a, M, T> = ParseResult<State<'a, M>, ParseNode<T>>;
 
-impl<'a, D> TextParseState<'a, D> {
-    pub fn new(input: &'a str, data: D) -> Self {
+impl<'a, M> TextParseState<'a, M> {
+    pub fn new(input: &'a str, data: M) -> Self {
         Self {
             input,
             at: 0,
@@ -38,27 +41,15 @@ impl<'a, D> TextParseState<'a, D> {
         }
     }
 
-    pub fn update_data_with<F: FnOnce(D) -> D>(self, update: F) -> Self {
-        Self {
-            input: self.input,
-            at: self.at,
-            next_id: self.next_id,
-            meta: update(self.meta),
-        }
-    }
-
-    pub fn update_data(self, data: D) -> Self {
-        self.update_data_with(|_| data)
-    }
-
     pub fn remainder(&self) -> &'a str {
         &self.input[self.at..]
     }
 
-    pub fn produce_node<T>(mut self, len: usize, data: T) -> (Self, ParseNode<T>) {
-        let span = (self.at, self.at + len);
-        self.at += len;
-
+    pub fn produce_node_with_span<T>(
+        mut self,
+        span: (usize, usize),
+        data: T,
+    ) -> (Self, ParseNode<T>) {
         let id = self.next_id + 1;
         self.next_id += 1;
 
@@ -67,11 +58,31 @@ impl<'a, D> TextParseState<'a, D> {
         (self, node)
     }
 
+    pub fn produce_node<T>(self, len: usize, data: T) -> (Self, ParseNode<T>) {
+        let span = (self.at, self.at + len);
+        self.produce_node_with_span(span, data)
+    }
+
     pub fn produce_next_id(mut self) -> (Self, usize) {
         let id = self.next_id + 1;
         self.next_id += 1;
 
         (self, id)
+    }
+}
+
+impl<'a, M: Clone> TextParseState<'a, M> {
+    pub fn update_meta_with<F: FnOnce(M) -> M>(self, update: F) -> Self {
+        Self {
+            input: self.input,
+            at: self.at,
+            next_id: self.next_id,
+            meta: update(self.meta),
+        }
+    }
+
+    pub fn update_meta(self, data: M) -> Self {
+        self.update_meta_with(|_| data.clone())
     }
 }
 
@@ -98,9 +109,45 @@ impl<A> ParseNode<Option<A>> {
     }
 }
 
+pub fn update_meta<'a, M, P, O>(
+    meta: M,
+    mut p: P,
+) -> impl Parser<TextParseState<'a, M>, Output = ParseNode<O>>
+where
+    P: Parser<TextParseState<'a, M>, Output = ParseNode<O>>,
+    M: Clone,
+{
+    move |state: TextParseState<'a, M>| {
+        let state = state.update_meta(meta.clone());
+        p.parse(state.clone())
+    }
+}
+
 pub fn pos<'a, M>(state: State<'a, M>) -> ParseResult<State<'a, M>, usize> {
     let at = state.at;
     Some((state, at))
+}
+
+pub fn as_node<'a, M, P, T>(mut p: P) -> impl Parser<TextParseState<'a, M>, Output = ParseNode<T>>
+where
+    P: Parser<TextParseState<'a, M>, Output = T>,
+    M: Clone,
+{
+    move |state: TextParseState<'a, M>| {
+        let (state, id) = state.produce_next_id();
+        let start = state.at;
+        let (state, data) = p.parse(state.clone())?;
+        let end = state.at;
+
+        Some((
+            state,
+            ParseNode {
+                id,
+                span: (start, end),
+                data,
+            },
+        ))
+    }
 }
 
 pub fn tag<'a, M>(tag: &'static str) -> impl Parser<State<'a, M>, Output = ParseNode<&'a str>> {
@@ -123,13 +170,13 @@ pub fn char<'a, M>(c: char) -> impl Parser<State<'a, M>, Output = ParseNode<char
     }
 }
 
-pub fn regex<'a, M>(re: &'static str) -> impl Parser<State<'a, M>, Output = ParseNode<&'a str>> {
+pub fn regex<'a, M>(re: &'static str) -> impl Parser<State<'a, M>, Output = &'a str> {
     let re = Regex::new(re).unwrap();
 
     move |s: State<'a, M>| {
         if let Some(m) = re.find(s.remainder()) {
             let found = &s.remainder()[m.range()];
-            Some(s.produce_node(found.len(), found))
+            Some((s, found))
         } else {
             None
         }
@@ -152,7 +199,7 @@ pub fn slws1<'a, M>(s: State<'a, M>) -> Res<'a, M, &'a str> {
     regex(r"^[ \t]+").parse(s)
 }
 
-pub fn eof<'a, M>(s: State<'a, M>) -> Res<'a, M, ()> {
+pub fn eof<'a, M>(s: State<'a, M>) -> NodeRes<'a, M, ()> {
     if s.remainder().len() == 0 {
         Some(s.produce_node(0, ()))
     } else {
@@ -160,38 +207,38 @@ pub fn eof<'a, M>(s: State<'a, M>) -> Res<'a, M, ()> {
     }
 }
 
-// pub fn listy<'a, P, O, M>(
-//     open_tag: &'static str,
-//     first: P,
-//     rest: P,
-//     close_tag: &'static str,
-// ) -> impl Parser<State<'a, M>, Output = (Vec<O>, bool)>
-// where
-//     P: Parser<State<'a, M>, Output = O>,
-//     M: Clone,
-// {
-//     delimited(
-//         seq((tag(open_tag), ws0)),
-//         map(
-//             optional(seq((
-//                 first,
-//                 many0(preceded(seq((ws0, tag(","), ws0)), rest)),
-//                 ws0,
-//                 optional(tag(",")),
-//             ))),
-//             |opt| match opt {
-//                 None => (vec![], false),
-//                 Some((first_el, mut els, _, trailing_comma)) => {
-//                     els.insert(0, first_el);
-//                     (els, trailing_comma.is_some())
-//                 }
-//             },
-//         ),
-//         seq((ws0, tag(close_tag))),
-//     )
-// }
-
 pub fn listy<'a, P, O, M>(
+    open_tag: &'static str,
+    first: P,
+    rest: P,
+    close_tag: &'static str,
+) -> impl Parser<State<'a, M>, Output = (Vec<O>, bool)>
+where
+    P: Parser<State<'a, M>, Output = O>,
+    M: Clone,
+{
+    delimited(
+        seq((tag(open_tag), ws0)),
+        map(
+            optional(seq((
+                first,
+                many0(preceded(seq((ws0, tag(","), ws0)), rest)),
+                ws0,
+                optional(tag(",")),
+            ))),
+            |opt| match opt {
+                None => (vec![], false),
+                Some((first_el, mut els, _, trailing_comma)) => {
+                    els.insert(0, first_el);
+                    (els, trailing_comma.is_some())
+                }
+            },
+        ),
+        seq((ws0, tag(close_tag))),
+    )
+}
+
+pub fn listy_nodes<'a, P, O, M>(
     open_tag: &'static str,
     first: P,
     rest: P,
@@ -239,40 +286,40 @@ where
     )
 }
 
-// pub fn listy_splat<'a, P, P2, O, O2, M>(
-//     open_tag: &'static str,
-//     first: P,
-//     rest: P,
-//     splat: P2,
-//     close_tag: &'static str,
-// ) -> impl Parser<State<'a, M>, Output = (Vec<O>, Option<O2>)>
-// where
-//     P: Parser<State<'a, M>, Output = O>,
-//     P2: Parser<State<'a, M>, Output = O2>,
-//     M: Clone,
-// {
-//     delimited(
-//         seq((tag(open_tag), ws0)),
-//         map(
-//             optional(seq((
-//                 first,
-//                 many0(preceded(seq((ws0, tag(","), ws0)), rest)),
-//                 ws0,
-//                 optional(preceded(tag(","), optional(preceded(ws0, splat)))),
-//             ))),
-//             |opt| match opt {
-//                 None => (vec![], None),
-//                 Some((first_el, mut els, _, opt)) => {
-//                     els.insert(0, first_el);
-//                     (els, opt.flatten())
-//                 }
-//             },
-//         ),
-//         seq((ws0, tag(close_tag))),
-//     )
-// }
-
 pub fn listy_splat<'a, P, P2, O, O2, M>(
+    open_tag: &'static str,
+    first: P,
+    rest: P,
+    splat: P2,
+    close_tag: &'static str,
+) -> impl Parser<State<'a, M>, Output = (Vec<O>, Option<O2>)>
+where
+    P: Parser<State<'a, M>, Output = O>,
+    P2: Parser<State<'a, M>, Output = O2>,
+    M: Clone,
+{
+    delimited(
+        seq((tag(open_tag), ws0)),
+        map(
+            optional(seq((
+                first,
+                many0(preceded(seq((ws0, tag(","), ws0)), rest)),
+                ws0,
+                optional(preceded(tag(","), optional(preceded(ws0, splat)))),
+            ))),
+            |opt| match opt {
+                None => (vec![], None),
+                Some((first_el, mut els, _, opt)) => {
+                    els.insert(0, first_el);
+                    (els, opt.flatten())
+                }
+            },
+        ),
+        seq((ws0, tag(close_tag))),
+    )
+}
+
+pub fn listy_splat_nodes<'a, P, P2, O, O2, M>(
     open_tag: &'static str,
     first: P,
     rest: P,
@@ -323,17 +370,12 @@ where
     )
 }
 
-pub fn unicode_sequence<'a, M: Clone>(
-    s: State<'a, M>,
-) -> ParseResult<State<'a, M>, ParseNode<char>> {
+pub fn unicode_sequence<'a, M: Clone>(s: State<'a, M>) -> Res<'a, M, char> {
     map_opt(regex(r"^u\{[0-9A-F]{1,6}\}"), |s| {
-        s.map(|s| {
-            u32::from_str_radix(&s[2..s.len() - 1], 16)
-                .ok()
-                .map(std::char::from_u32)
-                .flatten()
-        })
-        .transpose()
+        u32::from_str_radix(&s[2..s.len() - 1], 16)
+            .ok()
+            .map(std::char::from_u32)
+            .flatten()
     })
     .parse(s)
 }
@@ -372,14 +414,14 @@ pub fn escaped_char<'a, M: Clone>(s: State<'a, M>) -> Res<'a, M, char> {
         char('\\'),
         alt((
             unicode_sequence,
-            map_node(char('\n'), |_| 'n'),
-            map_node(char('\r'), |_| 'r'),
-            map_node(char('\t'), |_| 't'),
-            map_node(char('\u{08}'), |_| 'b'),
-            map_node(char('\u{0C}'), |_| 'f'),
-            map_node(char('\\'), |_| '\\'),
-            map_node(char('/'), |_| '/'),
-            map_node(char('"'), |_| '"'),
+            value('n', char('\n')),
+            value('r', char('\r')),
+            value('t', char('\t')),
+            value('b', char('\u{08}')),
+            value('f', char('\u{0C}')),
+            value('\\', char('\\')),
+            value('/', char('/')),
+            value('"', char('"')),
         )),
     )
     .parse(s)
