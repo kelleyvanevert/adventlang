@@ -87,11 +87,19 @@ impl<'a, M: Clone> TextParseState<'a, M> {
 }
 
 impl<A> ParseNode<A> {
-    pub fn map<B>(self, mut f: impl FnMut(A) -> B) -> ParseNode<B> {
+    pub fn map<B>(self, f: impl FnOnce(A) -> B) -> ParseNode<B> {
         ParseNode {
             id: self.id,
             span: self.span,
             data: f(self.data),
+        }
+    }
+
+    pub fn with_span(self, span: (usize, usize)) -> Self {
+        Self {
+            id: self.id,
+            span,
+            data: self.data,
         }
     }
 }

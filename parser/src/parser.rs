@@ -5,7 +5,7 @@ use parser_combinators::{
         preceded, seq, terminated, value,
     },
     text::{
-        ParseNode, TextParseState, as_node, char, escaped_char, expand_span, map_node, regex,
+        ParseNode, TextParseState, as_node, char, escaped_char, expand_span, map_node, pos, regex,
         slws0, slws1, tag, update_meta, ws0, ws1,
     },
 };
@@ -103,11 +103,11 @@ fn raw_str_literal(s: State) -> NodeRes<Expr> {
     .parse(s)
 }
 
-fn str_literal(s: State) -> NodeRes<Expr> {
+fn str_literal(s: State) -> Res<Expr> {
     map(
         delimited(
             char('"'),
-            many0(alt((
+            many0(as_node(alt((
                 map(str_lit_frag, StrLiteralPiece::Fragment),
                 map(
                     seq((
@@ -117,12 +117,19 @@ fn str_literal(s: State) -> NodeRes<Expr> {
                         ws0,
                         char('}'),
                     )),
-                    |(_, _, expr, _, _)| StrLiteralPiece::Interpolation(expr),
+                    |(_, _, expr, _, _)| {
+                        StrLiteralPiece::Interpolation(expr.into_ast_node(AstKind::Expr).into())
+                    },
                 ),
-            ))),
+            )))),
             char('"'),
         ),
-        |pieces| Expr::StrLiteral { pieces },
+        |pieces| Expr::StrLiteral {
+            pieces: pieces
+                .into_iter()
+                .map(|piece| piece.into_ast_node(AstKind::StrLiteralPiece))
+                .collect(),
+        },
     )
     .parse(s)
 }
@@ -479,7 +486,7 @@ fn str_literal(s: State) -> NodeRes<Expr> {
 //     .parse(s)
 // }
 
-fn invocation_args(s: State) -> NodeRes<Vec<Argument>> {
+fn invocation_args(s: State) -> NodeRes<Vec<ParseNode<Argument>>> {
     todo!()
     // let constrained = s.constrained;
 
@@ -567,25 +574,30 @@ fn expr_index_or_method_stack(s: State) -> NodeRes<Expr> {
 }
 
 fn expr_call_stack(s: State) -> NodeRes<Expr> {
-    map_state(
+    map(
         seq((
             expr_index_or_method_stack,
             many0(preceded(slws0, invocation_args)),
         )),
-        |mut state, (mut expr, invocations)| {
-            for args in invocations {
-                (state, expr) = state.produce_node_with_span(
-                    (expr.span.0, args.span.1),
+        |(mut expr, invocations)| {
+            for invoc_args in invocations {
+                // transform each `args` ParseNode into an invocation expr ParseNode
+                let span = (expr.span.0, invoc_args.span.1);
+                expr = invoc_args.with_span(span).map(|args| {
                     Expr::Invocation {
-                        expr: expr.into_ast_node(|expr| AstKind::Expr(expr)).into(),
+                        expr: expr.into_ast_node(AstKind::Expr).into(),
                         postfix: false,
                         coalesce: false, //TODO
-                        args,
-                    },
-                );
+                        // args: args,
+                        args: args
+                            .into_iter()
+                            .map(|arg| arg.into_ast_node(AstKind::Argument))
+                            .collect::<Vec<_>>(),
+                    }
+                });
             }
 
-            Some((state, expr))
+            expr
         },
     )
     .parse(s)
@@ -599,7 +611,7 @@ fn unary_expr_stack(s: State) -> NodeRes<Expr> {
                 (state, expr) = state.produce_node_with_span(
                     (op.span.0, expr.span.1),
                     Expr::UnaryExpr {
-                        expr: expr.into_ast_node(|expr| AstKind::Expr(expr)).into(),
+                        expr: expr.into_ast_node(AstKind::Expr).into(),
                         op: op.into_ast_node(|op| AstKind::Op(op.to_string())).into(),
                     },
                 );
@@ -612,11 +624,16 @@ fn unary_expr_stack(s: State) -> NodeRes<Expr> {
 
 #[derive(Debug, Clone)]
 enum TmpOp {
-    IndexSugar(bool, ParseNode<Expr>),
+    IndexSugar {
+        coalesce: bool,
+        index_expr: ParseNode<Expr>,
+        end_pos: usize,
+    },
     InfixOrPostfix {
         id: ParseNode<Identifier>,
         coalesce: bool,
-        args: Vec<Argument>,
+        args: Vec<ParseNode<Argument>>,
+        end_pos: usize,
     },
 }
 
@@ -629,14 +646,19 @@ fn postfix_index_sugar(input: State) -> Res<TmpOp> {
             tag(":["),
             update_meta(StateMeta { constrained: false }, expr),
             char(']'),
+            pos,
         )),
-        |(_, coalesce, _, _, expr, _)| TmpOp::IndexSugar(coalesce.is_some(), expr),
+        |(_, coalesce, _, _, index_expr, _, end_pos)| TmpOp::IndexSugar {
+            coalesce: coalesce.is_some(),
+            index_expr,
+            end_pos,
+        },
     )
     .parse(input)
 }
 
 fn infix_or_postfix_fn_latter_part(input: State) -> Res<TmpOp> {
-    map(
+    map_state(
         seq((
             ws0,
             optional(seq((char('?'), ws0))),
@@ -647,64 +669,128 @@ fn infix_or_postfix_fn_latter_part(input: State) -> Res<TmpOp> {
                 many0(
                     seq((
                         slws0,
+                        pos,
                         tag("'"),
                         as_node(identifier),
                         slws1,
                         unary_expr_stack,
+                        pos,
                     )),
                     // preceded(seq((slws0, char(','), slws0)), unary_expr_stack)
                 ),
             ))),
+            pos,
         )),
-        |(_, coalesce, _, id, opt)| TmpOp::InfixOrPostfix {
-            id,
-            coalesce: coalesce.is_some(),
-            args: match opt {
-                None => vec![],
-                Some((expr, additional_named_args)) => {
-                    let expr = expr.into_ast_node(|expr| AstKind::Expr(expr));
+        |mut state, (_, coalesce, _, id, opt, end_pos)| {
+            let op = TmpOp::InfixOrPostfix {
+                id,
+                coalesce: coalesce.is_some(),
+                args: match opt {
+                    None => vec![],
+                    Some((expr, additional_named_args)) => {
+                        let expr = expr.into_ast_node(AstKind::Expr);
 
-                    let mut all = vec![Argument { name: None, expr }];
+                        let (new_state, arg) = state.produce_node_with_span(
+                            expr.span,
+                            Argument {
+                                name: None,
+                                expr: expr.into(),
+                            },
+                        );
+                        state = new_state;
 
-                    for (_, _, name, _, expr) in additional_named_args {
-                        let name = name.into_ast_node(|id| AstKind::Identifier(id));
-                        all.push(Argument {
-                            name: Some(name),
-                            expr: expr.into_ast_node(|expr| AstKind::Expr(expr)),
-                        });
+                        let mut all = vec![arg];
+
+                        for (_, begin_pos, _, name, _, expr, end_pos) in additional_named_args {
+                            let (new_state, arg) = state.produce_node_with_span(
+                                (begin_pos, end_pos),
+                                Argument {
+                                    name: Some(name.into_ast_node(AstKind::Identifier).into()),
+                                    expr: expr.into_ast_node(AstKind::Expr).into(),
+                                },
+                            );
+                            state = new_state;
+                            all.push(arg);
+                        }
+
+                        all
                     }
+                },
+                end_pos,
+            };
 
-                    all
-                }
-            },
+            Some((state, op))
         },
     )
     .parse(input)
 }
 
 fn infix_or_postfix_fn_call_stack(s: State) -> NodeRes<Expr> {
-    map(
+    map_state(
         seq((
             unary_expr_stack,
             many0(alt((postfix_index_sugar, infix_or_postfix_fn_latter_part))),
         )),
-        |(mut expr, ops)| {
+        |mut state, (mut expr, ops)| {
             for op in ops {
-                expr = match op {
-                    TmpOp::IndexSugar(coalesce, index) => Expr::Index {
-                        expr: expr.into(),
+                match op {
+                    TmpOp::IndexSugar {
                         coalesce,
-                        index: index.into(),
-                    },
-                    TmpOp::InfixOrPostfix { id, coalesce, args } => Expr::Invocation {
-                        expr: Expr::Variable(id).into(),
-                        postfix: true,
+                        index_expr,
+                        end_pos,
+                    } => {
+                        let span = (expr.span.0, end_pos);
+                        (state, expr) = state.produce_node_with_span(
+                            span,
+                            Expr::Index {
+                                expr: expr.into_ast_node(AstKind::Expr).into(),
+                                coalesce,
+                                index: index_expr.into_ast_node(AstKind::Expr).into(),
+                            },
+                        );
+                    }
+                    TmpOp::InfixOrPostfix {
+                        id,
                         coalesce,
-                        args: [vec![Argument { name: None, expr }], args].concat(),
-                    },
-                };
+                        args,
+                        end_pos,
+                    } => {
+                        let span = (expr.span.0, end_pos);
+
+                        let mut args = args
+                            .into_iter()
+                            .map(|arg| arg.into_ast_node(AstKind::Argument))
+                            .collect::<Vec<_>>();
+
+                        {
+                            let (new_state, arg) = state.produce_node_with_span(
+                                expr.span,
+                                Argument {
+                                    name: None,
+                                    expr: expr.into_ast_node(AstKind::Expr).into(),
+                                },
+                            );
+                            state = new_state;
+                            args.insert(0, arg.into_ast_node(AstKind::Argument));
+                        }
+
+                        (state, expr) = state.produce_node_with_span(
+                            span,
+                            Expr::Invocation {
+                                expr: id
+                                    .map(|id| Expr::Variable(id))
+                                    .into_ast_node(AstKind::Expr)
+                                    .into(),
+                                postfix: true,
+                                coalesce,
+                                args,
+                            },
+                        );
+                    }
+                }
             }
-            expr
+
+            Some((state, expr))
         },
     )
     .parse(s)
@@ -801,9 +887,9 @@ where
                 (state, expr) = state.produce_node_with_span(
                     (expr.span.0, right.span.1),
                     Expr::BinaryExpr {
-                        left: expr.into_ast_node(|expr| AstKind::Expr(expr)).into(),
+                        left: expr.into_ast_node(AstKind::Expr).into(),
                         op: op.into_ast_node(|op| AstKind::Op(op.to_string())).into(),
-                        right: right.into_ast_node(|expr| AstKind::Expr(expr)).into(),
+                        right: right.into_ast_node(AstKind::Expr).into(),
                     },
                 );
             }

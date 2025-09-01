@@ -31,6 +31,7 @@ pub enum AstKind {
     Expr(Expr),
     StrLiteralPiece(StrLiteralPiece),
     Op(String),
+    Argument(Argument),
 }
 
 impl AstNode {
@@ -72,6 +73,13 @@ impl AstNode {
     pub fn as_op<'a>(&'a self) -> &'a str {
         match &self.kind {
             AstKind::Op(x) => x,
+            _ => panic!(),
+        }
+    }
+
+    pub fn as_argument(&self) -> &Argument {
+        match &self.kind {
+            AstKind::Argument(x) => x,
             _ => panic!(),
         }
     }
@@ -277,13 +285,13 @@ impl Display for Identifier {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum StrLiteralPiece {
     Fragment(String),
-    Interpolation(Expr),
+    Interpolation(Box<AstNode>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Argument {
-    pub name: Option<AstNode>,
-    pub expr: AstNode,
+    pub name: Option<Box<AstNode>>,
+    pub expr: Box<AstNode>,
 }
 
 // #[derive(Debug, Clone, PartialEq, Eq, Hash)]
