@@ -1,30 +1,23 @@
 use either::Either;
 use parser_combinators::{
-    generic::{
-        ParseResult, Parser, alt, check, delimited, many0, many1, map, map_state, optional,
-        preceded, seq, terminated, value,
-    },
-    text::{
-        ParseNode, TextParseState, as_node, char, escaped_char, expand_span, map_node, pos, regex,
-        slws0, slws1, tag, update_meta, ws0, ws1,
-    },
+    ParseNode, ParseState, alt, char, check, delimited, escaped_char, many0, many1, map, optional,
+    preceded, regex, seq, tag, ws0, ws1,
 };
 use regex::Regex;
 
 use crate::ast::{Argument, AstKind, Expr, Identifier, IntoAstNode, StrLiteralPiece, TypeVar};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct StateMeta {
+struct Extra {
     constrained: bool,
 }
 
-type State<'a> = TextParseState<'a, StateMeta>;
-type Res<'a, T> = ParseResult<State<'a>, T>;
-type NodeRes<'a, T> = ParseResult<State<'a>, ParseNode<T>>;
+type State<'a> = ParseState<'a, Extra>;
+type Res<'a, T> = parser_combinators::Res<'a, Extra, T>;
 // type P<'a, T> = dyn Parser<State<'a>, Output = Res<'a, T>>;
 
 fn initial_parse_state<'a>(input: &'a str) -> State<'a> {
-    TextParseState::new(input, StateMeta { constrained: false })
+    State::new(input, Extra { constrained: false })
 }
 
 fn raw_identifier(s: State) -> Res<Identifier> {
@@ -58,8 +51,8 @@ fn type_var(s: State) -> Res<TypeVar> {
     .parse(s)
 }
 
-fn label(s: State) -> NodeRes<Identifier> {
-    as_node(preceded(tag("'"), raw_identifier)).parse(s)
+fn label(s: State) -> Res<Identifier> {
+    preceded(tag("'"), raw_identifier).parse(s)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,7 +67,7 @@ fn str_lit_frag(s: State) -> Res<String> {
         many1(alt((
             map(regex(r#"^[^"{\\]+"#), StrFrag::Literal),
             map(escaped_char, StrFrag::EscapedChar),
-            value(StrFrag::EscapedWs, preceded(char('\\'), ws1)),
+            map(preceded(char('\\'), ws1), |_| StrFrag::EscapedWs),
         ))),
         |pieces| {
             let mut build = "".to_string();
@@ -91,15 +84,15 @@ fn str_lit_frag(s: State) -> Res<String> {
     .parse(s)
 }
 
-fn raw_str_literal(s: State) -> NodeRes<Expr> {
-    as_node(map(
-        delimited(tag(r#"r""#), as_node(regex(r#"^[^"]*"#)), char('"')),
+fn raw_str_literal(s: State) -> Res<Expr> {
+    map(
+        delimited(tag(r#"r""#), regex(r#"^[^"]*"#), char('"')),
         |s| Expr::StrLiteral {
             pieces: vec![
                 s.into_ast_node(|s| AstKind::StrLiteralPiece(StrLiteralPiece::Fragment(s.into()))),
             ],
         },
-    ))
+    )
     .parse(s)
 }
 
@@ -107,7 +100,7 @@ fn str_literal(s: State) -> Res<Expr> {
     map(
         delimited(
             char('"'),
-            many0(as_node(alt((
+            many0(alt((
                 map(str_lit_frag, StrLiteralPiece::Fragment),
                 map(
                     seq((
@@ -121,7 +114,7 @@ fn str_literal(s: State) -> Res<Expr> {
                         StrLiteralPiece::Interpolation(expr.into_ast_node(AstKind::Expr).into())
                     },
                 ),
-            )))),
+            ))),
             char('"'),
         ),
         |pieces| Expr::StrLiteral {
