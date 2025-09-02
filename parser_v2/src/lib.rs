@@ -10,28 +10,30 @@ pub struct ParseError {
 }
 
 #[derive(Debug, Clone)]
-pub struct ParseState<'a> {
+pub struct ParseState<'a, E> {
     source: &'a str,
     at: usize,
     next_id: usize,
+    extra: E,
 }
 
-impl<'a> ParseState<'a> {
-    pub fn new(source: &'a str) -> ParseState<'a> {
+impl<'a, E> ParseState<'a, E> {
+    pub fn new(source: &'a str, extra: E) -> ParseState<'a, E> {
         Self {
             source,
             at: 0,
             next_id: 0,
+            extra,
         }
     }
 }
 
-impl<'a> ParseState<'a> {
+impl<'a, E> ParseState<'a, E> {
     pub fn rem(&self) -> &'a str {
         &self.source[self.at..]
     }
 
-    pub fn produce_id(self) -> (ParseState<'a>, usize) {
+    pub fn produce_id(self) -> (ParseState<'a, E>, usize) {
         let id = self.next_id;
 
         (
@@ -39,12 +41,13 @@ impl<'a> ParseState<'a> {
                 source: self.source,
                 at: self.at,
                 next_id: self.next_id + 1,
+                extra: self.extra,
             },
             id,
         )
     }
 
-    pub fn produce<T>(self, len: usize, value: T) -> Res<'a, T> {
+    pub fn produce<T>(self, len: usize, value: T) -> Res<'a, E, T> {
         let id = self.next_id;
 
         Ok((
@@ -52,6 +55,7 @@ impl<'a> ParseState<'a> {
                 source: self.source,
                 at: self.at + len,
                 next_id: self.next_id + 1,
+                extra: self.extra,
             },
             ParseNode {
                 id,
@@ -68,14 +72,14 @@ impl<'a> ParseState<'a> {
         }
     }
 
-    pub fn produce_empty_error<T>(&self) -> Res<'a, T> {
+    pub fn produce_empty_error<T>(&self) -> Res<'a, E, T> {
         Err(ParseError {
             at: self.at,
             error: None,
         })
     }
 
-    pub fn produce_error<T>(&self, error: String) -> Res<'a, T> {
+    pub fn produce_error<T>(&self, error: String) -> Res<'a, E, T> {
         Err(self.mk_error(error))
     }
 }
@@ -121,21 +125,21 @@ impl<T> ParseNode<Option<T>> {
     }
 }
 
-pub type Res<'a, T> = Result<(ParseState<'a>, ParseNode<T>), ParseError>;
+pub type Res<'a, E, T> = Result<(ParseState<'a, E>, ParseNode<T>), ParseError>;
 
-pub trait Parser<'a> {
+pub trait Parser<'a, E> {
     type Output;
 
-    fn parse(&mut self, state: ParseState<'a>) -> Res<'a, Self::Output>;
+    fn parse(&mut self, state: ParseState<'a, E>) -> Res<'a, E, Self::Output>;
 }
 
-impl<'a, F, T> Parser<'a> for F
+impl<'a, F, T, E> Parser<'a, E> for F
 where
-    F: FnMut(ParseState<'a>) -> Res<'a, T>,
+    F: FnMut(ParseState<'a, E>) -> Res<'a, E, T>,
 {
     type Output = T;
 
-    fn parse(&mut self, state: ParseState<'a>) -> Res<'a, T> {
+    fn parse(&mut self, state: ParseState<'a, E>) -> Res<'a, E, T> {
         self(state)
     }
 }
@@ -147,8 +151,8 @@ where
 //     }
 // }
 
-pub fn tag<'a>(tag: &'static str) -> impl Parser<'a, Output = &'a str> {
-    move |state: ParseState<'a>| {
+pub fn tag<'a, E>(tag: &'static str) -> impl Parser<'a, E, Output = &'a str> {
+    move |state: ParseState<'a, E>| {
         if state.rem().starts_with(tag) {
             state.produce(tag.len(), tag)
         } else {
@@ -157,8 +161,8 @@ pub fn tag<'a>(tag: &'static str) -> impl Parser<'a, Output = &'a str> {
     }
 }
 
-pub fn char<'a>(c: char) -> impl Parser<'a, Output = char> {
-    move |state: ParseState<'a>| {
+pub fn char<'a, E>(c: char) -> impl Parser<'a, E, Output = char> {
+    move |state: ParseState<'a, E>| {
         if state.rem().starts_with(c) {
             state.produce(1, c)
         } else {
@@ -167,10 +171,10 @@ pub fn char<'a>(c: char) -> impl Parser<'a, Output = char> {
     }
 }
 
-pub fn regex<'a>(re: &'static str) -> impl Parser<'a, Output = &'a str> {
+pub fn regex<'a, E>(re: &'static str) -> impl Parser<'a, E, Output = &'a str> {
     let re = Regex::new(re).unwrap();
 
-    move |state: ParseState<'a>| {
+    move |state: ParseState<'a, E>| {
         if let Some(m) = re.find(state.rem()) {
             let found = &state.rem()[m.range()];
             state.produce(found.len(), found)
@@ -180,23 +184,23 @@ pub fn regex<'a>(re: &'static str) -> impl Parser<'a, Output = &'a str> {
     }
 }
 
-pub fn slws0<'a>(s: ParseState<'a>) -> Res<'a, &'a str> {
+pub fn slws0<'a, E>(s: ParseState<'a, E>) -> Res<'a, E, &'a str> {
     regex(r"^[ \t]*").parse(s)
 }
 
-pub fn ws0<'a>(s: ParseState<'a>) -> Res<'a, &'a str> {
+pub fn ws0<'a, E>(s: ParseState<'a, E>) -> Res<'a, E, &'a str> {
     regex(r"^\s*").parse(s)
 }
 
-pub fn ws1<'a>(s: ParseState<'a>) -> Res<'a, &'a str> {
+pub fn ws1<'a, E>(s: ParseState<'a, E>) -> Res<'a, E, &'a str> {
     regex(r"^\s+").parse(s)
 }
 
-pub fn slws1<'a>(s: ParseState<'a>) -> Res<'a, &'a str> {
+pub fn slws1<'a, E>(s: ParseState<'a, E>) -> Res<'a, E, &'a str> {
     regex(r"^[ \t]+").parse(s)
 }
 
-pub fn eof<'a>(state: ParseState<'a>) -> Res<'a, ()> {
+pub fn eof<'a, E>(state: ParseState<'a, E>) -> Res<'a, E, ()> {
     if state.rem().len() == 0 {
         state.produce(0, ())
     } else {
@@ -204,31 +208,31 @@ pub fn eof<'a>(state: ParseState<'a>) -> Res<'a, ()> {
     }
 }
 
-pub fn map<'a, A, B>(
-    mut p: impl Parser<'a, Output = A>,
+pub fn map<'a, E, A, B>(
+    mut p: impl Parser<'a, E, Output = A>,
     mut f: impl FnMut(A) -> B,
-) -> impl Parser<'a, Output = B> {
-    move |state: ParseState<'a>| {
+) -> impl Parser<'a, E, Output = B> {
+    move |state: ParseState<'a, E>| {
         let (state, node) = p.parse(state)?;
         Ok((state, node.map(&mut f)))
     }
 }
 
-pub fn map_state<'a, A, B>(
-    mut p: impl Parser<'a, Output = A>,
-    mut f: impl FnMut(ParseState<'a>, A) -> Res<'a, B>,
-) -> impl Parser<'a, Output = B> {
-    move |state: ParseState<'a>| {
+pub fn map_state<'a, E, A, B>(
+    mut p: impl Parser<'a, E, Output = A>,
+    mut f: impl FnMut(ParseState<'a, E>, A) -> Res<'a, E, B>,
+) -> impl Parser<'a, E, Output = B> {
+    move |state: ParseState<'a, E>| {
         let (state, node) = p.parse(state)?;
         f(state, node.value)
     }
 }
 
-pub fn map_opt<'a, T, B>(
-    mut p: impl Parser<'a, Output = T>,
+pub fn map_opt<'a, E, T, B>(
+    mut p: impl Parser<'a, E, Output = T>,
     mut f: impl FnMut(T) -> Option<B>,
-) -> impl Parser<'a, Output = B> {
-    move |state: ParseState<'a>| {
+) -> impl Parser<'a, E, Output = B> {
+    move |state: ParseState<'a, E>| {
         let (state, node) = p.parse(state)?;
         let node = node
             .map_opt(&mut f)
@@ -238,11 +242,11 @@ pub fn map_opt<'a, T, B>(
     }
 }
 
-pub fn cond<'a, T>(
-    mut p: impl Parser<'a, Output = T>,
+pub fn cond<'a, E, T>(
+    mut p: impl Parser<'a, E, Output = T>,
     check: impl Fn(&'a str) -> bool,
-) -> impl Parser<'a, Output = T> {
-    move |state: ParseState<'a>| {
+) -> impl Parser<'a, E, Output = T> {
+    move |state: ParseState<'a, E>| {
         if check(&state.rem()) {
             p.parse(state)
         } else {
@@ -251,11 +255,11 @@ pub fn cond<'a, T>(
     }
 }
 
-pub fn check<'a, T>(
-    mut p: impl Parser<'a, Output = T>,
+pub fn check<'a, E, T>(
+    mut p: impl Parser<'a, E, Output = T>,
     check: impl Fn(&T) -> bool,
-) -> impl Parser<'a, Output = T> {
-    move |state: ParseState<'a>| {
+) -> impl Parser<'a, E, Output = T> {
+    move |state: ParseState<'a, E>| {
         let (state, node) = p.parse(state)?;
         if check(&node.value) {
             Ok((state, node))
@@ -289,19 +293,19 @@ macro_rules! succ (
   (20, $submac:ident!($($rest:tt)*)) => ($submac!(21, $($rest)*));
 );
 
-pub trait Seq<'a> {
+pub trait Seq<'a, E> {
     type Output;
 
-    fn parse_seq(&mut self, state: ParseState<'a>) -> Res<'a, Self::Output>;
+    fn parse_seq(&mut self, state: ParseState<'a, E>) -> Res<'a, E, Self::Output>;
 }
 
-impl<'a, P0, O0> Seq<'a> for (P0,)
+impl<'a, P0, O0, E> Seq<'a, E> for (P0,)
 where
-    P0: Parser<'a, Output = O0>,
+    P0: Parser<'a, E, Output = O0>,
 {
     type Output = (ParseNode<O0>,);
 
-    fn parse_seq(&mut self, state: ParseState<'a>) -> Res<'a, Self::Output> {
+    fn parse_seq(&mut self, state: ParseState<'a, E>) -> Res<'a, E, Self::Output> {
         let (state, node) = self.0.parse(state)?;
         let (state, id) = state.produce_id();
         Ok((
@@ -340,13 +344,13 @@ macro_rules! seq_impl_inner {
 
 macro_rules! seq_impl {
     ($($name:ident $ty:ident),+) => {
-        impl<'a, $($name),+, $($ty),+> Seq<'a> for ($($name),+)
+        impl<'a, $($name),+, $($ty),+, E> Seq<'a, E> for ($($name),+)
         where
-            $($name: Parser<'a, Output = $ty>,)+
+            $($name: Parser<'a, E, Output = $ty>,)+
         {
             type Output = ($(ParseNode<$ty>),+);
 
-            fn parse_seq(&mut self, state: ParseState<'a>) -> Res<'a, Self::Output> {
+            fn parse_seq(&mut self, state: ParseState<'a, E>) -> Res<'a, E, Self::Output> {
                 seq_impl_inner!(0, self, state, 0, (), $($name)+)
             }
         }
@@ -371,23 +375,25 @@ seq_impl!(P0 O0, P1 O1, P2 O2, P3 O3, P4 O4, P5 O5, P6 O6, P7 O7, P8 O8, P9 O9, 
 seq_impl!(P0 O0, P1 O1, P2 O2, P3 O3, P4 O4, P5 O5, P6 O6, P7 O7, P8 O8, P9 O9, P10 O10, P11 O11, P12 O12, P13 O13, P14 O14, P15 O15, P16 O16);
 seq_impl!(P0 O0, P1 O1, P2 O2, P3 O3, P4 O4, P5 O5, P6 O6, P7 O7, P8 O8, P9 O9, P10 O10, P11 O11, P12 O12, P13 O13, P14 O14, P15 O15, P16 O16, P17 O17);
 
-pub fn seq<'a, T, List: Seq<'a, Output = T>>(mut list: List) -> impl Parser<'a, Output = T> {
-    move |state: ParseState<'a>| list.parse_seq(state)
+pub fn seq<'a, E, T, List: Seq<'a, E, Output = T>>(
+    mut list: List,
+) -> impl Parser<'a, E, Output = T> {
+    move |state: ParseState<'a, E>| list.parse_seq(state)
 }
 
-pub trait Alt<'a> {
+pub trait Alt<'a, E> {
     type Output;
 
-    fn choice(&mut self, state: ParseState<'a>) -> Res<'a, Self::Output>;
+    fn choice(&mut self, state: ParseState<'a, E>) -> Res<'a, E, Self::Output>;
 }
 
-impl<'a, P0, O> Alt<'a> for (P0,)
+impl<'a, P0, O, E> Alt<'a, E> for (P0,)
 where
-    P0: Parser<'a, Output = O>,
+    P0: Parser<'a, E, Output = O>,
 {
     type Output = O;
 
-    fn choice(&mut self, state: ParseState<'a>) -> Res<'a, Self::Output> {
+    fn choice(&mut self, state: ParseState<'a, E>) -> Res<'a, E, Self::Output> {
         self.0.parse(state)
     }
 }
@@ -407,13 +413,14 @@ macro_rules! alt_impl_inner {
 
 macro_rules! alt_impl {
     ($($name:ident),+) => {
-        impl<'a, $($name),+, O> Alt<'a> for ($($name),+)
+        impl<'a, $($name),+, O, E> Alt<'a, E> for ($($name),+)
         where
-            $($name: Parser<'a, Output = O>,)+
+            $($name: Parser<'a, E, Output = O>,)+
+            E: Clone,
         {
             type Output = O;
 
-            fn choice(&mut self, state: ParseState<'a>) -> Res<'a, Self::Output> {
+            fn choice(&mut self, state: ParseState<'a, E>) -> Res<'a, E, Self::Output> {
                 alt_impl_inner!(0, self, state, $($name)+)
             }
         }
@@ -449,37 +456,45 @@ alt_impl!(
     P0, P1, P2, P3, P4, P5, P6, P7, P8, P9, P10, P11, P12, P13, P14, P15, P16, P17, P18
 );
 
-pub fn alt<'a, O, List: Alt<'a, Output = O>>(mut list: List) -> impl Parser<'a, Output = O> {
-    move |state: ParseState<'a>| list.choice(state)
+pub fn alt<'a, O, E, List: Alt<'a, E, Output = O>>(
+    mut list: List,
+) -> impl Parser<'a, E, Output = O> {
+    move |state: ParseState<'a, E>| list.choice(state)
 }
 
-pub fn delimited<'a, P1, O1, P2, O2, P3, O3>(p1: P1, p2: P2, p3: P3) -> impl Parser<'a, Output = O2>
+pub fn delimited<'a, P1, O1, P2, O2, P3, O3, E>(
+    p1: P1,
+    p2: P2,
+    p3: P3,
+) -> impl Parser<'a, E, Output = O2>
 where
-    P1: Parser<'a, Output = O1>,
-    P2: Parser<'a, Output = O2>,
-    P3: Parser<'a, Output = O3>,
+    P1: Parser<'a, E, Output = O1>,
+    P2: Parser<'a, E, Output = O2>,
+    P3: Parser<'a, E, Output = O3>,
 {
     map(seq((p1, p2, p3)), |(_, r2, _)| r2.value)
 }
 
-pub fn preceded<'a, P1, O1, P2, O2>(p1: P1, p2: P2) -> impl Parser<'a, Output = O2>
+pub fn preceded<'a, P1, O1, P2, O2, E>(p1: P1, p2: P2) -> impl Parser<'a, E, Output = O2>
 where
-    P1: Parser<'a, Output = O1>,
-    P2: Parser<'a, Output = O2>,
+    P1: Parser<'a, E, Output = O1>,
+    P2: Parser<'a, E, Output = O2>,
 {
     map(seq((p1, p2)), |(_, r2)| r2.value)
 }
 
-pub fn terminated<'a, P1, O1, P2, O2>(p1: P1, p2: P2) -> impl Parser<'a, Output = O1>
+pub fn terminated<'a, P1, O1, P2, O2, E>(p1: P1, p2: P2) -> impl Parser<'a, E, Output = O1>
 where
-    P1: Parser<'a, Output = O1>,
-    P2: Parser<'a, Output = O2>,
+    P1: Parser<'a, E, Output = O1>,
+    P2: Parser<'a, E, Output = O2>,
 {
     map(seq((p1, p2)), |(r1, _)| r1.value)
 }
 
-pub fn optional<'a, T>(mut p: impl Parser<'a, Output = T>) -> impl Parser<'a, Output = Option<T>> {
-    move |state: ParseState<'a>| {
+pub fn optional<'a, E: Clone, T>(
+    mut p: impl Parser<'a, E, Output = T>,
+) -> impl Parser<'a, E, Output = Option<T>> {
+    move |state: ParseState<'a, E>| {
         match p.parse(state.clone()) {
             Ok((state, node)) => Ok((state, node.map(Some))),
             Err(_) => state.produce(0, None),
@@ -488,11 +503,11 @@ pub fn optional<'a, T>(mut p: impl Parser<'a, Output = T>) -> impl Parser<'a, Ou
     }
 }
 
-pub fn optional_if<'a, T>(
-    mut p: impl Parser<'a, Output = T>,
+pub fn optional_if<'a, E: Clone, T>(
+    mut p: impl Parser<'a, E, Output = T>,
     check: impl Fn(&'a str) -> bool,
-) -> impl Parser<'a, Output = Option<T>> {
-    move |state: ParseState<'a>| {
+) -> impl Parser<'a, E, Output = Option<T>> {
+    move |state: ParseState<'a, E>| {
         match p.parse(state.clone()) {
             Ok((state, node)) => {
                 if check(state.rem()) {
@@ -507,11 +522,11 @@ pub fn optional_if<'a, T>(
     }
 }
 
-pub fn many<'a, T>(
+pub fn many<'a, E: Clone, T>(
     minimum: usize,
-    mut p: impl Parser<'a, Output = T>,
-) -> impl Parser<'a, Output = Vec<ParseNode<T>>> {
-    move |mut state: ParseState<'a>| {
+    mut p: impl Parser<'a, E, Output = T>,
+) -> impl Parser<'a, E, Output = Vec<ParseNode<T>>> {
+    move |mut state: ParseState<'a, E>| {
         let mut span = (state.at, state.at);
         let mut nodes = vec![];
         while let Ok((next_state, node)) = p.parse(state.clone()) {
@@ -536,21 +551,25 @@ pub fn many<'a, T>(
     }
 }
 
-pub fn many0<'a, T>(p: impl Parser<'a, Output = T>) -> impl Parser<'a, Output = Vec<ParseNode<T>>> {
+pub fn many0<'a, E: Clone, T>(
+    p: impl Parser<'a, E, Output = T>,
+) -> impl Parser<'a, E, Output = Vec<ParseNode<T>>> {
     many(0, p)
 }
 
-pub fn many1<'a, T>(p: impl Parser<'a, Output = T>) -> impl Parser<'a, Output = Vec<ParseNode<T>>> {
+pub fn many1<'a, E: Clone, T>(
+    p: impl Parser<'a, E, Output = T>,
+) -> impl Parser<'a, E, Output = Vec<ParseNode<T>>> {
     many(1, p)
 }
 
-pub fn listy<'a, P, T>(
+pub fn listy<'a, E: Clone, P, T>(
     open_tag: &'static str,
     parse_element: P,
     close_tag: &'static str,
-) -> impl Parser<'a, Output = (Vec<ParseNode<T>>, bool)>
+) -> impl Parser<'a, E, Output = (Vec<ParseNode<T>>, bool)>
 where
-    P: Parser<'a, Output = T> + Clone,
+    P: Parser<'a, E, Output = T> + Clone,
 {
     delimited(
         seq((tag(open_tag), ws0)),
@@ -574,15 +593,15 @@ where
     )
 }
 
-pub fn listy_splat<'a, P, P2, T, S>(
+pub fn listy_splat<'a, E: Clone, P, P2, T, S>(
     open_tag: &'static str,
     parse_element: P,
     parse_splat: P2,
     close_tag: &'static str,
-) -> impl Parser<'a, Output = (Vec<ParseNode<T>>, Option<ParseNode<S>>)>
+) -> impl Parser<'a, E, Output = (Vec<ParseNode<T>>, Option<ParseNode<S>>)>
 where
-    P: Parser<'a, Output = T> + Clone,
-    P2: Parser<'a, Output = S>,
+    P: Parser<'a, E, Output = T> + Clone,
+    P2: Parser<'a, E, Output = S>,
 {
     delimited(
         seq((tag(open_tag), ws0)),
@@ -606,7 +625,7 @@ where
     )
 }
 
-pub fn unicode_sequence<'a>(state: ParseState<'a>) -> Res<'a, char> {
+pub fn unicode_sequence<'a, E>(state: ParseState<'a, E>) -> Res<'a, E, char> {
     map_opt(regex(r"^u\{[0-9A-F]{1,6}\}"), |s| {
         u32::from_str_radix(&s[2..s.len() - 1], 16)
             .ok()
@@ -616,7 +635,7 @@ pub fn unicode_sequence<'a>(state: ParseState<'a>) -> Res<'a, char> {
     .parse(state)
 }
 
-pub fn escaped_char<'a>(s: ParseState<'a>) -> Res<'a, char> {
+pub fn escaped_char<'a, E: Clone>(s: ParseState<'a, E>) -> Res<'a, E, char> {
     preceded(
         char('\\'),
         alt((
@@ -643,16 +662,16 @@ mod test {
     };
 
     fn parses_and_check<'a, T>(
-        mut p: impl Parser<'a, Output = T>,
+        mut p: impl Parser<'a, (), Output = T>,
         text: &'static str,
-        f: impl FnOnce(ParseState<'a>, ParseNode<T>),
+        f: impl FnOnce(ParseState<'a, ()>, ParseNode<T>),
     ) {
-        let (state, node) = p.parse(ParseState::new(text)).unwrap();
+        let (state, node) = p.parse(ParseState::new(text, ())).unwrap();
         f(state, node)
     }
 
-    fn does_not_parse<'a, T: Debug>(mut p: impl Parser<'a, Output = T>, text: &'static str) {
-        assert_matches!(p.parse(ParseState::new(text)), Err(_));
+    fn does_not_parse<'a, T: Debug>(mut p: impl Parser<'a, (), Output = T>, text: &'static str) {
+        assert_matches!(p.parse(ParseState::new(text, ())), Err(_));
     }
 
     #[test]
@@ -690,7 +709,7 @@ mod test {
             },
         );
 
-        fn parse_bla<'a>(state: ParseState<'a>) -> Res<'a, &'a str> {
+        fn parse_bla<'a>(state: ParseState<'a, ()>) -> Res<'a, (), &'a str> {
             tag("bla").parse(state)
         }
 
