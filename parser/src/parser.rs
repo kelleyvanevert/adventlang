@@ -1,7 +1,8 @@
 use either::Either;
 use parser_combinators::{
-    ParseNode, ParseState, alt, char, check, delimited, escaped_char, many0, many1, map, optional,
-    preceded, regex, seq, tag, ws0, ws1,
+    ParseNode, ParseState, Parser, alt, char, check, delimited, escaped_char, extra, many0, many1,
+    map, map_node, map_state, optional, preceded, regex, seq, slws0, slws1, tag, terminated, ws0,
+    ws1,
 };
 use regex::Regex;
 
@@ -72,7 +73,7 @@ fn str_lit_frag(s: State) -> Res<String> {
         |pieces| {
             let mut build = "".to_string();
             for piece in pieces {
-                match piece {
+                match piece.value {
                     StrFrag::EscapedChar(c) => build.push(c),
                     StrFrag::Literal(l) => build += l,
                     StrFrag::EscapedWs => {}
@@ -85,7 +86,7 @@ fn str_lit_frag(s: State) -> Res<String> {
 }
 
 fn raw_str_literal(s: State) -> Res<Expr> {
-    map(
+    map_node(
         delimited(tag(r#"r""#), regex(r#"^[^"]*"#), char('"')),
         |s| Expr::StrLiteral {
             pieces: vec![
@@ -106,7 +107,7 @@ fn str_literal(s: State) -> Res<Expr> {
                     seq((
                         char('{'),
                         ws0,
-                        update_meta(StateMeta { constrained: false }, expr),
+                        extra(Extra { constrained: false }, expr),
                         ws0,
                         char('}'),
                     )),
@@ -479,7 +480,7 @@ fn str_literal(s: State) -> Res<Expr> {
 //     .parse(s)
 // }
 
-fn invocation_args(s: State) -> NodeRes<Vec<ParseNode<Argument>>> {
+fn invocation_args(s: State) -> Res<Vec<ParseNode<Argument>>> {
     todo!()
     // let constrained = s.constrained;
 
@@ -512,7 +513,7 @@ fn invocation_args(s: State) -> NodeRes<Vec<ParseNode<Argument>>> {
     // }
 }
 
-fn expr_index_or_method_stack(s: State) -> NodeRes<Expr> {
+fn expr_index_or_method_stack(s: State) -> Res<Expr> {
     todo!()
     // map(
     //     seq((
@@ -566,7 +567,7 @@ fn expr_index_or_method_stack(s: State) -> NodeRes<Expr> {
     // .parse(s)
 }
 
-fn expr_call_stack(s: State) -> NodeRes<Expr> {
+fn expr_call_stack(s: State) -> Res<Expr> {
     map(
         seq((
             expr_index_or_method_stack,
@@ -596,7 +597,7 @@ fn expr_call_stack(s: State) -> NodeRes<Expr> {
     .parse(s)
 }
 
-fn unary_expr_stack(s: State) -> NodeRes<Expr> {
+fn unary_expr_stack(s: State) -> Res<Expr> {
     map_state(
         seq((many0(terminated(tag("!"), ws0)), expr_call_stack)),
         |mut state, (ops, mut expr)| {
@@ -620,13 +621,11 @@ enum TmpOp {
     IndexSugar {
         coalesce: bool,
         index_expr: ParseNode<Expr>,
-        end_pos: usize,
     },
     InfixOrPostfix {
         id: ParseNode<Identifier>,
         coalesce: bool,
         args: Vec<ParseNode<Argument>>,
-        end_pos: usize,
     },
 }
 
@@ -637,14 +636,12 @@ fn postfix_index_sugar(input: State) -> Res<TmpOp> {
             optional(char('?')),
             ws0,
             tag(":["),
-            update_meta(StateMeta { constrained: false }, expr),
+            extra(Extra { constrained: false }, expr),
             char(']'),
-            pos,
         )),
-        |(_, coalesce, _, _, index_expr, _, end_pos)| TmpOp::IndexSugar {
-            coalesce: coalesce.is_some(),
+        |(_, coalesce, _, _, index_expr, _)| TmpOp::IndexSugar {
+            coalesce: coalesce.value.is_some(),
             index_expr,
-            end_pos,
         },
     )
     .parse(input)
@@ -656,28 +653,19 @@ fn infix_or_postfix_fn_latter_part(input: State) -> Res<TmpOp> {
             ws0,
             optional(seq((char('?'), ws0))),
             char(':'),
-            as_node(identifier),
+            identifier,
             optional(seq((
                 preceded(slws0, unary_expr_stack),
                 many0(
-                    seq((
-                        slws0,
-                        pos,
-                        tag("'"),
-                        as_node(identifier),
-                        slws1,
-                        unary_expr_stack,
-                        pos,
-                    )),
+                    seq((slws0, tag("'"), identifier, slws1, unary_expr_stack)),
                     // preceded(seq((slws0, char(','), slws0)), unary_expr_stack)
                 ),
             ))),
-            pos,
         )),
-        |mut state, (_, coalesce, _, id, opt, end_pos)| {
+        |mut state, (_, coalesce, _, id, opt)| {
             let op = TmpOp::InfixOrPostfix {
                 id,
-                coalesce: coalesce.is_some(),
+                coalesce: coalesce.value.is_some(),
                 args: match opt {
                     None => vec![],
                     Some((expr, additional_named_args)) => {
@@ -694,22 +682,21 @@ fn infix_or_postfix_fn_latter_part(input: State) -> Res<TmpOp> {
 
                         let mut all = vec![arg];
 
-                        for (_, begin_pos, _, name, _, expr, end_pos) in additional_named_args {
-                            let (new_state, arg) = state.produce_node_with_span(
-                                (begin_pos, end_pos),
-                                Argument {
-                                    name: Some(name.into_ast_node(AstKind::Identifier).into()),
-                                    expr: expr.into_ast_node(AstKind::Expr).into(),
-                                },
-                            );
-                            state = new_state;
-                            all.push(arg);
-                        }
+                        // for (_, _, name, _, expr) in additional_named_args {
+                        //     let (new_state, arg) = state.produce_node_with_span(
+                        //         (begin_pos, end_pos),
+                        //         Argument {
+                        //             name: Some(name.into_ast_node(AstKind::Identifier).into()),
+                        //             expr: expr.into_ast_node(AstKind::Expr).into(),
+                        //         },
+                        //     );
+                        //     state = new_state;
+                        //     all.push(arg);
+                        // }
 
                         all
                     }
                 },
-                end_pos,
             };
 
             Some((state, op))
@@ -718,7 +705,7 @@ fn infix_or_postfix_fn_latter_part(input: State) -> Res<TmpOp> {
     .parse(input)
 }
 
-fn infix_or_postfix_fn_call_stack(s: State) -> NodeRes<Expr> {
+fn infix_or_postfix_fn_call_stack(s: State) -> Res<Expr> {
     map_state(
         seq((
             unary_expr_stack,
@@ -730,7 +717,6 @@ fn infix_or_postfix_fn_call_stack(s: State) -> NodeRes<Expr> {
                     TmpOp::IndexSugar {
                         coalesce,
                         index_expr,
-                        end_pos,
                     } => {
                         let span = (expr.span.0, end_pos);
                         (state, expr) = state.produce_node_with_span(
@@ -742,12 +728,7 @@ fn infix_or_postfix_fn_call_stack(s: State) -> NodeRes<Expr> {
                             },
                         );
                     }
-                    TmpOp::InfixOrPostfix {
-                        id,
-                        coalesce,
-                        args,
-                        end_pos,
-                    } => {
+                    TmpOp::InfixOrPostfix { id, coalesce, args } => {
                         let span = (expr.span.0, end_pos);
 
                         let mut args = args
@@ -789,7 +770,7 @@ fn infix_or_postfix_fn_call_stack(s: State) -> NodeRes<Expr> {
     .parse(s)
 }
 
-fn mul_expr_stack(s: State) -> NodeRes<Expr> {
+fn mul_expr_stack(s: State) -> Res<Expr> {
     binop_expr_stack(
         infix_or_postfix_fn_call_stack,
         alt((
@@ -803,7 +784,7 @@ fn mul_expr_stack(s: State) -> NodeRes<Expr> {
     .parse(s)
 }
 
-fn add_expr_stack(s: State) -> NodeRes<Expr> {
+fn add_expr_stack(s: State) -> Res<Expr> {
     binop_expr_stack(
         mul_expr_stack,
         alt((
@@ -817,7 +798,7 @@ fn add_expr_stack(s: State) -> NodeRes<Expr> {
     .parse(s)
 }
 
-fn equ_expr_stack(s: State) -> NodeRes<Expr> {
+fn equ_expr_stack(s: State) -> Res<Expr> {
     binop_expr_stack(
         add_expr_stack,
         alt((
@@ -835,7 +816,7 @@ fn equ_expr_stack(s: State) -> NodeRes<Expr> {
     .parse(s)
 }
 
-fn and_expr_stack(s: State) -> NodeRes<Expr> {
+fn and_expr_stack(s: State) -> Res<Expr> {
     binop_expr_stack(
         equ_expr_stack,
         alt((
@@ -847,7 +828,7 @@ fn and_expr_stack(s: State) -> NodeRes<Expr> {
     .parse(s)
 }
 
-fn or_expr_stack(s: State) -> NodeRes<Expr> {
+fn or_expr_stack(s: State) -> Res<Expr> {
     binop_expr_stack(
         and_expr_stack,
         alt((
@@ -861,14 +842,14 @@ fn or_expr_stack(s: State) -> NodeRes<Expr> {
 }
 
 // Just pass the same function to `parse_expr_le` and `parse_expr_ri` -- I'm not sure how to reuse it
-fn binop_expr_stack<'a, PExpr, POp>(
+fn binop_expr_stack<'a, PExpr, POp, E: Clone>(
     parse_expr_le: PExpr,
     parse_op: POp,
     parse_expr_ri: PExpr,
-) -> impl Parser<State<'a>, Output = ParseNode<Expr>>
+) -> impl Parser<'a, E, Output = Expr>
 where
-    POp: Parser<State<'a>, Output = ParseNode<&'a str>>,
-    PExpr: Parser<State<'a>, Output = ParseNode<Expr>>,
+    POp: Parser<'a, E, Output = &'a str>,
+    PExpr: Parser<'a, E, Output = Expr>,
 {
     map_state(
         seq((
@@ -891,7 +872,7 @@ where
     )
 }
 
-fn expr(s: State) -> NodeRes<Expr> {
+fn expr(s: State) -> Res<Expr> {
     alt((
         // if_expr,
         or_expr_stack,

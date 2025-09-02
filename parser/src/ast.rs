@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use parser_combinators::text::ParseNode;
+use parser_combinators::ParseNode;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AstNode {
@@ -18,7 +18,7 @@ impl<T> IntoAstNode<T> for ParseNode<T> {
         AstNode {
             id: self.id,
             span: self.span,
-            kind: f(self.data),
+            kind: f(self.value),
         }
     }
 }

@@ -26,6 +26,15 @@ impl<'a, E> ParseState<'a, E> {
             extra,
         }
     }
+
+    pub fn with_extra(self, extra: E) -> ParseState<'a, E> {
+        Self {
+            source: self.source,
+            at: self.at,
+            next_id: self.next_id,
+            extra,
+        }
+    }
 }
 
 impl<'a, E> ParseState<'a, E> {
@@ -84,14 +93,25 @@ impl<'a, E> ParseState<'a, E> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ParseNode<T> {
-    id: usize,
-    span: (usize, usize),
-    value: T,
+    pub id: usize,
+    pub span: (usize, usize),
+    pub value: T,
 }
 
 impl<T> ParseNode<T> {
+    pub fn map_outer<F, B>(self, mut f: F) -> ParseNode<B>
+    where
+        F: FnMut(ParseNode<T>) -> B,
+    {
+        let id = self.id;
+        let span = self.span;
+        let value = f(self);
+
+        ParseNode { id, span, value }
+    }
+
     pub fn map<F, B>(self, mut f: F) -> ParseNode<B>
     where
         F: FnMut(T) -> B,
@@ -208,6 +228,13 @@ pub fn eof<'a, E>(state: ParseState<'a, E>) -> Res<'a, E, ()> {
     }
 }
 
+pub fn extra<'a, E: Clone, T>(
+    extra: E,
+    mut p: impl Parser<'a, E, Output = T>,
+) -> impl Parser<'a, E, Output = T> {
+    move |state: ParseState<'a, E>| p.parse(state.with_extra(extra.clone()))
+}
+
 pub fn map<'a, E, A, B>(
     mut p: impl Parser<'a, E, Output = A>,
     mut f: impl FnMut(A) -> B,
@@ -215,6 +242,16 @@ pub fn map<'a, E, A, B>(
     move |state: ParseState<'a, E>| {
         let (state, node) = p.parse(state)?;
         Ok((state, node.map(&mut f)))
+    }
+}
+
+pub fn map_node<'a, E, A, B>(
+    mut p: impl Parser<'a, E, Output = A>,
+    mut f: impl FnMut(ParseNode<A>) -> B,
+) -> impl Parser<'a, E, Output = B> {
+    move |state: ParseState<'a, E>| {
+        let (state, node) = p.parse(state)?;
+        Ok((state, node.map_outer(&mut f)))
     }
 }
 
