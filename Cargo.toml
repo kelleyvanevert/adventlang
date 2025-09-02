@@ -1,4 +1,4 @@
 [workspace]
 resolver = "2"
-members = ["compiler", "parser", "tests"]
+members = ["compiler", "parser", "tests", "parser_v2"]
 # members = ["compiler", "parser", "parser_combinators", "tests"]

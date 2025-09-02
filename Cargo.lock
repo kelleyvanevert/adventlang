@@ -309,6 +309,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "parser_v2"
+version = "0.1.0"
+dependencies = [
+ "regex",
+]
+
+[[package]]
 name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
