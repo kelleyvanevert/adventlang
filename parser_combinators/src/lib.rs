@@ -56,10 +56,28 @@ impl<'a, E> ParseState<'a, E> {
         )
     }
 
-    pub fn produce<T>(self, len: usize, value: T) -> Res<'a, E, T> {
+    pub fn produce_with_span<T>(
+        self,
+        span: (usize, usize),
+        value: T,
+    ) -> (ParseState<'a, E>, ParseNode<T>) {
         let id = self.next_id;
 
-        Ok((
+        (
+            ParseState {
+                source: self.source,
+                at: self.at,
+                next_id: self.next_id + 1,
+                extra: self.extra,
+            },
+            ParseNode { id, span, value },
+        )
+    }
+
+    pub fn produce<T>(self, len: usize, value: T) -> (ParseState<'a, E>, ParseNode<T>) {
+        let id = self.next_id;
+
+        (
             ParseState {
                 source: self.source,
                 at: self.at + len,
@@ -71,7 +89,14 @@ impl<'a, E> ParseState<'a, E> {
                 span: (self.at, self.at + len),
                 value,
             },
-        ))
+        )
+    }
+
+    pub fn mk_empty_error(&self) -> ParseError {
+        ParseError {
+            at: self.at,
+            error: None,
+        }
     }
 
     pub fn mk_error(&self, error: String) -> ParseError {
@@ -79,17 +104,6 @@ impl<'a, E> ParseState<'a, E> {
             at: self.at,
             error: Some(error),
         }
-    }
-
-    pub fn produce_empty_error<T>(&self) -> Res<'a, E, T> {
-        Err(ParseError {
-            at: self.at,
-            error: None,
-        })
-    }
-
-    pub fn produce_error<T>(&self, error: String) -> Res<'a, E, T> {
-        Err(self.mk_error(error))
     }
 }
 
@@ -101,9 +115,9 @@ pub struct ParseNode<T> {
 }
 
 impl<T> ParseNode<T> {
-    pub fn map_outer<F, B>(self, mut f: F) -> ParseNode<B>
+    pub fn map_outer<F, B>(self, f: F) -> ParseNode<B>
     where
-        F: FnMut(ParseNode<T>) -> B,
+        F: FnOnce(ParseNode<T>) -> B,
     {
         let id = self.id;
         let span = self.span;
@@ -112,9 +126,9 @@ impl<T> ParseNode<T> {
         ParseNode { id, span, value }
     }
 
-    pub fn map<F, B>(self, mut f: F) -> ParseNode<B>
+    pub fn map<F, B>(self, f: F) -> ParseNode<B>
     where
-        F: FnMut(T) -> B,
+        F: FnOnce(T) -> B,
     {
         ParseNode {
             id: self.id,
@@ -123,15 +137,23 @@ impl<T> ParseNode<T> {
         }
     }
 
-    pub fn map_opt<'a, F, B>(self, mut f: F) -> Option<ParseNode<B>>
+    pub fn map_opt<'a, F, B>(self, f: F) -> Option<ParseNode<B>>
     where
-        F: FnMut(T) -> Option<B>,
+        F: FnOnce(T) -> Option<B>,
     {
         f(self.value).map(|value| ParseNode {
             id: self.id,
             span: self.span,
             value,
         })
+    }
+
+    pub fn with_span(self, span: (usize, usize)) -> ParseNode<T> {
+        ParseNode {
+            id: self.id,
+            span,
+            value: self.value,
+        }
     }
 }
 
@@ -174,9 +196,9 @@ where
 pub fn tag<'a, E>(tag: &'static str) -> impl Parser<'a, E, Output = &'a str> {
     move |state: ParseState<'a, E>| {
         if state.rem().starts_with(tag) {
-            state.produce(tag.len(), tag)
+            Ok(state.produce(tag.len(), tag))
         } else {
-            state.produce_error(format!("does not start with tag {tag}"))
+            Err(state.mk_error(format!("does not start with tag {tag}")))
         }
     }
 }
@@ -184,9 +206,9 @@ pub fn tag<'a, E>(tag: &'static str) -> impl Parser<'a, E, Output = &'a str> {
 pub fn char<'a, E>(c: char) -> impl Parser<'a, E, Output = char> {
     move |state: ParseState<'a, E>| {
         if state.rem().starts_with(c) {
-            state.produce(1, c)
+            Ok(state.produce(1, c))
         } else {
-            state.produce_error(format!("does not start with char {c}"))
+            Err(state.mk_error(format!("does not start with char {c}")))
         }
     }
 }
@@ -197,9 +219,9 @@ pub fn regex<'a, E>(re: &'static str) -> impl Parser<'a, E, Output = &'a str> {
     move |state: ParseState<'a, E>| {
         if let Some(m) = re.find(state.rem()) {
             let found = &state.rem()[m.range()];
-            state.produce(found.len(), found)
+            Ok(state.produce(found.len(), found))
         } else {
-            state.produce_error(format!("does not start with regex {re}"))
+            Err(state.mk_error(format!("does not start with regex {re}")))
         }
     }
 }
@@ -222,9 +244,9 @@ pub fn slws1<'a, E>(s: ParseState<'a, E>) -> Res<'a, E, &'a str> {
 
 pub fn eof<'a, E>(state: ParseState<'a, E>) -> Res<'a, E, ()> {
     if state.rem().len() == 0 {
-        state.produce(0, ())
+        Ok(state.produce(0, ()))
     } else {
-        state.produce_error(format!("not at end of file"))
+        Err(state.mk_error(format!("not at end of file")))
     }
 }
 
@@ -287,7 +309,7 @@ pub fn cond<'a, E, T>(
         if check(&state.rem()) {
             p.parse(state)
         } else {
-            state.produce_error(format!("condition invalid"))
+            Err(state.mk_error(format!("condition invalid")))
         }
     }
 }
@@ -301,7 +323,7 @@ pub fn check<'a, E, T>(
         if check(&node.value) {
             Ok((state, node))
         } else {
-            state.produce_error(format!("check failed"))
+            Err(state.mk_error(format!("check failed")))
         }
     }
 }
@@ -534,7 +556,7 @@ pub fn optional<'a, E: Clone, T>(
     move |state: ParseState<'a, E>| {
         match p.parse(state.clone()) {
             Ok((state, node)) => Ok((state, node.map(Some))),
-            Err(_) => state.produce(0, None),
+            Err(_) => Ok(state.produce(0, None)),
             // Actual err => err
         }
     }
@@ -550,10 +572,10 @@ pub fn optional_if<'a, E: Clone, T>(
                 if check(state.rem()) {
                     Ok((state, node.map(Some)))
                 } else {
-                    state.produce(0, None)
+                    Ok(state.produce(0, None))
                 }
             }
-            Err(_) => state.produce(0, None),
+            Err(_) => Ok(state.produce(0, None)),
             // Actual err => err
         }
     }
@@ -583,7 +605,7 @@ pub fn many<'a, E: Clone, T>(
                 },
             ))
         } else {
-            state.produce_error(format!("could not parse at least {minimum} element"))
+            Err(state.mk_error(format!("could not parse at least {minimum} element")))
         }
     }
 }
@@ -757,13 +779,17 @@ mod test {
             ))
         };
 
-        parses_and_check(parse_arglist(), "( bla, bla ,bla)", |state, node| {
+        parses_and_check(parse_arglist(), "( bla, bla ,bla)", |_state, node| {
             assert_eq!(node.value.0.value.0.len(), 3);
         });
 
-        parses_and_check(parse_arglist(), "( bla, bla ,bla, ..ok )", |state, node| {
-            assert_eq!(node.value.0.value.0.len(), 3);
-        });
+        parses_and_check(
+            parse_arglist(),
+            "( bla, bla ,bla, ..ok )",
+            |_state, node| {
+                assert_eq!(node.value.0.value.0.len(), 3);
+            },
+        );
 
         does_not_parse(parse_arglist(), "( bla, bla ,bla, .. ok )");
     }

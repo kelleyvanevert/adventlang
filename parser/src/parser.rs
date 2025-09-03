@@ -574,7 +574,7 @@ fn expr_call_stack(s: State) -> Res<Expr> {
             many0(preceded(slws0, invocation_args)),
         )),
         |(mut expr, invocations)| {
-            for invoc_args in invocations {
+            for invoc_args in invocations.value {
                 // transform each `args` ParseNode into an invocation expr ParseNode
                 let span = (expr.span.0, invoc_args.span.1);
                 expr = invoc_args.with_span(span).map(|args| {
@@ -591,7 +591,8 @@ fn expr_call_stack(s: State) -> Res<Expr> {
                 });
             }
 
-            expr
+            // but, actually, maybe we should actually parse to our own node, instead of auto-noding it?
+            expr.value
         },
     )
     .parse(s)
@@ -857,17 +858,24 @@ where
             many0(seq((ws0, parse_op, ws0, parse_expr_ri))),
         )),
         |mut state, (mut expr, ops)| {
-            for (_, op, _, right) in ops {
-                (state, expr) = state.produce_node_with_span(
+            for ParseNode {
+                value: (_, op, _, right),
+                ..
+            } in ops.value
+            {
+                (state, expr) = state.produce_with_span(
                     (expr.span.0, right.span.1),
                     Expr::BinaryExpr {
                         left: expr.into_ast_node(AstKind::Expr).into(),
-                        op: op.into_ast_node(|op| AstKind::Op(op.to_string())).into(),
+                        op: op
+                            .map(|op| op.to_string())
+                            .into_ast_node(AstKind::Op)
+                            .into(),
                         right: right.into_ast_node(AstKind::Expr).into(),
                     },
                 );
             }
-            Some((state, expr))
+            Ok((state, expr))
         },
     )
 }
