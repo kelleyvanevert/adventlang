@@ -1,8 +1,7 @@
 use either::Either;
 use parser_combinators::{
-    ParseNode, ParseState, Parser, alt, char, check, delimited, escaped_char, extra, many0, many1,
-    map, map_node, map_result, map_w_state, optional, preceded, regex, seq, slws0, slws1, tag,
-    terminated, ws0, ws1,
+    ParseNode, ParseState, Parser, alt, check, delimited, escaped_char, extra, many0, many1, map,
+    map_node, map_result, map_w_state, preceded, regex, slws0, slws1, terminated, ws0, ws1,
 };
 use regex::Regex;
 
@@ -53,7 +52,7 @@ fn type_var(s: State) -> Res<TypeVar> {
 }
 
 fn label(s: State) -> Res<Identifier> {
-    preceded(tag("'"), raw_identifier).parse(s)
+    preceded("'", raw_identifier).parse(s)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,7 +67,7 @@ fn str_lit_frag(s: State) -> Res<String> {
         many1(alt((
             map(regex(r#"^[^"{\\]+"#), StrFrag::Literal),
             map(escaped_char, StrFrag::EscapedChar),
-            map(preceded(char('\\'), ws1), |_| StrFrag::EscapedWs),
+            map(preceded('\\', ws1), |_| StrFrag::EscapedWs),
         ))),
         |pieces| {
             let mut build = "".to_string();
@@ -86,37 +85,36 @@ fn str_lit_frag(s: State) -> Res<String> {
 }
 
 fn raw_str_literal(s: State) -> Res<Expr> {
-    map_node(
-        delimited(tag(r#"r""#), regex(r#"^[^"]*"#), char('"')),
-        |s| Expr::StrLiteral {
+    map_node(delimited(r#"r""#, regex(r#"^[^"]*"#), '"'), |s| {
+        Expr::StrLiteral {
             pieces: vec![
                 s.into_ast_node(|s| AstKind::StrLiteralPiece(StrLiteralPiece::Fragment(s.into()))),
             ],
-        },
-    )
+        }
+    })
     .parse(s)
 }
 
 fn str_literal(s: State) -> Res<Expr> {
     map(
         delimited(
-            char('"'),
+            '"',
             many0(alt((
                 map(str_lit_frag, StrLiteralPiece::Fragment),
                 map(
-                    seq((
-                        char('{'),
+                    (
+                        '{',
                         ws0,
                         extra(Extra { constrained: false }, expr),
                         ws0,
-                        char('}'),
-                    )),
+                        '}',
+                    ),
                     |(_, _, expr, _, _)| {
                         StrLiteralPiece::Interpolation(expr.into_ast_node(AstKind::Expr).into())
                     },
                 ),
             ))),
-            char('"'),
+            '"',
         ),
         |pieces| Expr::StrLiteral {
             pieces: pieces
@@ -568,31 +566,34 @@ fn expr_index_or_method_stack(s: State) -> Res<Expr> {
 }
 
 fn expr_call_stack(s: State) -> Res<Expr> {
-    map(
-        seq((
+    map_result(
+        (
             expr_index_or_method_stack,
             many0(preceded(slws0, invocation_args)),
-        )),
-        |(mut expr, invocations)| {
+        ),
+        |mut state,
+         ParseNode {
+             value: (mut expr, invocations),
+             ..
+         }| {
             for invoc_args in invocations.value {
-                // transform each `args` ParseNode into an invocation expr ParseNode
-                let span = (expr.span.0, invoc_args.span.1);
-                expr = invoc_args.with_span(span).map(|args| {
+                (state, expr) = state.produce_with_span(
+                    (expr.span.0, invoc_args.span.1),
                     Expr::Invocation {
                         expr: expr.into_ast_node(AstKind::Expr).into(),
                         postfix: false,
                         coalesce: false, //TODO
                         // args: args,
-                        args: args
+                        args: invoc_args
+                            .value
                             .into_iter()
                             .map(|arg| arg.into_ast_node(AstKind::Argument))
                             .collect::<Vec<_>>(),
-                    }
-                });
+                    },
+                );
             }
 
-            // but, actually, maybe we should actually parse to our own node, instead of auto-noding it?
-            expr.value
+            Ok((state, expr))
         },
     )
     .parse(s)
@@ -600,7 +601,7 @@ fn expr_call_stack(s: State) -> Res<Expr> {
 
 fn unary_expr_stack(s: State) -> Res<Expr> {
     map_result(
-        seq((many0(terminated(tag("!"), ws0)), expr_call_stack)),
+        (many0(terminated("!", ws0)), expr_call_stack),
         |mut state,
          ParseNode {
              value: (ops, mut expr),
@@ -615,6 +616,7 @@ fn unary_expr_stack(s: State) -> Res<Expr> {
                     },
                 );
             }
+
             Ok((state, expr))
         },
     )
@@ -636,14 +638,14 @@ enum TmpOp {
 
 fn postfix_index_sugar(input: State) -> Res<TmpOp> {
     map(
-        seq((
+        (
             ws0,
-            optional(char('?')),
+            ["?"],
             ws0,
-            tag(":["),
+            ":[",
             extra(Extra { constrained: false }, expr),
-            char(']'),
-        )),
+            "]",
+        ),
         |(_, coalesce, _, _, index_expr, _)| TmpOp::IndexSugar {
             coalesce: coalesce.value.is_some(),
             index_expr,
@@ -654,19 +656,19 @@ fn postfix_index_sugar(input: State) -> Res<TmpOp> {
 
 fn infix_or_postfix_fn_latter_part(input: State) -> Res<TmpOp> {
     map_w_state(
-        seq((
+        (
             ws0,
-            optional(seq((char('?'), ws0))),
-            char(':'),
+            [("?", ws0)],
+            ':',
             identifier,
-            optional(seq((
+            [(
                 preceded(slws0, unary_expr_stack),
                 many0(
-                    seq((slws0, tag("'"), identifier, slws1, unary_expr_stack)),
+                    (slws0, "'", identifier, slws1, unary_expr_stack),
                     // preceded(seq((slws0, char(','), slws0)), unary_expr_stack)
                 ),
-            ))),
-        )),
+            )],
+        ),
         |mut state, (_, coalesce, _, id, opt)| {
             let op = TmpOp::InfixOrPostfix {
                 id,
@@ -707,10 +709,10 @@ fn infix_or_postfix_fn_latter_part(input: State) -> Res<TmpOp> {
 
 fn infix_or_postfix_fn_call_stack(s: State) -> Res<Expr> {
     map_result(
-        seq((
+        (
             unary_expr_stack,
             many0(alt((postfix_index_sugar, infix_or_postfix_fn_latter_part))),
-        )),
+        ),
         |mut state,
          ParseNode {
              value: (mut expr, ops),
@@ -775,91 +777,36 @@ fn infix_or_postfix_fn_call_stack(s: State) -> Res<Expr> {
 }
 
 fn mul_expr_stack(s: State) -> Res<Expr> {
-    binop_expr_stack(
-        infix_or_postfix_fn_call_stack,
-        alt((
-            //
-            tag("*"),
-            tag("/"),
-            tag("%"),
-        )),
-        infix_or_postfix_fn_call_stack,
-    )
-    .parse(s)
+    binop_expr_stack(infix_or_postfix_fn_call_stack, alt(("*", "/", "%"))).parse(s)
 }
 
 fn add_expr_stack(s: State) -> Res<Expr> {
-    binop_expr_stack(
-        mul_expr_stack,
-        alt((
-            //
-            tag("+"),
-            tag("-"),
-            tag("<<"),
-        )),
-        mul_expr_stack,
-    )
-    .parse(s)
+    binop_expr_stack(mul_expr_stack, alt(("+", "-", "<<"))).parse(s)
 }
 
 fn equ_expr_stack(s: State) -> Res<Expr> {
-    binop_expr_stack(
-        add_expr_stack,
-        alt((
-            //
-            tag("!="),
-            tag(">="),
-            tag("<="),
-            tag("=="),
-            tag("<"),
-            tag(">"),
-            tag("^"),
-        )),
-        add_expr_stack,
-    )
-    .parse(s)
+    binop_expr_stack(add_expr_stack, alt(("!=", ">=", "<=", "==", "<", ">", "^"))).parse(s)
 }
 
 fn and_expr_stack(s: State) -> Res<Expr> {
-    binop_expr_stack(
-        equ_expr_stack,
-        alt((
-            //
-            tag("&&"),
-        )),
-        equ_expr_stack,
-    )
-    .parse(s)
+    binop_expr_stack(equ_expr_stack, alt(("&&",))).parse(s)
 }
 
 fn or_expr_stack(s: State) -> Res<Expr> {
-    binop_expr_stack(
-        and_expr_stack,
-        alt((
-            //
-            tag("||"),
-            tag("??"),
-        )),
-        and_expr_stack,
-    )
-    .parse(s)
+    binop_expr_stack(and_expr_stack, alt(("||", "??"))).parse(s)
 }
 
 // Just pass the same function to `parse_expr_le` and `parse_expr_ri` -- I'm not sure how to reuse it
 fn binop_expr_stack<'a, PExpr, POp, E: Clone>(
-    parse_expr_le: PExpr,
+    parse_expr: PExpr,
     parse_op: POp,
-    parse_expr_ri: PExpr,
 ) -> impl Parser<'a, E, Output = Expr>
 where
     POp: Parser<'a, E, Output = &'a str>,
-    PExpr: Parser<'a, E, Output = Expr>,
+    PExpr: Parser<'a, E, Output = Expr> + Copy,
 {
     map_result(
-        seq((
-            parse_expr_le,
-            many0(seq((ws0, parse_op, ws0, parse_expr_ri))),
-        )),
+        (parse_expr, many0((ws0, parse_op, ws0, parse_expr))),
         |mut state,
          ParseNode {
              value: (mut expr, ops),

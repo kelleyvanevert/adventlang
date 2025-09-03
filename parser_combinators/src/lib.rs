@@ -206,15 +206,12 @@ where
     }
 }
 
-// pub fn value<I, A, B: Copy>(b: B, mut p: impl Parser<I, Output = A>) -> impl Parser<I, Output = B> {
-//     move |input: I| {
-//         let (input, _) = p.parse(input)?;
-//         Some((input, b))
-//     }
-// }
+impl<'a, E> Parser<'a, E> for &'a str {
+    type Output = &'a str;
 
-pub fn tag<'a, E>(tag: &'static str) -> impl Parser<'a, E, Output = &'a str> {
-    move |state: ParseState<'a, E>| {
+    fn parse(&mut self, state: ParseState<'a, E>) -> Res<'a, E, &'a str> {
+        let tag = *self;
+
         if state.rem().starts_with(tag) {
             Ok(state.produce(tag.len(), tag))
         } else {
@@ -223,12 +220,31 @@ pub fn tag<'a, E>(tag: &'static str) -> impl Parser<'a, E, Output = &'a str> {
     }
 }
 
-pub fn char<'a, E>(c: char) -> impl Parser<'a, E, Output = char> {
-    move |state: ParseState<'a, E>| {
-        if state.rem().starts_with(c) {
-            Ok(state.produce(1, c))
+impl<'a, E> Parser<'a, E> for char {
+    type Output = char;
+
+    fn parse(&mut self, state: ParseState<'a, E>) -> Res<'a, E, char> {
+        let ch = *self;
+
+        if state.rem().starts_with(ch) {
+            Ok(state.produce(1, ch))
         } else {
-            Err(state.mk_error(format!("does not start with char {c}")))
+            Err(state.mk_error(format!("does not start with tag {ch}")))
+        }
+    }
+}
+
+impl<'a, P, T, E: Clone> Parser<'a, E> for [P; 1]
+where
+    P: Parser<'a, E, Output = T>,
+{
+    type Output = Option<T>;
+
+    fn parse(&mut self, state: ParseState<'a, E>) -> Res<'a, E, Option<T>> {
+        match self[0].parse(state.clone()) {
+            Ok((state, node)) => Ok((state, node.map(Some))),
+            Err(_) => Ok(state.produce(0, None)),
+            // Actual err => err
         }
     }
 }
@@ -386,19 +402,13 @@ macro_rules! succ (
   (20, $submac:ident!($($rest:tt)*)) => ($submac!(21, $($rest)*));
 );
 
-pub trait Seq<'a, E> {
-    type Output;
-
-    fn parse_seq(&mut self, state: ParseState<'a, E>) -> Res<'a, E, Self::Output>;
-}
-
-impl<'a, P0, O0, E> Seq<'a, E> for (P0,)
+impl<'a, P0, O0, E> Parser<'a, E> for (P0,)
 where
     P0: Parser<'a, E, Output = O0>,
 {
     type Output = (ParseNode<O0>,);
 
-    fn parse_seq(&mut self, state: ParseState<'a, E>) -> Res<'a, E, Self::Output> {
+    fn parse(&mut self, state: ParseState<'a, E>) -> Res<'a, E, Self::Output> {
         let (state, node) = self.0.parse(state)?;
         let (state, id) = state.produce_id();
         Ok((
@@ -437,13 +447,13 @@ macro_rules! seq_impl_inner {
 
 macro_rules! seq_impl {
     ($($name:ident $ty:ident),+) => {
-        impl<'a, $($name),+, $($ty),+, E> Seq<'a, E> for ($($name),+)
+        impl<'a, $($name),+, $($ty),+, E> Parser<'a, E> for ($($name),+)
         where
             $($name: Parser<'a, E, Output = $ty>,)+
         {
             type Output = ($(ParseNode<$ty>),+);
 
-            fn parse_seq(&mut self, state: ParseState<'a, E>) -> Res<'a, E, Self::Output> {
+            fn parse(&mut self, state: ParseState<'a, E>) -> Res<'a, E, Self::Output> {
                 seq_impl_inner!(0, self, state, 0, (), $($name)+)
             }
         }
@@ -467,12 +477,6 @@ seq_impl!(P0 O0, P1 O1, P2 O2, P3 O3, P4 O4, P5 O5, P6 O6, P7 O7, P8 O8, P9 O9, 
 seq_impl!(P0 O0, P1 O1, P2 O2, P3 O3, P4 O4, P5 O5, P6 O6, P7 O7, P8 O8, P9 O9, P10 O10, P11 O11, P12 O12, P13 O13, P14 O14, P15 O15);
 seq_impl!(P0 O0, P1 O1, P2 O2, P3 O3, P4 O4, P5 O5, P6 O6, P7 O7, P8 O8, P9 O9, P10 O10, P11 O11, P12 O12, P13 O13, P14 O14, P15 O15, P16 O16);
 seq_impl!(P0 O0, P1 O1, P2 O2, P3 O3, P4 O4, P5 O5, P6 O6, P7 O7, P8 O8, P9 O9, P10 O10, P11 O11, P12 O12, P13 O13, P14 O14, P15 O15, P16 O16, P17 O17);
-
-pub fn seq<'a, E, T, List: Seq<'a, E, Output = T>>(
-    mut list: List,
-) -> impl Parser<'a, E, Output = T> {
-    move |state: ParseState<'a, E>| list.parse_seq(state)
-}
 
 pub trait Alt<'a, E> {
     type Output;
@@ -565,7 +569,7 @@ where
     P2: Parser<'a, E, Output = O2>,
     P3: Parser<'a, E, Output = O3>,
 {
-    map(seq((p1, p2, p3)), |(_, r2, _)| r2.value)
+    map((p1, p2, p3), |(_, r2, _)| r2.value)
 }
 
 pub fn preceded<'a, P1, O1, P2, O2, E>(p1: P1, p2: P2) -> impl Parser<'a, E, Output = O2>
@@ -573,7 +577,7 @@ where
     P1: Parser<'a, E, Output = O1>,
     P2: Parser<'a, E, Output = O2>,
 {
-    map(seq((p1, p2)), |(_, r2)| r2.value)
+    map((p1, p2), |(_, r2)| r2.value)
 }
 
 pub fn terminated<'a, P1, O1, P2, O2, E>(p1: P1, p2: P2) -> impl Parser<'a, E, Output = O1>
@@ -581,19 +585,7 @@ where
     P1: Parser<'a, E, Output = O1>,
     P2: Parser<'a, E, Output = O2>,
 {
-    map(seq((p1, p2)), |(r1, _)| r1.value)
-}
-
-pub fn optional<'a, E: Clone, T>(
-    mut p: impl Parser<'a, E, Output = T>,
-) -> impl Parser<'a, E, Output = Option<T>> {
-    move |state: ParseState<'a, E>| {
-        match p.parse(state.clone()) {
-            Ok((state, node)) => Ok((state, node.map(Some))),
-            Err(_) => Ok(state.produce(0, None)),
-            // Actual err => err
-        }
-    }
+    map((p1, p2), |(r1, _)| r1.value)
 }
 
 pub fn optional_if<'a, E: Clone, T>(
@@ -662,17 +654,17 @@ pub fn listy<'a, E: Clone, P, T>(
     close_tag: &'static str,
 ) -> impl Parser<'a, E, Output = (Vec<ParseNode<T>>, bool)>
 where
-    P: Parser<'a, E, Output = T> + Clone,
+    P: Parser<'a, E, Output = T> + Copy,
 {
     delimited(
-        seq((tag(open_tag), ws0)),
+        (open_tag, ws0),
         map(
-            optional(seq((
-                parse_element.clone(),
-                many0(preceded(seq((ws0, tag(","), ws0)), parse_element)),
+            [(
+                parse_element,
+                many0(preceded((ws0, ",", ws0), parse_element)),
                 ws0,
-                optional(tag(",")),
-            ))),
+                [","],
+            )],
             |opt| match opt {
                 None => (vec![], false),
                 Some((first_el, els, _, trailing_comma)) => {
@@ -682,7 +674,7 @@ where
                 }
             },
         ),
-        seq((ws0, tag(close_tag))),
+        (ws0, close_tag),
     )
 }
 
@@ -693,18 +685,18 @@ pub fn listy_splat<'a, E: Clone, P, P2, T, S>(
     close_tag: &'static str,
 ) -> impl Parser<'a, E, Output = (Vec<ParseNode<T>>, Option<ParseNode<S>>)>
 where
-    P: Parser<'a, E, Output = T> + Clone,
+    P: Parser<'a, E, Output = T> + Copy,
     P2: Parser<'a, E, Output = S>,
 {
     delimited(
-        seq((tag(open_tag), ws0)),
+        (open_tag, ws0),
         map(
-            optional(seq((
-                parse_element.clone(),
-                many0(preceded(seq((ws0, tag(","), ws0)), parse_element)),
+            [(
+                parse_element,
+                many0(preceded((ws0, ",", ws0), parse_element)),
                 ws0,
-                optional(preceded(tag(","), optional(preceded(ws0, parse_splat)))),
-            ))),
+                [preceded(",", [preceded(ws0, parse_splat)])],
+            )],
             |opt| match opt {
                 None => (vec![], None),
                 Some((first_el, els, _, opt)) => {
@@ -714,7 +706,7 @@ where
                 }
             },
         ),
-        seq((ws0, tag(close_tag))),
+        (ws0, close_tag),
     )
 }
 
@@ -730,17 +722,17 @@ pub fn unicode_sequence<'a, E>(state: ParseState<'a, E>) -> Res<'a, E, char> {
 
 pub fn escaped_char<'a, E: Clone>(s: ParseState<'a, E>) -> Res<'a, E, char> {
     preceded(
-        char('\\'),
+        '\\',
         alt((
             unicode_sequence,
-            map(char('\n'), |_| 'n'),
-            map(char('\r'), |_| 'r'),
-            map(char('\t'), |_| 't'),
-            map(char('\u{08}'), |_| 'b'),
-            map(char('\u{0C}'), |_| 'f'),
-            map(char('\\'), |_| '\\'),
-            map(char('/'), |_| '/'),
-            map(char('"'), |_| '"'),
+            map('\n', |_| 'n'),
+            map('\r', |_| 'r'),
+            map('\t', |_| 't'),
+            map('\u{08}', |_| 'b'),
+            map('\u{0C}', |_| 'f'),
+            map('\\', |_| '\\'),
+            map('/', |_| '/'),
+            map('"', |_| '"'),
         )),
     )
     .parse(s)
@@ -750,9 +742,7 @@ pub fn escaped_char<'a, E: Clone>(s: ParseState<'a, E>) -> Res<'a, E, char> {
 mod test {
     use std::{assert_matches::assert_matches, fmt::Debug};
 
-    use crate::{
-        ParseNode, ParseState, Parser, Res, alt, eof, listy_splat, many0, preceded, seq, tag, ws0,
-    };
+    use crate::{ParseNode, ParseState, Parser, alt, eof, listy_splat, many0, preceded, ws0};
 
     fn parses_and_check<'a, T>(
         mut p: impl Parser<'a, (), Output = T>,
@@ -769,49 +759,32 @@ mod test {
 
     #[test]
     fn test() {
-        parses_and_check(tag("hel"), "hello world!", |state, node| {
+        parses_and_check("hel", "hello world!", |state, node| {
             assert_eq!(node.value, "hel");
             assert_eq!(state.at, 3);
         });
 
-        parses_and_check(
-            seq((tag("hel"), tag("lo"), ws0)),
-            "hello world!",
-            |state, node| {
-                assert_eq!(node.span, (0, 6));
-                assert_eq!(node.value.0.value, "hel");
-                assert_eq!(node.value.1.value, "lo");
-                assert_eq!(node.value.2.value, " ");
-                assert_eq!(state.at, 6);
-            },
-        );
+        parses_and_check(("hel", "lo", ws0), "hello world!", |state, node| {
+            assert_eq!(node.span, (0, 6));
+            assert_eq!(node.value.0.value, "hel");
+            assert_eq!(node.value.1.value, "lo");
+            assert_eq!(node.value.2.value, " ");
+            assert_eq!(state.at, 6);
+        });
 
-        parses_and_check(many0(tag("hi")), "hihihibla", |state, node| {
+        parses_and_check(many0("hi"), "hihihibla", |state, node| {
             assert_eq!(node.span, (0, 6));
             assert_eq!(node.value[0].span, (0, 2));
             assert_eq!(node.value[1].span, (2, 4));
             assert_eq!(state.at, 6);
         });
 
-        parses_and_check(
-            alt((tag("hi"), tag("hello"), tag("goodbye"))),
-            "hello!",
-            |state, node| {
-                assert_eq!(node.value, "hello");
-                assert_eq!(state.at, 5);
-            },
-        );
+        parses_and_check(alt(("hi", "hello", "goodbye")), "hello!", |state, node| {
+            assert_eq!(node.value, "hello");
+            assert_eq!(state.at, 5);
+        });
 
-        fn parse_bla<'a>(state: ParseState<'a, ()>) -> Res<'a, (), &'a str> {
-            tag("bla").parse(state)
-        }
-
-        let parse_arglist = || {
-            seq((
-                listy_splat("(", parse_bla, preceded(tag(".."), tag("ok")), ")"),
-                eof,
-            ))
-        };
+        let parse_arglist = || (listy_splat("(", "bla", preceded("..", "ok"), ")"), eof);
 
         parses_and_check(parse_arglist(), "( bla, bla ,bla)", |_state, node| {
             assert_eq!(node.value.0.value.0.len(), 3);
