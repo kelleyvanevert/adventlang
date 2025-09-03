@@ -1,11 +1,15 @@
 use either::Either;
 use parser_combinators::{
-    ParseNode, ParseState, Parser, alt, check, delimited, escaped_char, extra, many0, many1, map,
-    map_node, map_result, map_w_state, preceded, regex, slws0, slws1, terminated, ws0, ws1,
+    ParseNode, ParseState, Parser, alt, check, delimited, eof, escaped_char, extra, listy,
+    listy_elements, many0, many1, map, map_node, map_result, map_w_state, preceded, regex, slws0,
+    slws1, terminated, ws0, ws1,
 };
 use regex::Regex;
 
-use crate::ast::{Argument, AstKind, Expr, Identifier, IntoAstNode, StrLiteralPiece, TypeVar};
+use crate::ast::{
+    Argument, AstKind, AstNode, Expr, FnType, Identifier, IntoAstNode, Op, StrLiteralPiece, Type,
+    TypeVar,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Extra {
@@ -15,6 +19,30 @@ struct Extra {
 type State<'a> = ParseState<'a, Extra>;
 type Res<'a, T> = parser_combinators::Res<'a, Extra, T>;
 // type P<'a, T> = dyn Parser<State<'a>, Output = Res<'a, T>>;
+
+macro_rules! parse_node_into_ast_node {
+    ($name:ident) => {
+        impl Into<AstNode> for ParseNode<$name> {
+            fn into(self) -> AstNode {
+                self.into_ast_node(AstKind::$name)
+            }
+        }
+
+        impl Into<Box<AstNode>> for ParseNode<$name> {
+            fn into(self) -> Box<AstNode> {
+                self.into_ast_node(AstKind::$name).into()
+            }
+        }
+    };
+}
+
+parse_node_into_ast_node!(Identifier);
+parse_node_into_ast_node!(TypeVar);
+parse_node_into_ast_node!(Type);
+parse_node_into_ast_node!(Expr);
+parse_node_into_ast_node!(StrLiteralPiece);
+parse_node_into_ast_node!(Op);
+parse_node_into_ast_node!(Argument);
 
 fn initial_parse_state<'a>(input: &'a str) -> State<'a> {
     State::new(input, Extra { constrained: false })
@@ -86,10 +114,9 @@ fn str_lit_frag(s: State) -> Res<String> {
 
 fn raw_str_literal(s: State) -> Res<Expr> {
     map_node(delimited(r#"r""#, regex(r#"^[^"]*"#), '"'), |s| {
+        let s = s.map(|s| StrLiteralPiece::Fragment(s.to_owned()));
         Expr::StrLiteral {
-            pieces: vec![
-                s.into_ast_node(|s| AstKind::StrLiteralPiece(StrLiteralPiece::Fragment(s.into()))),
-            ],
+            pieces: vec![s.into()],
         }
     })
     .parse(s)
@@ -109,18 +136,13 @@ fn str_literal(s: State) -> Res<Expr> {
                         ws0,
                         '}',
                     ),
-                    |(_, _, expr, _, _)| {
-                        StrLiteralPiece::Interpolation(expr.into_ast_node(AstKind::Expr).into())
-                    },
+                    |(_, _, expr, _, _)| StrLiteralPiece::Interpolation(expr.into()),
                 ),
             ))),
             '"',
         ),
         |pieces| Expr::StrLiteral {
-            pieces: pieces
-                .into_iter()
-                .map(|piece| piece.into_ast_node(AstKind::StrLiteralPiece))
-                .collect(),
+            pieces: pieces.into_iter().map(|piece| piece.into()).collect(),
         },
     )
     .parse(s)
@@ -580,14 +602,14 @@ fn expr_call_stack(s: State) -> Res<Expr> {
                 (state, expr) = state.produce_with_span(
                     (expr.span.0, invoc_args.span.1),
                     Expr::Invocation {
-                        expr: expr.into_ast_node(AstKind::Expr).into(),
+                        expr: expr.into(),
                         postfix: false,
                         coalesce: false, //TODO
                         // args: args,
                         args: invoc_args
                             .value
                             .into_iter()
-                            .map(|arg| arg.into_ast_node(AstKind::Argument))
+                            .map(|arg| arg.into())
                             .collect::<Vec<_>>(),
                     },
                 );
@@ -611,8 +633,8 @@ fn unary_expr_stack(s: State) -> Res<Expr> {
                 (state, expr) = state.produce_with_span(
                     (op.span.0, expr.span.1),
                     Expr::UnaryExpr {
-                        expr: expr.into_ast_node(AstKind::Expr).into(),
-                        op: op.into_ast_node(|op| AstKind::Op(op.to_string())).into(),
+                        expr: expr.into(),
+                        op: op.map(|op| Op(op.to_owned())).into(),
                     },
                 );
             }
@@ -676,8 +698,6 @@ fn infix_or_postfix_fn_latter_part(input: State) -> Res<TmpOp> {
                 args: match opt.value {
                     None => vec![],
                     Some((expr, additional_named_args)) => {
-                        let expr = expr.into_ast_node(AstKind::Expr);
-
                         let (new_state, arg) = state.produce_with_span(
                             expr.span,
                             Argument {
@@ -691,8 +711,8 @@ fn infix_or_postfix_fn_latter_part(input: State) -> Res<TmpOp> {
 
                         for arg in additional_named_args.value {
                             all.push(arg.map(|(_, _, name, _, expr)| Argument {
-                                name: Some(name.into_ast_node(AstKind::Identifier).into()),
-                                expr: expr.into_ast_node(AstKind::Expr).into(),
+                                name: Some(name.into()),
+                                expr: expr.into(),
                             }));
                         }
 
@@ -728,9 +748,9 @@ fn infix_or_postfix_fn_call_stack(s: State) -> Res<Expr> {
                         (state, expr) = state.produce_with_span(
                             span,
                             Expr::Index {
-                                expr: expr.into_ast_node(AstKind::Expr).into(),
+                                expr: expr.into(),
                                 coalesce,
-                                index: index_expr.into_ast_node(AstKind::Expr).into(),
+                                index: index_expr.into(),
                             },
                         );
                     }
@@ -747,7 +767,7 @@ fn infix_or_postfix_fn_call_stack(s: State) -> Res<Expr> {
                                 expr.span,
                                 Argument {
                                     name: None,
-                                    expr: expr.into_ast_node(AstKind::Expr).into(),
+                                    expr: expr.into(),
                                 },
                             );
                             state = new_state;
@@ -757,10 +777,7 @@ fn infix_or_postfix_fn_call_stack(s: State) -> Res<Expr> {
                         (state, expr) = state.produce_with_span(
                             span,
                             Expr::Invocation {
-                                expr: id
-                                    .map(|id| Expr::Variable(id))
-                                    .into_ast_node(AstKind::Expr)
-                                    .into(),
+                                expr: id.map(|id| Expr::Variable(id)).into(),
                                 postfix: true,
                                 coalesce,
                                 args,
@@ -820,12 +837,9 @@ where
                 (state, expr) = state.produce_with_span(
                     (expr.span.0, right.span.1),
                     Expr::BinaryExpr {
-                        left: expr.into_ast_node(AstKind::Expr).into(),
-                        op: op
-                            .map(|op| op.to_string())
-                            .into_ast_node(AstKind::Op)
-                            .into(),
-                        right: right.into_ast_node(AstKind::Expr).into(),
+                        left: expr.into(),
+                        op: op.map(|op| Op(op.to_string())).into(),
+                        right: right.into(),
                     },
                 );
             }
@@ -903,129 +917,131 @@ fn expr(s: State) -> Res<Expr> {
 //     .parse(s)
 // }
 
-// fn type_leaf(s: State) -> ParseResult<State, Type> {
-//     alt((
-//         // map(tag("any"), |_| Type::Any),
-//         map(tag("nil"), |_| Type::Nil),
-//         map(tag("bool"), |_| Type::Bool),
-//         map(tag("str"), |_| Type::Str),
-//         map(tag("int"), |_| Type::Int),
-//         map(tag("float"), |_| Type::Float),
-//         map(tag("num"), |_| Type::Num),
-//         map(tag("regex"), |_| Type::Regex),
-//         type_fn,
-//         // "dict" or "dict[K, V]"
-//         map(
-//             preceded(
-//                 tag("dict"),
-//                 optional(delimited(
-//                     seq((tag("["), ws0)),
-//                     seq((typespec, ws0, tag(","), ws0, typespec)),
-//                     seq((ws0, tag("]"))),
-//                 )),
-//             ),
-//             |opt| Type::Dict(opt.map(|(k, _, _, _, v)| (k.into(), v.into()))),
-//         ),
-//         // implicitly typed tuple
-//         map(tag("tuple"), |_| Type::Tuple(None)),
-//         // (a, b, c, ..)
-//         map(
-//             listy("(", typespec, typespec, ")"),
-//             |(mut ts, trailing_comma)| {
-//                 if ts.len() == 1 && !trailing_comma {
-//                     // parse "(A)" as the type "A", but "(A,)" as the tuple "(A)"
-//                     // (and "()" is still just the empty tuple)
-//                     ts.pop().unwrap()
-//                 } else {
-//                     Type::Tuple(Some(ts))
-//                 }
-//             },
-//         ),
-//         // implicitly typed list
-//         map(tag("list"), |_| Type::List(None)),
-//         // explicitly typed list: [T]
-//         map(
-//             delimited(seq((tag("["), ws0)), typespec, seq((ws0, tag("]")))),
-//             |t| Type::List(Some(t.into())),
-//         ),
-//         map(type_var, Type::TypeVar),
-//         // recurse with parentheses
-//         parenthesized_type,
-//     ))
-//     .parse(s)
-// }
+fn type_leaf(s: State) -> Res<Type> {
+    alt((
+        // map(tag("any"), |_| Type::Any),
+        map("nil", |_| Type::Nil),
+        map("bool", |_| Type::Bool),
+        map("str", |_| Type::Str),
+        map("int", |_| Type::Int),
+        map("float", |_| Type::Float),
+        map("num", |_| Type::Num),
+        map("regex", |_| Type::Regex),
+        type_fn,
+        // "dict" or "dict[K, V]"
+        map(
+            preceded(
+                "dict",
+                [delimited(
+                    ("[", ws0),
+                    (typespec, (ws0, ",", ws0), typespec),
+                    (ws0, "]"),
+                )],
+            ),
+            |opt| Type::Dict(opt.map(|(k, _, v)| (k.into(), v.into()))),
+        ),
+        // implicitly typed tuple
+        map("tuple", |_| Type::Tuple(None)),
+        // (a, b, c, ..)
+        map(listy("(", typespec, ")"), |(mut ts, trailing_comma)| {
+            if ts.len() == 1 && !trailing_comma {
+                // parse "(A)" as the type "A", but "(A,)" as the tuple "(A)"
+                // (and "()" is still just the empty tuple)
+                ts.pop().unwrap().value
+            } else {
+                let elements = ts.into_iter().map(|t| t.into()).collect();
+                Type::Tuple(Some(elements))
+            }
+        }),
+        // implicitly typed list
+        map("list", |_| Type::List(None)),
+        // explicitly typed list: [T]
+        map_node(delimited(("[", ws0), typespec, (ws0, "]")), |t| {
+            Type::List(Some(t.into()))
+        }),
+        map_node(type_var, |var| Type::TypeVar(var.into())),
+        // recurse with parentheses
+        parenthesized_type,
+    ))
+    .parse(s)
+}
 
-// fn type_fn(s: State) -> ParseResult<State, Type> {
-//     map(
-//         seq((
-//             tag("fn"),
-//             optional(seq((
-//                 optional(preceded(ws0, listy("<", type_var, type_var, ">"))),
-//                 preceded(ws0, listy("(", typespec, typespec, ")")),
-//             ))),
-//             optional(preceded(seq((ws0, tag("->"), ws0)), typespec)),
-//         )),
-//         |(_, generics_and_args, ret)| {
-//             if generics_and_args.is_none() && ret.is_none() {
-//                 return Type::Fun(None);
-//             }
+fn type_fn(s: State) -> Res<Type> {
+    map(
+        (
+            "fn",
+            [(
+                [preceded(ws0, listy_elements("<", type_var, ">"))],
+                preceded(ws0, listy_elements("(", typespec, ")")),
+            )],
+            [preceded((ws0, "->", ws0), typespec)],
+        ),
+        |(_, generics_and_params, ret)| {
+            if generics_and_params.value.is_none() && ret.value.is_none() {
+                return Type::Fun(None);
+            }
 
-//             let (generics, (params, _)) = generics_and_args.unwrap_or_default();
-//             let generics = generics.map(|t| t.0).unwrap_or(vec![]);
-//             let ret = ret.unwrap_or(Type::Nil);
+            let (generics, params) = generics_and_params
+                .value
+                .map(|(a, b)| (a.value.unwrap_or_default(), b.value))
+                .unwrap_or((vec![], vec![]));
 
-//             // TODO: maybe validate?
+            let generics = generics.into_iter().map(|var| var.into()).collect();
+            let params = params.into_iter().map(|var| var.into()).collect();
+            let ret = ret.map(|t| t.unwrap_or(Type::Nil)).into();
 
-//             Type::Fun(Some(FnType {
-//                 generics,
-//                 params,
-//                 ret: ret.into(),
-//             }))
-//         },
-//     )
-//     .parse(s)
-// }
+            // TODO: maybe validate?
 
-// fn parenthesized_type(s: State) -> ParseResult<State, Type> {
-//     delimited(seq((char('('), ws0)), typespec, seq((ws0, char(')')))).parse(s)
-// }
+            Type::Fun(Some(FnType {
+                generics,
+                params,
+                ret,
+            }))
+        },
+    )
+    .parse(s)
+}
 
-// fn type_nullable_stack(s: State) -> ParseResult<State, Type> {
-//     map(
-//         seq((many0(terminated(tag("?"), ws0)), type_leaf)),
-//         |(nullable, ty)| {
-//             if !nullable.is_empty() {
-//                 Type::Nullable(ty.into())
-//             } else {
-//                 ty
-//             }
-//         },
-//     )
-//     .parse(s)
-// }
+fn parenthesized_type(s: State) -> Res<Type> {
+    delimited(('(', ws0), typespec, (ws0, ')')).parse(s)
+}
 
-// fn type_union_stack(s: State) -> ParseResult<State, Type> {
-//     type_nullable_stack
-//         // map(
-//         //     seq((
-//         //         type_nullable_stack,
-//         //         many0(preceded(seq((ws0, tag("|"), ws0)), type_nullable_stack)),
-//         //     )),
-//         //     |(first, mut rest)| {
-//         //         if rest.len() > 0 {
-//         //             rest.insert(0, first);
-//         //             Type::Union(rest)
-//         //         } else {
-//         //             first
-//         //         }
-//         //     },
-//         // )
-//         .parse(s)
-// }
+fn type_nullable_stack(s: State) -> Res<Type> {
+    map(
+        (many0(terminated("?", ws0)), type_leaf),
+        |(nullable, ty)| {
+            if !nullable.value.is_empty() {
+                Type::Nullable(ty.into())
+            } else {
+                ty.value
+            }
+        },
+    )
+    .parse(s)
+}
 
-// fn typespec(s: State) -> ParseResult<State, Type> {
-//     type_union_stack.parse(s)
-// }
+fn type_union_stack(s: State) -> Res<Type> {
+    type_nullable_stack
+        // map(
+        //     seq((
+        //         type_nullable_stack,
+        //         many0(preceded(seq((ws0, tag("|"), ws0)), type_nullable_stack)),
+        //     )),
+        //     |(first, mut rest)| {
+        //         if rest.len() > 0 {
+        //             rest.insert(0, first);
+        //             Type::Union(rest)
+        //         } else {
+        //             first
+        //         }
+        //     },
+        // )
+        .parse(s)
+}
+
+fn typespec(s: State) -> Res<Type> {
+    type_union_stack.parse(s)
+}
 
 // fn declarable(s: State) -> ParseResult<State, Declarable> {
 //     map(
@@ -1393,15 +1409,16 @@ fn expr(s: State) -> Res<Expr> {
 //         .expect("parse declarable")
 // }
 
-// pub fn try_parse_type(input: &str) -> Option<Type> {
-//     terminated(typespec, eof)
-//         .parse(input.trim().into())
-//         .map(|(_, t)| t)
-// }
+pub fn try_parse_type(input: &str) -> Option<Type> {
+    terminated(typespec, eof)
+        .parse(initial_parse_state(input.trim()))
+        .map(|(_, t)| t.value)
+        .ok()
+}
 
-// pub fn parse_type(input: &str) -> Type {
-//     try_parse_type(input).expect("can parse type")
-// }
+pub fn parse_type(input: &str) -> Type {
+    try_parse_type(input).expect("can parse type")
+}
 
 // pub fn try_parse_expr(input: &str) -> Option<Expr> {
 //     terminated(expr, eof)
@@ -1421,16 +1438,27 @@ fn expr(s: State) -> Res<Expr> {
 
 #[cfg(test)]
 mod tests {
-    //     use super::*;
-    //     use crate::ast::*;
+    use std::assert_matches::assert_matches;
+
+    use super::*;
+    use crate::ast::*;
+
+    fn parses_and_check<'a, T>(
+        p: impl Parser<'a, Extra, Output = T>,
+        text: &'static str,
+        f: impl FnOnce(ParseNode<T>),
+    ) {
+        let (_state, node) = terminated(p, eof).parse(initial_parse_state(text)).unwrap();
+        f(node)
+    }
 
     //     fn id(id: &str) -> Identifier {
     //         Identifier(id.into())
     //     }
 
-    //     fn tv(id: &str) -> TypeVar {
-    //         TypeVar(id.into())
-    //     }
+    fn tv(id: &str) -> TypeVar {
+        TypeVar(id.into())
+    }
 
     //     fn var(name: &str) -> Expr {
     //         Expr::Variable(Identifier(name.into()))
@@ -1620,118 +1648,122 @@ mod tests {
     //         );
     //     }
 
-    //     #[test]
-    //     fn test_parse_types() {
-    //         assert_eq!(parse_type("bool"), Type::Bool);
+    #[test]
+    fn test_parse_types() {
+        assert_eq!(parse_type("bool"), Type::Bool);
 
-    //         // assert_eq!(
-    //         //     parse_type("bool | nil"),
-    //         //     Type::Union(vec![Type::Bool, Type::Nil])
-    //         // );
+        //         // assert_eq!(
+        //         //     parse_type("bool | nil"),
+        //         //     Type::Union(vec![Type::Bool, Type::Nil])
+        //         // );
 
-    //         // assert_eq!(
-    //         //     parse_type("?bool"),
-    //         //     Type::Union(vec![Type::Nil, Type::Bool])
-    //         // );
+        //         // assert_eq!(
+        //         //     parse_type("?bool"),
+        //         //     Type::Union(vec![Type::Nil, Type::Bool])
+        //         // );
 
-    //         // assert_eq!(
-    //         //     parse_type("?bool | int"),
-    //         //     Type::Union(vec![Type::Union(vec![Type::Nil, Type::Bool]), Type::Int])
-    //         // );
+        //         // assert_eq!(
+        //         //     parse_type("?bool | int"),
+        //         //     Type::Union(vec![Type::Union(vec![Type::Nil, Type::Bool]), Type::Int])
+        //         // );
 
-    //         // assert_eq!(
-    //         //     parse_type("?(bool | int)"),
-    //         //     Type::Union(vec![Type::Nil, Type::Union(vec![Type::Bool, Type::Int]),])
-    //         // );
+        //         // assert_eq!(
+        //         //     parse_type("?(bool | int)"),
+        //         //     Type::Union(vec![Type::Nil, Type::Union(vec![Type::Bool, Type::Int]),])
+        //         // );
 
-    //         // assert_eq!(
-    //         //     parse_type("?(bool | int,)"),
-    //         //     Type::Union(vec![
-    //         //         Type::Nil,
-    //         //         Type::Tuple(Some(vec![Type::Union(vec![Type::Bool, Type::Int])]))
-    //         //     ])
-    //         // );
+        //         // assert_eq!(
+        //         //     parse_type("?(bool | int,)"),
+        //         //     Type::Union(vec![
+        //         //         Type::Nil,
+        //         //         Type::Tuple(Some(vec![Type::Union(vec![Type::Bool, Type::Int])]))
+        //         //     ])
+        //         // );
 
-    //         // assert_eq!(
-    //         //     parse_type("?((bool | int),)"),
-    //         //     Type::Union(vec![
-    //         //         Type::Nil,
-    //         //         Type::Tuple(Some(vec![Type::Union(vec![Type::Bool, Type::Int])]))
-    //         //     ])
-    //         // );
+        //         // assert_eq!(
+        //         //     parse_type("?((bool | int),)"),
+        //         //     Type::Union(vec![
+        //         //         Type::Nil,
+        //         //         Type::Tuple(Some(vec![Type::Union(vec![Type::Bool, Type::Int])]))
+        //         //     ])
+        //         // );
 
-    //         assert_eq!(parse_type("fn"), Type::Fun(None));
+        assert_eq!(parse_type("fn"), Type::Fun(None));
 
-    //         assert_eq!(
-    //             parse_type("fn -> int"),
-    //             Type::Fun(Some(FnType {
-    //                 generics: vec![],
-    //                 params: vec![],
-    //                 ret: Box::new(Type::Int)
-    //             }))
-    //         );
+        parses_and_check(typespec, "fn -> int", |n| {
+            assert_matches!(n.value, Type::Fun(Some(_)));
+        });
 
-    //         assert_eq!(
-    //             parse_type("fn ( bool ) -> int"),
-    //             Type::Fun(Some(FnType {
-    //                 generics: vec![],
-    //                 params: vec![Type::Bool],
-    //                 ret: Box::new(Type::Int)
-    //             }))
-    //         );
+        // assert_eq!(
+        //     parse_type("fn -> int"),
+        //     Type::Fun(Some(FnType {
+        //         generics: vec![],
+        //         params: vec![],
+        //         ret: Box::new(Type::Int)
+        //     }))
+        // );
 
-    //         assert_eq!(
-    //             parse_type("fn(bool)->int"),
-    //             Type::Fun(Some(FnType {
-    //                 generics: vec![],
-    //                 params: vec![Type::Bool],
-    //                 ret: Box::new(Type::Int)
-    //             }))
-    //         );
+        //         assert_eq!(
+        //             parse_type("fn ( bool ) -> int"),
+        //             Type::Fun(Some(FnType {
+        //                 generics: vec![],
+        //                 params: vec![Type::Bool],
+        //                 ret: Box::new(Type::Int)
+        //             }))
+        //         );
 
-    //         assert_eq!(
-    //             parse_type("fn(bool , int,)"),
-    //             Type::Fun(Some(FnType {
-    //                 generics: vec![],
-    //                 params: vec![Type::Bool, Type::Int],
-    //                 ret: Box::new(Type::Nil)
-    //             }))
-    //         );
+        //         assert_eq!(
+        //             parse_type("fn(bool)->int"),
+        //             Type::Fun(Some(FnType {
+        //                 generics: vec![],
+        //                 params: vec![Type::Bool],
+        //                 ret: Box::new(Type::Int)
+        //             }))
+        //         );
 
-    //         // assert_eq!(
-    //         //     parse_type("fn(bool) -> int | any"),
-    //         //     Type::Fun(Some(FnType {
-    //         //         generics: vec![],
-    //         //         params: vec![Type::Bool],
-    //         //         ret: Box::new(Type::Union(vec![Type::Int, Type::Any]))
-    //         //     }))
-    //         // );
+        //         assert_eq!(
+        //             parse_type("fn(bool , int,)"),
+        //             Type::Fun(Some(FnType {
+        //                 generics: vec![],
+        //                 params: vec![Type::Bool, Type::Int],
+        //                 ret: Box::new(Type::Nil)
+        //             }))
+        //         );
 
-    //         // assert_eq!(
-    //         //     parse_type("(fn(bool) -> int) | any"),
-    //         //     Type::Union(vec![
-    //         //         Type::Fun(Some(FnType {
-    //         //             generics: vec![],
-    //         //             params: vec![Type::Bool],
-    //         //             ret: Box::new(Type::Int)
-    //         //         })),
-    //         //         Type::Any,
-    //         //     ])
-    //         // );
+        //         // assert_eq!(
+        //         //     parse_type("fn(bool) -> int | any"),
+        //         //     Type::Fun(Some(FnType {
+        //         //         generics: vec![],
+        //         //         params: vec![Type::Bool],
+        //         //         ret: Box::new(Type::Union(vec![Type::Int, Type::Any]))
+        //         //     }))
+        //         // );
 
-    //         assert_eq!(
-    //             parse_type("fn<t>(t)"),
-    //             Type::Fun(Some(FnType {
-    //                 generics: vec![TypeVar("t".into())],
-    //                 params: vec![Type::TypeVar(TypeVar("t".into()))],
-    //                 ret: Box::new(Type::Nil)
-    //             }))
-    //         );
+        //         // assert_eq!(
+        //         //     parse_type("(fn(bool) -> int) | any"),
+        //         //     Type::Union(vec![
+        //         //         Type::Fun(Some(FnType {
+        //         //             generics: vec![],
+        //         //             params: vec![Type::Bool],
+        //         //             ret: Box::new(Type::Int)
+        //         //         })),
+        //         //         Type::Any,
+        //         //     ])
+        //         // );
 
-    //         assert_eq!(try_parse_type("fn<t>"), None);
+        //         assert_eq!(
+        //             parse_type("fn<t>(t)"),
+        //             Type::Fun(Some(FnType {
+        //                 generics: vec![TypeVar("t".into())],
+        //                 params: vec![Type::TypeVar(TypeVar("t".into()))],
+        //                 ret: Box::new(Type::Nil)
+        //             }))
+        //         );
 
-    //         assert_eq!(try_parse_type("fn<t> -> t"), None);
-    //     }
+        //         assert_eq!(try_parse_type("fn<t>"), None);
+
+        //         assert_eq!(try_parse_type("fn<t> -> t"), None);
+    }
 
     //     #[test]
     //     fn test_parse_str_literals() {

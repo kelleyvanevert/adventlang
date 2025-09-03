@@ -30,7 +30,7 @@ pub enum AstKind {
     Type(Type),
     Expr(Expr),
     StrLiteralPiece(StrLiteralPiece),
-    Op(String),
+    Op(Op),
     Argument(Argument),
 }
 
@@ -70,7 +70,7 @@ impl AstNode {
         }
     }
 
-    pub fn as_op<'a>(&'a self) -> &'a str {
+    pub fn as_op(&self) -> &Op {
         match &self.kind {
             AstKind::Op(x) => x,
             _ => panic!(),
@@ -294,6 +294,15 @@ pub struct Argument {
     pub expr: Box<AstNode>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Op(pub String);
+
+impl<'a> From<&'a str> for Op {
+    fn from(id: &'a str) -> Self {
+        Op(id.into())
+    }
+}
+
 // #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 // pub enum DeclareGuardExpr {
 //     Unguarded(Identifier),
@@ -490,18 +499,18 @@ pub enum Type {
     Num,
     Regex,
     Fun(Option<FnType>), // underspecified ("fn"), or specified (e.g. "fn<T>([T]) -> T")
-    List(Option<Box<ParseNode<Type>>>), // underspecified ("list"), or specified (e.g. "[int]"")
-    Tuple(Option<Vec<ParseNode<Type>>>), // underspecified ("tuple"), or specified (e.g. "(int, bool)")
-    Dict(Option<(Box<ParseNode<Type>>, Box<ParseNode<Type>>)>), // underspecified ("dict"), or specified (e.g. "{ [int]: str }")
-    Nullable(Box<ParseNode<Type>>),                             // ?int
-    TypeVar(ParseNode<TypeVar>),                                // x, y, z
+    List(Option<Box<AstNode>>), // underspecified ("list"), or specified (e.g. "[int]"")
+    Tuple(Option<Vec<AstNode>>), // underspecified ("tuple"), or specified (e.g. "(int, bool)")
+    Dict(Option<(Box<AstNode>, Box<AstNode>)>), // underspecified ("dict"), or specified (e.g. "{ [int]: str }")
+    Nullable(Box<AstNode>),                     // ?int
+    TypeVar(Box<AstNode>),                      // x, y, z
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FnType {
-    pub generics: Vec<ParseNode<TypeVar>>,
-    pub params: Vec<ParseNode<Type>>,
-    pub ret: Box<ParseNode<Type>>,
+    pub generics: Vec<AstNode>,
+    pub params: Vec<AstNode>,
+    pub ret: Box<AstNode>,
 }
 
 // impl Display for Type {

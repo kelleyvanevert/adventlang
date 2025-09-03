@@ -177,6 +177,12 @@ impl<T> ParseNode<T> {
     }
 }
 
+impl<'a> ParseNode<&'a str> {
+    pub fn to_owned(self) -> ParseNode<String> {
+        self.map(|s| s.to_owned())
+    }
+}
+
 impl<T> ParseNode<Option<T>> {
     pub fn transpose(self) -> Option<ParseNode<T>> {
         self.value.map(|value| ParseNode {
@@ -234,6 +240,7 @@ impl<'a, E> Parser<'a, E> for char {
     }
 }
 
+/// optional
 impl<'a, P, T, E: Clone> Parser<'a, E> for [P; 1]
 where
     P: Parser<'a, E, Output = T>,
@@ -678,6 +685,20 @@ where
     )
 }
 
+pub fn listy_elements<'a, E: Clone, P, T>(
+    open_tag: &'static str,
+    parse_element: P,
+    close_tag: &'static str,
+) -> impl Parser<'a, E, Output = Vec<ParseNode<T>>>
+where
+    P: Parser<'a, E, Output = T> + Copy,
+{
+    map(
+        listy(open_tag, parse_element, close_tag),
+        |(elements, _)| elements,
+    )
+}
+
 pub fn listy_splat<'a, E: Clone, P, P2, T, S>(
     open_tag: &'static str,
     parse_element: P,
@@ -742,7 +763,7 @@ pub fn escaped_char<'a, E: Clone>(s: ParseState<'a, E>) -> Res<'a, E, char> {
 mod test {
     use std::{assert_matches::assert_matches, fmt::Debug};
 
-    use crate::{ParseNode, ParseState, Parser, alt, eof, listy_splat, many0, preceded, ws0};
+    use super::*;
 
     fn parses_and_check<'a, T>(
         mut p: impl Parser<'a, (), Output = T>,
