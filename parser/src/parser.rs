@@ -593,11 +593,9 @@ fn expr_call_stack(s: State) -> Res<Expr> {
             expr_index_or_method_stack,
             many0(preceded(slws0, invocation_args)),
         ),
-        |mut state,
-         ParseNode {
-             value: (mut expr, invocations),
-             ..
-         }| {
+        |mut state, n| {
+            let (mut expr, invocations) = n.value;
+
             for invoc_args in invocations.value {
                 (state, expr) = state.produce_with_span(
                     (expr.span.0, invoc_args.span.1),
@@ -624,11 +622,9 @@ fn expr_call_stack(s: State) -> Res<Expr> {
 fn unary_expr_stack(s: State) -> Res<Expr> {
     map_result(
         (many0(terminated("!", ws0)), expr_call_stack),
-        |mut state,
-         ParseNode {
-             value: (ops, mut expr),
-             ..
-         }| {
+        |mut state, n| {
+            let (ops, mut expr) = n.value;
+
             for op in ops.value.into_iter().rev() {
                 (state, expr) = state.produce_with_span(
                     (op.span.0, expr.span.1),
@@ -733,11 +729,9 @@ fn infix_or_postfix_fn_call_stack(s: State) -> Res<Expr> {
             unary_expr_stack,
             many0(alt((postfix_index_sugar, infix_or_postfix_fn_latter_part))),
         ),
-        |mut state,
-         ParseNode {
-             value: (mut expr, ops),
-             ..
-         }| {
+        |mut state, n| {
+            let (mut expr, ops) = n.value;
+
             for op in ops.value {
                 match op.value {
                     TmpOp::IndexSugar {
@@ -757,10 +751,8 @@ fn infix_or_postfix_fn_call_stack(s: State) -> Res<Expr> {
                     TmpOp::InfixOrPostfix { id, coalesce, args } => {
                         let span = (expr.span.0, op.span.1);
 
-                        let mut args = args
-                            .into_iter()
-                            .map(|arg| arg.into_ast_node(AstKind::Argument))
-                            .collect::<Vec<_>>();
+                        let mut args: Vec<AstNode> =
+                            args.into_iter().map(|arg| arg.into()).collect();
 
                         {
                             let (new_state, arg) = state.produce_with_span(
@@ -771,7 +763,7 @@ fn infix_or_postfix_fn_call_stack(s: State) -> Res<Expr> {
                                 },
                             );
                             state = new_state;
-                            args.insert(0, arg.into_ast_node(AstKind::Argument));
+                            args.insert(0, arg.into());
                         }
 
                         (state, expr) = state.produce_with_span(
@@ -824,16 +816,10 @@ where
 {
     map_result(
         (parse_expr, many0((ws0, parse_op, ws0, parse_expr))),
-        |mut state,
-         ParseNode {
-             value: (mut expr, ops),
-             ..
-         }| {
-            for ParseNode {
-                value: (_, op, _, right),
-                ..
-            } in ops.value
-            {
+        |mut state, node| {
+            let (mut expr, ops) = node.value;
+
+            for (_, op, _, right) in ops.plain_elements() {
                 (state, expr) = state.produce_with_span(
                     (expr.span.0, right.span.1),
                     Expr::BinaryExpr {

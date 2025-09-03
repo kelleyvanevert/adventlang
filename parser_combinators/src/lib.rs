@@ -193,6 +193,12 @@ impl<T> ParseNode<Option<T>> {
     }
 }
 
+impl<T> ParseNode<Vec<ParseNode<T>>> {
+    pub fn plain_elements(self) -> Vec<T> {
+        self.value.into_iter().map(|node| node.value).collect()
+    }
+}
+
 pub type Res<'a, E, T> = Result<(ParseState<'a, E>, ParseNode<T>), ParseError>;
 
 pub trait Parser<'a, E> {
