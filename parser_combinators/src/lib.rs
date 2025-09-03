@@ -14,7 +14,7 @@ pub struct ParseState<'a, E> {
     source: &'a str,
     at: usize,
     next_id: usize,
-    extra: E,
+    pub extra: E,
 }
 
 impl<'a, E> ParseState<'a, E> {
@@ -603,12 +603,12 @@ where
 
 pub fn optional_if<'a, E: Clone, T>(
     mut p: impl Parser<'a, E, Output = T>,
-    check: impl Fn(&'a str) -> bool,
+    check: impl Fn(ParseState<'a, E>) -> bool,
 ) -> impl Parser<'a, E, Output = Option<T>> {
     move |state: ParseState<'a, E>| {
         match p.parse(state.clone()) {
             Ok((state, node)) => {
-                if check(state.rem()) {
+                if check(state.clone()) {
                     Ok((state, node.map(Some)))
                 } else {
                     Ok(state.produce(0, None))
@@ -659,6 +659,24 @@ pub fn many1<'a, E: Clone, T>(
     p: impl Parser<'a, E, Output = T>,
 ) -> impl Parser<'a, E, Output = Vec<ParseNode<T>>> {
     many(1, p)
+}
+
+pub fn maybe_parenthesized<'a, P, E: Clone, T>(mut parser: P) -> impl Parser<'a, E, Output = T>
+where
+    P: Parser<'a, E, Output = T>,
+{
+    move |s| {
+        let (s, opt) = [('(', ws0)].parse(s)?;
+
+        let (s, res) = parser.parse(s)?;
+
+        let s = match opt.value {
+            None => s,
+            Some(_) => ((ws0, ')')).parse(s)?.0,
+        };
+
+        Ok((s, res))
+    }
 }
 
 pub fn listy<'a, E: Clone, P, T>(

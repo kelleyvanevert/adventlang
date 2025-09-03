@@ -32,6 +32,13 @@ pub enum AstKind {
     StrLiteralPiece(StrLiteralPiece),
     Op(Op),
     Argument(Argument),
+    Declarable(Declarable),
+    DeclarePattern(DeclarePattern),
+    DeclareGuardExpr(DeclareGuardExpr),
+    Block(Block),
+    Stmt(Stmt),
+    Item(Item),
+    Document(Document),
 }
 
 impl AstNode {
@@ -106,11 +113,11 @@ impl Display for Identifier {
     }
 }
 
-// #[derive(Debug, Clone, PartialEq, Eq)]
-// pub struct Declarable {
-//     pub pattern: DeclarePattern,
-//     pub fallback: Option<Expr>,
-// }
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Declarable {
+    pub pattern: Box<AstNode>,
+    pub fallback: Option<Box<AstNode>>,
+}
 
 // impl Display for Declarable {
 //     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -122,21 +129,21 @@ impl Display for Identifier {
 //     }
 // }
 
-// #[derive(Debug, Clone, PartialEq, Eq)]
-// pub enum DeclarePattern {
-//     Declare {
-//         guard: DeclareGuardExpr,
-//         ty: Option<Type>,
-//     },
-//     List {
-//         elements: Vec<Declarable>,
-//         rest: Option<(Identifier, Option<Type>)>,
-//     },
-//     Tuple {
-//         elements: Vec<Declarable>,
-//         rest: Option<(Identifier, Option<Type>)>,
-//     },
-// }
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum DeclarePattern {
+    Declare {
+        guard: Box<AstNode>,
+        ty: Option<Box<AstNode>>,
+    },
+    List {
+        elements: Vec<AstNode>,
+        rest: Option<(Box<AstNode>, Option<Box<AstNode>>)>,
+    },
+    Tuple {
+        elements: Vec<AstNode>,
+        rest: Option<(Box<AstNode>, Option<Box<AstNode>>)>,
+    },
+}
 
 // impl DeclarePattern {
 //     pub fn is_named(&self, id: Identifier) -> bool {
@@ -303,12 +310,12 @@ impl<'a> From<&'a str> for Op {
     }
 }
 
-// #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-// pub enum DeclareGuardExpr {
-//     Unguarded(Identifier),
-//     Some(Identifier),
-//     // TODO more things, like simple comparisons etc.
-// }
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum DeclareGuardExpr {
+    Unguarded { id: Box<AstNode> },
+    Some { id: Box<AstNode> },
+    // TODO more things, like simple comparisons etc.
+}
 
 // impl DeclareGuardExpr {
 //     pub fn is_named(&self, id: Identifier) -> bool {
@@ -334,13 +341,13 @@ impl<'a> From<&'a str> for Op {
 //     Expr(Expr),
 // }
 
-// #[derive(Debug, Clone, PartialEq, Eq)]
-// pub struct FnDecl {
-//     pub generics: Vec<TypeVar>,
-//     pub ret: Option<Type>,
-//     pub params: Vec<Declarable>,
-//     pub body: Block,
-// }
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FnDecl {
+    pub generics: Vec<AstNode>,
+    pub ret: Option<Box<AstNode>>,
+    pub params: Vec<AstNode>,
+    pub body: Box<AstNode>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Expr {
@@ -389,9 +396,9 @@ pub enum Expr {
         coalesce: bool,
         args: Vec<AstNode>,
     },
-    //     AnonymousFn {
-    //         decl: FnDecl,
-    //     },
+    AnonymousFn {
+        decl: FnDecl,
+    },
     //     If {
     //         pattern: Option<DeclarePattern>,
     //         cond: Box<Expr>,
@@ -404,15 +411,15 @@ pub enum Expr {
     //         cond: Box<Expr>,
     //         body: Block,
     //     },
-    //     DoWhile {
-    //         label: Option<Identifier>,
-    //         body: Block,
-    //         cond: Option<Box<Expr>>,
-    //     },
-    //     Loop {
-    //         label: Option<Identifier>,
-    //         body: Block,
-    //     },
+    DoWhile {
+        label: Option<Box<AstNode>>,
+        body: Box<AstNode>,
+        cond: Option<Box<AstNode>>,
+    },
+    Loop {
+        label: Option<Box<AstNode>>,
+        body: Box<AstNode>,
+    },
     //     For {
     //         label: Option<Identifier>,
     //         pattern: DeclarePattern,
@@ -439,46 +446,46 @@ pub enum Expr {
 //     }
 // }
 
-// #[derive(Debug, Clone, PartialEq, Eq)]
-// pub enum Item {
-//     NamedFn { name: Identifier, decl: FnDecl },
-// }
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Item {
+    NamedFn { name: Box<AstNode>, decl: FnDecl },
+}
 
-// #[derive(Debug, Clone, PartialEq, Eq)]
-// pub enum Stmt {
-//     Break {
-//         label: Option<Identifier>,
-//         expr: Option<Expr>,
-//     },
-//     Continue {
-//         label: Option<Identifier>,
-//     },
-//     Return {
-//         expr: Option<Expr>,
-//     },
-//     Declare {
-//         pattern: DeclarePattern,
-//         expr: Expr,
-//     },
-//     Assign {
-//         pattern: AssignPattern,
-//         expr: Expr,
-//     },
-//     Expr {
-//         expr: Expr,
-//     }, // ...
-// }
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Stmt {
+    Break {
+        label: Option<Box<AstNode>>,
+        expr: Option<Box<AstNode>>,
+    },
+    Continue {
+        label: Option<Box<AstNode>>,
+    },
+    Return {
+        expr: Option<Box<AstNode>>,
+    },
+    Declare {
+        pattern: Box<AstNode>,
+        expr: Box<AstNode>,
+    },
+    Assign {
+        pattern: Box<AstNode>,
+        expr: Box<AstNode>,
+    },
+    Expr {
+        expr: Box<AstNode>,
+    }, // ...
+}
 
-// #[derive(Debug, Clone, PartialEq, Eq)]
-// pub struct Block {
-//     pub items: Vec<Item>,
-//     pub stmts: Vec<Stmt>,
-// }
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Block {
+    pub items: Vec<AstNode>,
+    pub stmts: Vec<AstNode>,
+}
 
-// #[derive(Debug, PartialEq, Eq)]
-// pub struct Document {
-//     pub body: Block,
-// }
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Document {
+    pub body: Box<AstNode>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TypeVar(pub String);

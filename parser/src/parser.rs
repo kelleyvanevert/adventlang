@@ -1,14 +1,12 @@
-use either::Either;
 use parser_combinators::{
     ParseNode, ParseState, Parser, alt, check, delimited, eof, escaped_char, extra, listy,
-    listy_elements, many0, many1, map, map_node, map_result, map_w_state, preceded, regex, slws0,
-    slws1, terminated, ws0, ws1,
+    listy_elements, many0, many1, map, map_node, map_result, map_w_state, maybe_parenthesized,
+    optional_if, preceded, regex, slws0, slws1, terminated, ws0, ws1,
 };
-use regex::Regex;
 
 use crate::ast::{
-    Argument, AstKind, AstNode, Expr, FnType, Identifier, IntoAstNode, Op, StrLiteralPiece, Type,
-    TypeVar,
+    Argument, AstKind, AstNode, Block, Declarable, DeclareGuardExpr, DeclarePattern, Document,
+    Expr, FnDecl, FnType, Identifier, IntoAstNode, Item, Op, Stmt, StrLiteralPiece, Type, TypeVar,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -43,6 +41,20 @@ parse_node_into_ast_node!(Expr);
 parse_node_into_ast_node!(StrLiteralPiece);
 parse_node_into_ast_node!(Op);
 parse_node_into_ast_node!(Argument);
+parse_node_into_ast_node!(Declarable);
+parse_node_into_ast_node!(DeclarePattern);
+parse_node_into_ast_node!(DeclareGuardExpr);
+parse_node_into_ast_node!(Block);
+parse_node_into_ast_node!(Stmt);
+parse_node_into_ast_node!(Item);
+parse_node_into_ast_node!(Document);
+
+fn constrained<'a, T>(
+    constrained: bool,
+    p: impl Parser<'a, Extra, Output = T>,
+) -> impl Parser<'a, Extra, Output = T> {
+    extra(Extra { constrained }, p)
+}
 
 fn initial_parse_state<'a>(input: &'a str) -> State<'a> {
     State::new(input, Extra { constrained: false })
@@ -129,13 +141,7 @@ fn str_literal(s: State) -> Res<Expr> {
             many0(alt((
                 map(str_lit_frag, StrLiteralPiece::Fragment),
                 map(
-                    (
-                        '{',
-                        ws0,
-                        extra(Extra { constrained: false }, expr),
-                        ws0,
-                        '}',
-                    ),
+                    ('{', ws0, constrained(false, expr), ws0, '}'),
                     |(_, _, expr, _, _)| StrLiteralPiece::Interpolation(expr.into()),
                 ),
             ))),
@@ -148,109 +154,84 @@ fn str_literal(s: State) -> Res<Expr> {
     .parse(s)
 }
 
-// // ugly, I know
-// fn regex_contents(s: State) -> ParseResult<State, String> {
-//     let mut contents = "".to_string();
-//     let mut escaped = false;
+// ugly, I know
+fn regex_contents(s: State) -> Res<String> {
+    let mut contents = "".to_string();
+    let mut escaped = false;
 
-//     for (i, c) in s.input.char_indices() {
-//         if escaped {
-//             if c == 'n' {
-//                 contents.push('\n');
-//                 // etc..
-//             } else {
-//                 contents.push('\\');
-//                 contents.push(c);
-//             }
-//             escaped = false;
-//         } else if c == '/' {
-//             if contents.len() == 0 {
-//                 return None;
-//             }
+    for (i, c) in s.rem().char_indices() {
+        if escaped {
+            if c == 'n' {
+                contents.push('\n');
+                // etc..
+            } else {
+                contents.push('\\');
+                contents.push(c);
+            }
+            escaped = false;
+        } else if c == '/' {
+            if contents.len() == 0 {
+                return Err(s.mk_error(format!("empty regex is not allowed")));
+            }
 
-//             return Some((s.slice(i), contents));
-//         } else if c == '\\' {
-//             escaped = true;
-//         } else {
-//             contents.push(c);
-//         }
-//     }
+            return Ok(s.produce(i, contents));
+        } else if c == '\\' {
+            escaped = true;
+        } else {
+            contents.push(c);
+        }
+    }
 
-//     if contents.len() == 0 {
-//         return None;
-//     }
+    if contents.len() == 0 {
+        return Err(s.mk_error(format!("regex started but not ended")));
+    }
 
-//     Some((s.slice(s.input.len()), contents))
-// }
+    let len = s.rem().len();
+    Ok(s.produce(len, contents))
+}
 
-// fn regex_literal(s: State) -> ParseResult<State, Expr> {
-//     let (s, re) = delimited(char('/'), regex_contents, char('/')).parse(s)?;
+fn regex_literal(s: State) -> Res<Expr> {
+    map(delimited('/', regex_contents, '/'), Expr::RegexLiteral).parse(s)
+}
 
-//     Some((
-//         s,
-//         // Expr::RegexLiteral {
-//         //     regex: AlRegex(Regex::from_str(&re).ok()?),
-//         // },
-//         Expr::RegexLiteral(re),
-//     ))
-// }
+fn integer(s: State) -> Res<Expr> {
+    map(regex(r"^-?[0-9]+"), |num| {
+        Expr::Int(num.parse::<i64>().unwrap())
+    })
+    .parse(s)
+}
 
-// fn integer(s: State) -> ParseResult<State, Expr> {
-//     map(regex(r"^-?[0-9]+"), |num| {
-//         Expr::Int(num.parse::<i64>().unwrap())
-//     })
-//     .parse(s)
-// }
+fn float(s: State) -> Res<Expr> {
+    map(regex(r"^-?[0-9]+\.[0-9]+"), |num| {
+        Expr::Float(num.to_string())
+    })
+    .parse(s)
+}
 
-// fn float(s: State) -> ParseResult<State, Expr> {
-//     map(regex(r"^-?[0-9]+\.[0-9]+"), |num| {
-//         Expr::Float(num.to_string())
-//     })
-//     .parse(s)
-// }
-
-// fn anonymous_fn(s: State) -> ParseResult<State, Expr> {
-//     map(
-//         seq((
-//             optional_if(
-//                 delimited(
-//                     seq((char('|'), ws0)),
-//                     parameter_list,
-//                     seq((ws0, char('|'), ws0)),
-//                 ),
-//                 |s| !s.constrained,
-//             ),
-//             delimited(seq((char('{'), ws0)), block_contents, seq((ws0, char('}')))),
-//         )),
-//         |(params, body)| Expr::AnonymousFn {
-//             decl: FnDecl {
-//                 generics: vec![],
-//                 ret: None,
-//                 params: params.unwrap_or_else(|| vec![]),
-//                 body,
-//             },
-//         },
-//     )
-//     .parse(s)
-// }
-
-// fn maybe_parenthesized<'a, P, T>(mut parser: P) -> impl Parser<State<'a>, Output = T>
-// where
-//     P: Parser<State<'a>, Output = T>,
-// {
-//     move |s| {
-//         let (s, opt) = optional(seq((char('('), ws0))).parse(s)?;
-
-//         let (s, res) = parser.parse(s)?;
-
-//         let s = match opt {
-//             None => s,
-//             Some(_) => seq((ws0, char(')'))).parse(s)?.0,
-//         };
-
-//         Some((s, res))
-//     }
-// }
+fn anonymous_fn(s: State) -> Res<Expr> {
+    map(
+        (
+            optional_if(terminated(listy_elements("|", declarable, "|"), ws0), |s| {
+                !s.extra.constrained
+            }),
+            delimited(('{', ws0), block_contents, (ws0, '}')),
+        ),
+        |(params, body)| Expr::AnonymousFn {
+            decl: FnDecl {
+                generics: vec![],
+                ret: None,
+                params: params
+                    .value
+                    .unwrap_or(vec![])
+                    .into_iter()
+                    .map(|param| param.into())
+                    .collect(),
+                body: body.into(),
+            },
+        },
+    )
+    .parse(s)
+}
 
 // fn if_expr(s: State) -> ParseResult<State, Expr> {
 //     map(
@@ -299,39 +280,42 @@ fn str_literal(s: State) -> Res<Expr> {
 //     .parse(s)
 // }
 
-// fn do_while_expr(s: State) -> ParseResult<State, Expr> {
-//     map(
-//         seq((
-//             optional(terminated(label, seq((tag(":"), ws0)))),
-//             tag("do"),
-//             ws0,
-//             delimited(seq((char('{'), ws0)), block_contents, seq((ws0, char('}')))),
-//             optional(preceded(
-//                 seq((ws0, tag("while"), slws1)),
-//                 maybe_parenthesized(constrained(true, expr)),
-//             )),
-//         )),
-//         |(label, _, _, body, cond)| Expr::DoWhile {
-//             label,
-//             cond: cond.map(Box::new),
-//             body,
-//         },
-//     )
-//     .parse(s)
-// }
+fn do_while_expr(s: State) -> Res<Expr> {
+    map(
+        (
+            [terminated(label, (":", ws0))],
+            "do",
+            ws0,
+            delimited(('{', ws0), block_contents, (ws0, '}')),
+            [preceded(
+                (ws0, "while", slws1),
+                maybe_parenthesized(constrained(true, expr)),
+            )],
+        ),
+        |(label, _, _, body, cond)| Expr::DoWhile {
+            label: label.transpose().map(Into::into),
+            cond: cond.transpose().map(Into::into),
+            body: body.into(),
+        },
+    )
+    .parse(s)
+}
 
-// fn loop_expr(s: State) -> ParseResult<State, Expr> {
-//     map(
-//         seq((
-//             optional(terminated(label, seq((char(':'), ws0)))),
-//             tag("loop"),
-//             ws0,
-//             delimited(seq((char('{'), ws0)), block_contents, seq((ws0, char('}')))),
-//         )),
-//         |(label, _, _, body)| Expr::Loop { label, body },
-//     )
-//     .parse(s)
-// }
+fn loop_expr(s: State) -> Res<Expr> {
+    map(
+        (
+            [terminated(label, (':', ws0))],
+            "loop",
+            ws0,
+            delimited(('{', ws0), block_contents, (ws0, '}')),
+        ),
+        |(label, _, _, body)| Expr::Loop {
+            label: label.transpose().map(Into::into),
+            body: body.into(),
+        },
+    )
+    .parse(s)
+}
 
 // fn while_expr(s: State) -> ParseResult<State, Expr> {
 //     map(
@@ -842,66 +826,39 @@ fn expr(s: State) -> Res<Expr> {
     .parse(s)
 }
 
-// fn parameter_list(mut s: State) -> ParseResult<State, Vec<Declarable>> {
-//     if let Some((rem, id)) = declarable.parse(s.clone()) {
-//         let mut ids = vec![];
-//         let mut seen_comma = false;
+fn break_stmt(s: State) -> Res<Stmt> {
+    map(
+        (
+            "break",
+            [preceded(ws1, label)],
+            [preceded((slws1, "with", slws1), constrained(false, expr))],
+        ),
+        |(_, label, expr)| Stmt::Break {
+            label: label.transpose().map(Into::into),
+            expr: expr.transpose().map(Into::into),
+        },
+    )
+    .parse(s)
+}
 
-//         ids.push(id);
-//         s = rem;
+fn continue_stmt(s: State) -> Res<Stmt> {
+    map(("continue", [preceded(ws1, label)]), |(_, label)| {
+        Stmt::Continue {
+            label: label.transpose().map(Into::into),
+        }
+    })
+    .parse(s)
+}
 
-//         loop {
-//             if seen_comma && let Some((rem, id)) = preceded(ws0, declarable).parse(s.clone()) {
-//                 ids.push(id);
-//                 s = rem;
-//                 seen_comma = false;
-//             } else if !seen_comma && let Some((rem, _)) = preceded(ws0, tag(",")).parse(s.clone()) {
-//                 s = rem;
-//                 seen_comma = true;
-//             } else {
-//                 return Some((s, ids));
-//             }
-//         }
-//     }
-
-//     Some((s, vec![]))
-// }
-
-// fn break_stmt(s: State) -> ParseResult<State, Stmt> {
-//     map(
-//         seq((
-//             tag("break"),
-//             optional(preceded(ws1, label)),
-//             optional(preceded(
-//                 seq((slws1, tag("with"), slws1)),
-//                 constrained(false, expr),
-//             )),
-//         )),
-//         |(_, label, expr)| Stmt::Break {
-//             label: label.into(),
-//             expr,
-//         },
-//     )
-//     .parse(s)
-// }
-
-// fn continue_stmt(s: State) -> ParseResult<State, Stmt> {
-//     map(
-//         seq((tag("continue"), optional(preceded(ws1, label)))),
-//         |(_, label)| Stmt::Continue {
-//             label: label.into(),
-//         },
-//     )
-//     .parse(s)
-// }
-
-// fn return_stmt(s: State) -> ParseResult<State, Stmt> {
-//     map(
-//         seq((tag("return"), slws1, constrained(false, expr))),
-//         |(_, _, expr)| Stmt::Return { expr: Some(expr) },
-//     )
-//     .parse(s)
-// }
+fn return_stmt(s: State) -> Res<Stmt> {
+    map(
+        ("return", slws1, constrained(false, expr)),
+        |(_, _, expr)| Stmt::Return {
+            expr: Some(expr.into()),
+        },
+    )
+    .parse(s)
+}
 
 fn type_leaf(s: State) -> Res<Type> {
     alt((
@@ -1029,126 +986,151 @@ fn typespec(s: State) -> Res<Type> {
     type_union_stack.parse(s)
 }
 
-// fn declarable(s: State) -> ParseResult<State, Declarable> {
-//     map(
-//         seq((
-//             declare_pattern,
-//             optional(preceded(seq((ws0, tag("="), ws0)), constrained(true, expr))),
-//         )),
-//         |(pattern, fallback)| Declarable { pattern, fallback },
-//     )
-//     .parse(s)
-// }
+fn declarable(s: State) -> Res<Declarable> {
+    map(
+        (
+            declare_pattern,
+            [preceded((ws0, "=", ws0), constrained(true, expr))],
+        ),
+        |(pattern, fallback)| Declarable {
+            pattern: pattern.into(),
+            fallback: fallback.transpose().map(Into::into),
+        },
+    )
+    .parse(s)
+}
 
-// fn declare_guard_expr(s: State) -> ParseResult<State, DeclareGuardExpr> {
-//     alt((
-//         map(
-//             preceded(seq((tag("some"), ws1)), identifier),
-//             DeclareGuardExpr::Some,
-//         ),
-//         map(identifier, DeclareGuardExpr::Unguarded),
-//     ))
-//     .parse(s)
-// }
+fn declare_guard_expr(s: State) -> Res<DeclareGuardExpr> {
+    alt((
+        map_node(preceded(("some", ws1), identifier), |id| {
+            DeclareGuardExpr::Some { id: id.into() }
+        }),
+        map_node(identifier, |id| DeclareGuardExpr::Unguarded {
+            id: id.into(),
+        }),
+    ))
+    .parse(s)
+}
 
-// fn declare_pattern(s: State) -> ParseResult<State, DeclarePattern> {
-//     alt((
-//         map(
-//             seq((
-//                 declare_guard_expr,
-//                 optional(preceded(seq((ws0, tag(":"), ws0)), typespec)),
-//             )),
-//             |(guard, ty)| DeclarePattern::Declare { guard, ty },
-//         ),
-//         delimited(
-//             seq((tag("["), ws0)),
-//             map(
-//                 optional(seq((
-//                     declarable,
-//                     many0(preceded(seq((ws0, tag(","), ws0)), declarable)),
-//                     ws0,
-//                     optional(preceded(
-//                         tag(","),
-//                         optional(delimited(
-//                             seq((ws0, tag(".."), ws0)),
-//                             seq((
-//                                 identifier,
-//                                 optional(preceded(seq((ws0, tag(":"), ws0)), typespec)),
-//                             )),
-//                             optional(seq((ws0, tag(",")))),
-//                         )),
-//                     )),
-//                 ))),
-//                 |opt| match opt {
-//                     None => DeclarePattern::List {
-//                         elements: vec![],
-//                         rest: None,
-//                     },
-//                     Some((first, mut elements, _, rest)) => {
-//                         elements.insert(0, first);
-//                         DeclarePattern::List {
-//                             elements,
-//                             rest: rest.flatten(),
-//                         }
-//                     }
-//                 },
-//             ),
-//             seq((ws0, tag("]"))),
-//         ),
-//         delimited(
-//             seq((tag("("), ws0)),
-//             map(
-//                 optional(seq((
-//                     declarable,
-//                     many0(preceded(seq((ws0, tag(","), ws0)), declarable)),
-//                     ws0,
-//                     optional(preceded(
-//                         tag(","),
-//                         optional(delimited(
-//                             seq((ws0, tag(".."), ws0)),
-//                             seq((
-//                                 identifier,
-//                                 optional(preceded(seq((ws0, tag(":"), ws0)), typespec)),
-//                             )),
-//                             optional(seq((ws0, tag(",")))),
-//                         )),
-//                     )),
-//                 ))),
-//                 |opt| match opt {
-//                     None => DeclarePattern::Tuple {
-//                         elements: vec![],
-//                         rest: None,
-//                     },
-//                     Some((first, mut elements, _, rest)) => {
-//                         elements.insert(0, first);
-//                         DeclarePattern::Tuple {
-//                             elements,
-//                             rest: rest.flatten(),
-//                         }
-//                     }
-//                 },
-//             ),
-//             seq((ws0, tag(")"))),
-//         ),
-//     ))
-//     .parse(s)
-// }
+fn declare_pattern_list(s: State) -> Res<DeclarePattern> {
+    map(
+        delimited(
+            ("[", ws0),
+            [(
+                declarable,
+                many0(preceded((ws0, ",", ws0), declarable)),
+                ws0,
+                [preceded(
+                    ",",
+                    [delimited(
+                        (ws0, "..", ws0),
+                        (identifier, [preceded((ws0, ":", ws0), typespec)]),
+                        [(ws0, ",")],
+                    )],
+                )],
+            )],
+            (ws0, "]"),
+        ),
+        |opt| match opt {
+            None => DeclarePattern::List {
+                elements: vec![],
+                rest: None,
+            },
+            Some((first, elements, _, rest)) => {
+                let mut elements: Vec<AstNode> =
+                    elements.value.into_iter().map(|decl| decl.into()).collect();
 
-// fn declare_stmt(s: State) -> ParseResult<State, Stmt> {
-//     map(
-//         seq((
-//             tag("let"),
-//             ws1,
-//             declare_pattern,
-//             ws0,
-//             tag("="),
-//             ws0,
-//             constrained(false, expr),
-//         )),
-//         |(_, _, pattern, _, _, _, expr)| Stmt::Declare { pattern, expr },
-//     )
-//     .parse(s)
-// }
+                elements.insert(0, first.into());
+
+                DeclarePattern::List {
+                    elements,
+                    rest: rest
+                        .value
+                        .flatten()
+                        .map(|(id, ty)| (id.into(), ty.transpose().map(Into::into))),
+                }
+            }
+        },
+    )
+    .parse(s)
+}
+
+fn declare_pattern_tuple(s: State) -> Res<DeclarePattern> {
+    map(
+        delimited(
+            ("(", ws0),
+            [(
+                declarable,
+                many0(preceded((ws0, ",", ws0), declarable)),
+                ws0,
+                [preceded(
+                    ",",
+                    [delimited(
+                        (ws0, "..", ws0),
+                        (identifier, [preceded((ws0, ":", ws0), typespec)]),
+                        [(ws0, ",")],
+                    )],
+                )],
+            )],
+            (ws0, ")"),
+        ),
+        |opt| match opt {
+            None => DeclarePattern::List {
+                elements: vec![],
+                rest: None,
+            },
+            Some((first, elements, _, rest)) => {
+                let mut elements: Vec<AstNode> =
+                    elements.value.into_iter().map(|decl| decl.into()).collect();
+
+                elements.insert(0, first.into());
+
+                DeclarePattern::Tuple {
+                    elements,
+                    rest: rest
+                        .value
+                        .flatten()
+                        .map(|(id, ty)| (id.into(), ty.transpose().map(Into::into))),
+                }
+            }
+        },
+    )
+    .parse(s)
+}
+
+fn declare_pattern(s: State) -> Res<DeclarePattern> {
+    alt((
+        map(
+            (declare_guard_expr, [preceded((ws0, ":", ws0), typespec)]),
+            |(guard, ty)| DeclarePattern::Declare {
+                guard: guard.into(),
+                ty: ty.transpose().map(Into::into),
+            },
+        ),
+        declare_pattern_list,
+        declare_pattern_tuple,
+    ))
+    .parse(s)
+}
+
+fn declare_stmt(s: State) -> Res<Stmt> {
+    map(
+        (
+            "let",
+            ws1,
+            declare_pattern,
+            ws0,
+            "=",
+            ws0,
+            constrained(false, expr),
+        ),
+        |(_, _, pattern, _, _, _, expr)| Stmt::Declare {
+            pattern: pattern.into(),
+            expr: expr.into(),
+        },
+    )
+    .parse(s)
+}
 
 // // fn assign_stmt(s: State) -> ParseResult<State, Stmt> {
 // //     map(
@@ -1186,207 +1168,215 @@ fn typespec(s: State) -> Res<Type> {
 // //     .parse(s)
 // // }
 
-// fn stmt(s: State) -> ParseResult<State, Stmt> {
-//     alt((
-//         continue_stmt,
-//         break_stmt,
-//         return_stmt,
-//         declare_stmt,
-//         // I'm optimizing the assignment expression parsing here, by combining it with the regular expression-stmt. First, the expression is parsed, and then it's determined whether it's an assignment.
-//         // This works, because assignment patterns are a strict syntactic superset of expressions, so we can convert with `try_from`.
-//         // This might not work though, if assignment-stmts should better be parsed with constrained expression parsing on the left-hand side of the `=`.
-//         // We'll see...
-//         map_opt(
-//             seq((
-//                 constrained(false, expr), //
-//                 optional(seq((
-//                     ws0,
-//                     optional(alt((
-//                         tag("+"),
-//                         tag("*"),
-//                         tag("^"),
-//                         tag("-"),
-//                         tag("/"),
-//                         tag("%"),
-//                         tag("<<"),
-//                         tag("??"),
-//                         tag("[]"),
-//                     ))),
-//                     tag("="),
-//                     ws0,
-//                     constrained(false, expr),
-//                 ))),
-//             )),
-//             |(le, ri)| match ri {
-//                 None => Some(Stmt::Expr { expr: le }),
-//                 Some((_, op, _, _, expr)) => {
-//                     AssignPattern::try_from(le.clone())
-//                         .ok()
-//                         .map(|pattern| Stmt::Assign {
-//                             pattern,
-//                             expr: match op {
-//                                 None => expr,
-//                                 Some(op) => Expr::BinaryExpr {
-//                                     left: Expr::from(le).into(),
-//                                     op: op.into(),
-//                                     right: expr.into(),
-//                                 },
-//                             },
-//                         })
-//                 }
-//             },
-//         ),
-//     ))
-//     .parse(s)
-// }
+fn stmt(s: State) -> Res<Stmt> {
+    alt((
+        continue_stmt,
+        break_stmt,
+        return_stmt,
+        declare_stmt,
+        // // I'm optimizing the assignment expression parsing here, by combining it with the regular expression-stmt. First, the expression is parsed, and then it's determined whether it's an assignment.
+        // // This works, because assignment patterns are a strict syntactic superset of expressions, so we can convert with `try_from`.
+        // // This might not work though, if assignment-stmts should better be parsed with constrained expression parsing on the left-hand side of the `=`.
+        // // We'll see...
+        // map_opt(
+        //     seq((
+        //         constrained(false, expr), //
+        //         optional(seq((
+        //             ws0,
+        //             optional(alt((
+        //                 tag("+"),
+        //                 tag("*"),
+        //                 tag("^"),
+        //                 tag("-"),
+        //                 tag("/"),
+        //                 tag("%"),
+        //                 tag("<<"),
+        //                 tag("??"),
+        //                 tag("[]"),
+        //             ))),
+        //             tag("="),
+        //             ws0,
+        //             constrained(false, expr),
+        //         ))),
+        //     )),
+        //     |(le, ri)| match ri {
+        //         None => Some(Stmt::Expr { expr: le }),
+        //         Some((_, op, _, _, expr)) => {
+        //             AssignPattern::try_from(le.clone())
+        //                 .ok()
+        //                 .map(|pattern| Stmt::Assign {
+        //                     pattern,
+        //                     expr: match op {
+        //                         None => expr,
+        //                         Some(op) => Expr::BinaryExpr {
+        //                             left: Expr::from(le).into(),
+        //                             op: op.into(),
+        //                             right: expr.into(),
+        //                         },
+        //                     },
+        //                 })
+        //         }
+        //     },
+        // ),
+    ))
+    .parse(s)
+}
 
-// fn named_fn_item(s: State) -> ParseResult<State, Item> {
-//     map(
-//         seq((
-//             tag("fn"),
-//             ws0,
-//             identifier,
-//             ws0,
-//             optional(terminated(listy("<", type_var, type_var, ">"), ws0)),
-//             tag("("),
-//             ws0,
-//             parameter_list,
-//             ws0,
-//             tag(")"),
-//             ws0,
-//             optional(seq((tag("->"), ws0, typespec, ws0))),
-//             tag("{"),
-//             ws0,
-//             block_contents,
-//             ws0,
-//             tag("}"),
-//         )),
-//         |(_, _, name, _, generics, _, _, params, _, _, _, ret, _, _, body, _, _)| Item::NamedFn {
-//             name,
-//             decl: FnDecl {
-//                 generics: generics.map(|(generics, _)| generics).unwrap_or_default(),
-//                 ret: ret.map(|(_, _, t, _)| t),
-//                 params,
-//                 body,
-//             },
-//         },
-//     )
-//     .parse(s)
-// }
+fn named_fn_item(s: State) -> Res<Item> {
+    map(
+        (
+            "fn",
+            ws0,
+            identifier,
+            ws0,
+            [terminated(listy_elements("<", type_var, ">"), ws0)],
+            listy_elements("(", declarable, ")"),
+            ws0,
+            [delimited(("->", ws0), typespec, ws0)],
+            "{",
+            ws0,
+            block_contents,
+            ws0,
+            "}",
+        ),
+        |(_, _, name, _, generics, params, _, ret, _, _, body, _, _)| Item::NamedFn {
+            name: name.into(),
+            decl: FnDecl {
+                generics: generics
+                    .value
+                    .unwrap_or(vec![])
+                    .into_iter()
+                    .map(Into::into)
+                    .collect(),
+                params: params.value.into_iter().map(Into::into).collect(),
+                ret: ret.transpose().map(Into::into),
+                body: body.into(),
+            },
+        },
+    )
+    .parse(s)
+}
 
-// fn item(s: State) -> ParseResult<State, Item> {
-//     alt((
-//         named_fn_item,
-//         // declare_stmt,
-//         // assign_stmt,
-//         // map(expr, |expr| Stmt::Expr { expr: expr.into() }),
-//     ))
-//     .parse(s)
-// }
+fn item(s: State) -> Res<Item> {
+    alt((
+        named_fn_item,
+        // declare_stmt,
+        // assign_stmt,
+        // map(expr, |expr| Stmt::Expr { expr: expr.into() }),
+    ))
+    .parse(s)
+}
 
-// enum StmtOrItem {
-//     Stmt(Stmt),
-//     Item(Item),
-// }
+enum StmtOrItem {
+    Stmt(AstNode),
+    Item(AstNode),
+}
 
-// fn stmt_or_item(s: State) -> ParseResult<State, StmtOrItem> {
-//     alt((map(stmt, StmtOrItem::Stmt), map(item, StmtOrItem::Item))).parse(s)
-// }
+fn stmt_or_item(s: State) -> Res<StmtOrItem> {
+    alt((
+        map_node(stmt, |s| StmtOrItem::Stmt(s.into())),
+        map_node(item, |s| StmtOrItem::Item(s.into())),
+    ))
+    .parse(s)
+}
 
-// fn block_contents(s: State) -> ParseResult<State, Block> {
-//     let sep = regex(r"^[ \t]*([;\n][ \t]*)+");
+fn block_contents(s: State) -> Res<Block> {
+    let sep = regex(r"^[ \t]*([;\n][ \t]*)+");
 
-//     map(
-//         optional(seq((
-//             stmt_or_item,
-//             many0(preceded(many0(sep), stmt_or_item)),
-//         ))),
-//         |m| {
-//             let mut block = Block {
-//                 items: vec![],
-//                 stmts: vec![],
-//             };
+    map(
+        [(
+            //
+            stmt_or_item,
+            many0(preceded(many0(sep), stmt_or_item)),
+        )],
+        |m| {
+            let mut block = Block {
+                items: vec![],
+                stmts: vec![],
+            };
 
-//             if let Some((first, rest)) = m {
-//                 match first {
-//                     StmtOrItem::Stmt(stmt) => block.stmts.push(stmt),
-//                     StmtOrItem::Item(item) => block.items.push(item),
-//                 }
+            if let Some((first, rest)) = m {
+                match first.value {
+                    StmtOrItem::Stmt(stmt) => block.stmts.push(stmt),
+                    StmtOrItem::Item(item) => block.items.push(item),
+                }
 
-//                 for el in rest {
-//                     match el {
-//                         StmtOrItem::Stmt(stmt) => block.stmts.push(stmt),
-//                         StmtOrItem::Item(item) => block.items.push(item),
-//                     }
-//                 }
-//             }
+                for el in rest.plain_elements() {
+                    match el {
+                        StmtOrItem::Stmt(stmt) => block.stmts.push(stmt),
+                        StmtOrItem::Item(item) => block.items.push(item),
+                    }
+                }
+            }
 
-//             block
-//         },
-//     )
-//     .parse(s)
-// }
+            block
+        },
+    )
+    .parse(s)
+}
 
-// fn remove_comments(input: &str) -> String {
-//     let mut it = input.char_indices().peekable();
+fn remove_comments(input: &str) -> String {
+    let mut it = input.char_indices().peekable();
 
-//     let mut breakpoints = vec![0];
+    let mut breakpoints = vec![0];
 
-//     let mut in_str_lit = false; // suboptimal, doesn't account for interapolated expressions
-//     let mut in_raw_str_lit = false;
-//     let mut in_comment = false;
+    let mut in_str_lit = false; // suboptimal, doesn't account for interapolated expressions
+    let mut in_raw_str_lit = false;
+    let mut in_comment = false;
 
-//     while let Some((i, c)) = it.next() {
-//         if !in_comment
-//             && !in_str_lit
-//             && !in_raw_str_lit
-//             && c == 'r'
-//             && let Some((_, '"')) = it.peek()
-//         {
-//             in_raw_str_lit = true;
-//             it.next();
-//         } else if !in_comment && c == '"' {
-//             if in_raw_str_lit {
-//                 in_raw_str_lit = false;
-//             } else {
-//                 in_str_lit = !in_str_lit;
-//             }
-//         }
+    while let Some((i, c)) = it.next() {
+        if !in_comment
+            && !in_str_lit
+            && !in_raw_str_lit
+            && c == 'r'
+            && let Some((_, '"')) = it.peek()
+        {
+            in_raw_str_lit = true;
+            it.next();
+        } else if !in_comment && c == '"' {
+            if in_raw_str_lit {
+                in_raw_str_lit = false;
+            } else {
+                in_str_lit = !in_str_lit;
+            }
+        }
 
-//         if !in_comment
-//             && !in_str_lit
-//             && !in_raw_str_lit
-//             && c == '/'
-//             && let Some((_, '/')) = it.peek()
-//         {
-//             // START COMMENT
-//             in_comment = true;
-//             breakpoints.push(i);
-//             it.next();
-//         }
+        if !in_comment
+            && !in_str_lit
+            && !in_raw_str_lit
+            && c == '/'
+            && let Some((_, '/')) = it.peek()
+        {
+            // START COMMENT
+            in_comment = true;
+            breakpoints.push(i);
+            it.next();
+        }
 
-//         if (c == '\n' || c == '\r') && in_comment {
-//             // STOP
-//             in_comment = false;
-//             breakpoints.push(i);
-//         }
-//     }
+        if (c == '\n' || c == '\r') && in_comment {
+            // STOP
+            in_comment = false;
+            breakpoints.push(i);
+        }
+    }
 
-//     breakpoints.push(input.len());
+    breakpoints.push(input.len());
 
-//     breakpoints
-//         .chunks_exact(2)
-//         .map(|chunk| &input[chunk[0]..chunk[1]])
-//         .collect::<Vec<_>>()
-//         .join("")
-// }
+    breakpoints
+        .chunks_exact(2)
+        .map(|chunk| &input[chunk[0]..chunk[1]])
+        .collect::<Vec<_>>()
+        .join("")
+}
 
-// fn document(s: State) -> ParseResult<State, Document> {
-//     map(seq((ws0, block_contents, ws0, eof)), |(_, body, _, _)| {
-//         Document { body }
-//     })
-//     .parse(s)
-// }
+fn document(s: State) -> Res<Document> {
+    map_node(
+        //
+        delimited(ws0, block_contents, (ws0, eof)),
+        |block| Document { body: block.into() },
+    )
+    .parse(s)
+}
 
 // pub fn parse_declarable(input: &str) -> Declarable {
 //     terminated(declarable, eof)
