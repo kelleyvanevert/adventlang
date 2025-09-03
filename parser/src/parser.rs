@@ -1,8 +1,8 @@
 use either::Either;
 use parser_combinators::{
     ParseNode, ParseState, Parser, alt, char, check, delimited, escaped_char, extra, many0, many1,
-    map, map_node, map_state, optional, preceded, regex, seq, slws0, slws1, tag, terminated, ws0,
-    ws1,
+    map, map_node, map_result, map_w_state, optional, preceded, regex, seq, slws0, slws1, tag,
+    terminated, ws0, ws1,
 };
 use regex::Regex;
 
@@ -599,11 +599,15 @@ fn expr_call_stack(s: State) -> Res<Expr> {
 }
 
 fn unary_expr_stack(s: State) -> Res<Expr> {
-    map_state(
+    map_result(
         seq((many0(terminated(tag("!"), ws0)), expr_call_stack)),
-        |mut state, (ops, mut expr)| {
-            for op in ops.into_iter().rev() {
-                (state, expr) = state.produce_node_with_span(
+        |mut state,
+         ParseNode {
+             value: (ops, mut expr),
+             ..
+         }| {
+            for op in ops.value.into_iter().rev() {
+                (state, expr) = state.produce_with_span(
                     (op.span.0, expr.span.1),
                     Expr::UnaryExpr {
                         expr: expr.into_ast_node(AstKind::Expr).into(),
@@ -611,7 +615,7 @@ fn unary_expr_stack(s: State) -> Res<Expr> {
                     },
                 );
             }
-            Some((state, expr))
+            Ok((state, expr))
         },
     )
     .parse(s)
@@ -649,7 +653,7 @@ fn postfix_index_sugar(input: State) -> Res<TmpOp> {
 }
 
 fn infix_or_postfix_fn_latter_part(input: State) -> Res<TmpOp> {
-    map_state(
+    map_w_state(
         seq((
             ws0,
             optional(seq((char('?'), ws0))),
@@ -667,12 +671,12 @@ fn infix_or_postfix_fn_latter_part(input: State) -> Res<TmpOp> {
             let op = TmpOp::InfixOrPostfix {
                 id,
                 coalesce: coalesce.value.is_some(),
-                args: match opt {
+                args: match opt.value {
                     None => vec![],
                     Some((expr, additional_named_args)) => {
                         let expr = expr.into_ast_node(AstKind::Expr);
 
-                        let (new_state, arg) = state.produce_node_with_span(
+                        let (new_state, arg) = state.produce_with_span(
                             expr.span,
                             Argument {
                                 name: None,
@@ -683,44 +687,43 @@ fn infix_or_postfix_fn_latter_part(input: State) -> Res<TmpOp> {
 
                         let mut all = vec![arg];
 
-                        // for (_, _, name, _, expr) in additional_named_args {
-                        //     let (new_state, arg) = state.produce_node_with_span(
-                        //         (begin_pos, end_pos),
-                        //         Argument {
-                        //             name: Some(name.into_ast_node(AstKind::Identifier).into()),
-                        //             expr: expr.into_ast_node(AstKind::Expr).into(),
-                        //         },
-                        //     );
-                        //     state = new_state;
-                        //     all.push(arg);
-                        // }
+                        for arg in additional_named_args.value {
+                            all.push(arg.map(|(_, _, name, _, expr)| Argument {
+                                name: Some(name.into_ast_node(AstKind::Identifier).into()),
+                                expr: expr.into_ast_node(AstKind::Expr).into(),
+                            }));
+                        }
 
                         all
                     }
                 },
             };
 
-            Some((state, op))
+            (state, op)
         },
     )
     .parse(input)
 }
 
 fn infix_or_postfix_fn_call_stack(s: State) -> Res<Expr> {
-    map_state(
+    map_result(
         seq((
             unary_expr_stack,
             many0(alt((postfix_index_sugar, infix_or_postfix_fn_latter_part))),
         )),
-        |mut state, (mut expr, ops)| {
-            for op in ops {
-                match op {
+        |mut state,
+         ParseNode {
+             value: (mut expr, ops),
+             ..
+         }| {
+            for op in ops.value {
+                match op.value {
                     TmpOp::IndexSugar {
                         coalesce,
                         index_expr,
                     } => {
-                        let span = (expr.span.0, end_pos);
-                        (state, expr) = state.produce_node_with_span(
+                        let span = (expr.span.0, op.span.1);
+                        (state, expr) = state.produce_with_span(
                             span,
                             Expr::Index {
                                 expr: expr.into_ast_node(AstKind::Expr).into(),
@@ -730,7 +733,7 @@ fn infix_or_postfix_fn_call_stack(s: State) -> Res<Expr> {
                         );
                     }
                     TmpOp::InfixOrPostfix { id, coalesce, args } => {
-                        let span = (expr.span.0, end_pos);
+                        let span = (expr.span.0, op.span.1);
 
                         let mut args = args
                             .into_iter()
@@ -738,7 +741,7 @@ fn infix_or_postfix_fn_call_stack(s: State) -> Res<Expr> {
                             .collect::<Vec<_>>();
 
                         {
-                            let (new_state, arg) = state.produce_node_with_span(
+                            let (new_state, arg) = state.produce_with_span(
                                 expr.span,
                                 Argument {
                                     name: None,
@@ -749,7 +752,7 @@ fn infix_or_postfix_fn_call_stack(s: State) -> Res<Expr> {
                             args.insert(0, arg.into_ast_node(AstKind::Argument));
                         }
 
-                        (state, expr) = state.produce_node_with_span(
+                        (state, expr) = state.produce_with_span(
                             span,
                             Expr::Invocation {
                                 expr: id
@@ -765,7 +768,7 @@ fn infix_or_postfix_fn_call_stack(s: State) -> Res<Expr> {
                 }
             }
 
-            Some((state, expr))
+            Ok((state, expr))
         },
     )
     .parse(s)
@@ -852,12 +855,16 @@ where
     POp: Parser<'a, E, Output = &'a str>,
     PExpr: Parser<'a, E, Output = Expr>,
 {
-    map_state(
+    map_result(
         seq((
             parse_expr_le,
             many0(seq((ws0, parse_op, ws0, parse_expr_ri))),
         )),
-        |mut state, (mut expr, ops)| {
+        |mut state,
+         ParseNode {
+             value: (mut expr, ops),
+             ..
+         }| {
             for ParseNode {
                 value: (_, op, _, right),
                 ..

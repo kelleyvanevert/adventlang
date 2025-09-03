@@ -137,6 +137,26 @@ impl<T> ParseNode<T> {
         }
     }
 
+    pub fn map_w_state<'a, F, B, E>(
+        self,
+        state: ParseState<'a, E>,
+        f: F,
+    ) -> (ParseState<'a, E>, ParseNode<B>)
+    where
+        F: FnOnce(ParseState<'a, E>, T) -> (ParseState<'a, E>, B),
+    {
+        let (state, value) = f(state, self.value);
+
+        (
+            state,
+            ParseNode {
+                id: self.id,
+                span: self.span,
+                value,
+            },
+        )
+    }
+
     pub fn map_opt<'a, F, B>(self, f: F) -> Option<ParseNode<B>>
     where
         F: FnOnce(T) -> Option<B>,
@@ -257,6 +277,7 @@ pub fn extra<'a, E: Clone, T>(
     move |state: ParseState<'a, E>| p.parse(state.with_extra(extra.clone()))
 }
 
+/// Map the inner value of a parser (preserving the span)
 pub fn map<'a, E, A, B>(
     mut p: impl Parser<'a, E, Output = A>,
     mut f: impl FnMut(A) -> B,
@@ -267,6 +288,18 @@ pub fn map<'a, E, A, B>(
     }
 }
 
+/// Map the inner value of a parser, but with access to the state (preserving the span)
+pub fn map_w_state<'a, E, A, B>(
+    mut p: impl Parser<'a, E, Output = A>,
+    mut f: impl FnMut(ParseState<'a, E>, A) -> (ParseState<'a, E>, B),
+) -> impl Parser<'a, E, Output = B> {
+    move |state: ParseState<'a, E>| {
+        let (state, node) = p.parse(state)?;
+        Ok(node.map_w_state(state, &mut f))
+    }
+}
+
+/// Map the node of a parser to a new value (preserving the span)
 pub fn map_node<'a, E, A, B>(
     mut p: impl Parser<'a, E, Output = A>,
     mut f: impl FnMut(ParseNode<A>) -> B,
@@ -277,13 +310,14 @@ pub fn map_node<'a, E, A, B>(
     }
 }
 
-pub fn map_state<'a, E, A, B>(
+/// Map the entire result of a parser (to access the state and/or to adjust the span)
+pub fn map_result<'a, E, A, B>(
     mut p: impl Parser<'a, E, Output = A>,
-    mut f: impl FnMut(ParseState<'a, E>, A) -> Res<'a, E, B>,
+    mut f: impl FnMut(ParseState<'a, E>, ParseNode<A>) -> Res<'a, E, B>,
 ) -> impl Parser<'a, E, Output = B> {
     move |state: ParseState<'a, E>| {
         let (state, node) = p.parse(state)?;
-        f(state, node.value)
+        f(state, node)
     }
 }
 
