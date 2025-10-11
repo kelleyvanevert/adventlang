@@ -1,0 +1,38 @@
+{
+  "$schema": "https://tree-sitter.github.io/tree-sitter/assets/schemas/config.schema.json",
+  "grammars": [
+    {
+      "name": "adventlang",
+      "camelcase": "Adventlang",
+      "title": "Adventlang",
+      "scope": "source.adventlang",
+      "file-types": ["al"],
+      "injection-regex": "^adventlang$",
+      "class-name": "TreeSitterAdventlang"
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "MIT",
+    "description": "Adventlang grammar for tree-sitter",
+    "authors": [
+      {
+        "name": "Kelley van Evert",
+        "email": "hello@klve.nl",
+        "url": "https://klve.nl/"
+      }
+    ],
+    "links": {
+      "repository": "https://github.com/kelleyvanevert/adventlang"
+    }
+  },
+  "bindings": {
+    "c": false,
+    "go": false,
+    "node": true,
+    "python": false,
+    "rust": true,
+    "swift": false,
+    "zig": false
+  }
+}
