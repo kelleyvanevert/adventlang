@@ -27,6 +27,8 @@ const PREC = {
   closure: -1,
 };
 
+const ws = optional(/[ \t\r\n]+/);
+
 // prettier-ignore
 module.exports = grammar({
   name: "adventlang",
@@ -64,7 +66,7 @@ module.exports = grammar({
   //   // Local ambiguity due to anonymous types:
   //   // See https://internals.rust-lang.org/t/pre-rfc-deprecating-anonymous-parameters/3710
   //   [$._type, $._pattern],
-  //   [$.unit_type, $.tuple_pattern],
+  //   [$.nil_type, $.tuple_pattern],
   //   [$.scoped_identifier, $.scoped_type_identifier],
   //   [$.parameters, $._pattern],
   //   [$.parameters, $.tuple_struct_pattern],
@@ -76,8 +78,8 @@ module.exports = grammar({
 
   rules: {
     source_file: ($) => seq(
-      sepBy($.stmt_separator, $._stmt),
-      optional($.stmt_separator)
+      sepBy($._stmt_separator, $._stmt),
+      optional($._stmt_separator)
     ),
 
     line_comment: $ => seq(
@@ -101,46 +103,92 @@ module.exports = grammar({
 
     label: $ => seq("'", $.identifier),
 
-    unit_type: _ => "nil",
+    nil_type: _ => "nil",
 
-    tuple_type: $ => seq(
-      "(",
-      sepBy1(",", $._type),
-      optional(","),
-      ")",
+    tuple_type: $ => choice(
+      seq(
+        "(",
+        seq($._type, ","),
+        repeat(seq($._type, ",")),
+        optional($._type),
+        ")",
+      ),
+      "tuple",
     ),
 
-    stmt_separator: _ => /[ \t\r]*([;\n][ \t]*)+/,
+    list_type: $ => choice(
+      seq(
+        "[",
+        $._type,
+        "]",
+      ),
+      "list",
+    ),
 
-    _block_contents: $ => sepBy1(/[ \t\r]*([;\n][ \t]*)+/, $._stmt),
+    dict_type: $ => choice(
+      seq(
+        "dict",
+        "[",
+        $._type,
+        ",",
+        $._type,
+        "]",
+      ),
+      "dict",
+    ),
+
+    nullable_type: $ => seq("?", $._type),
+
+    fn_type: $ => seq(
+      "fn",
+      optional(
+        seq(
+          optional(seq("<", listElements($._type_identifier), ">")),
+          "(", listElements($._type), ")"
+        ),
+      ),
+      optional(
+        seq("->", $._type),
+      ),
+    ),
+
+    parenthesized_type: $ => seq("(", $._type, ")"),
+
+    _stmt_separator: _ => /[ \t\r]*([;\n][ \t]*)+/,
 
     _type: $ => choice(
-      // $.abstract_type,
-      // $.reference_type,
-      // $.metavariable,
-      // $.pointer_type,
-      // $.generic_type,
-      // $.scoped_type_identifier,
       $.tuple_type,
-      $.unit_type,
-      // $.array_type,
-      // $.function_type,
-      // $._type_identifier,
-      // $.macro_invocation,
-      // $.never_type,
-      // $.dynamic_type,
-      // $.bounded_type,
-      // $.removed_trait_bound,
+      $.list_type,
+      $.dict_type,
+      $.nil_type,
       alias(choice("bool", "str", "int", "float", "num", "regex"), $.primitive_type),
+      $.fn_type,
+      $.nullable_type,
+      $._type_identifier,
+      $.parenthesized_type,
     ),
 
     _stmt: $ => choice(
-      // $.named_fn_item,
+      $.named_fn_item,
       $.continue_stmt,
       $.break_stmt,
       $.return_stmt,
+      $.declare_stmt,
       $._expr,
-      // $.declare_stmt,
+    ),
+
+    named_fn_item: $ => seq(
+      "fn", ws,
+      $.identifier, ws,
+      optional(seq("<", field("generic", listElements($._type)), ">")),
+      seq("(", field("parameter", listElements($.declarable)), ")"),
+      optional(seq("->", field("return", $._type))),
+      "{",
+      seq(
+        sepBy($._stmt_separator, $._stmt),
+        optional($._stmt_separator)
+      ),
+      "}",
     ),
 
     continue_stmt: $ => seq(
@@ -158,6 +206,23 @@ module.exports = grammar({
       "return",
       optional($._expr),
     ),
+
+    declare_stmt: $ => seq(
+      "let",
+      $.declare_pattern,
+      "=",
+      $._expr,
+    ),
+
+    declare_guard: $ => "some",
+
+    declare_pattern: $ => choice(
+      seq(optional($.declare_guard), $.identifier, optional(seq(":", $._type))),
+      seq("[", listElements($.declarable), optional(seq("..", $.identifier, optional(seq(":", $._type)))), "]"),
+      seq("(", listElements($.declarable), optional(seq("..", $.identifier, optional(seq(":", $._type)))), ")"),
+    ),
+
+    declarable: $ => seq($.declare_pattern, optional(seq("=", $._expr))),
 
     _expr: $ => choice(
       $.unary_expression,
@@ -244,3 +309,107 @@ function sepBy1(sep, rule) {
 function sepBy(sep, rule) {
   return optional(sepBy1(sep, rule));
 }
+
+function listElements(rule, sep = ",") {
+  return optional(seq(sepBy1(sep, rule), optional(sep)));
+}
+
+// declarable ::= declare-pattern [ "=" expr ]
+
+// expr ::=
+//   | "true"
+//   | "false"
+//   | "nil"
+//   | raw-str-literal
+//   | str-literal
+//   | float
+//   | int
+//   | regex
+//   | do-while-expr
+//   | while-expr
+//   | loop-expr
+//   | for-expr
+//   | identifier
+//   | anonymous-fn
+//   | "(" list-elements(expr) [ ".." expr ] ")"
+//   | "[" list-elements(expr) [ ".." expr ] "]"
+//   | expr [ "?" ] "[" expr "]"
+//   | expr [ "?" ] "." identifier
+//   | expr "(" list-elements(argument) ")" [ anonymous-fn ]
+//   | expr anonymous-fn
+//   | expr postfix-op
+//   | expr [ "?" ] ":" "[" expr "]"
+//   | expr [ "?" ] ":" identifier [ expr ] { "'" identifier expr }
+//   | expr infix-op expr
+//   | "(" expr ")"
+
+// argument ::= [ identifier "=" ] expr
+
+// postfix-op ::= "!"
+
+// infix-op ::= "*" | "/" | "%" | "+" | "-" | "<<" | ">>" | "!=" | "==" | "<=" | ">=" | "<" | ">" | "^" | "&&" | "||" | "??"
+
+// raw-str-literal ::= "r\"" text-content "\""
+
+// str-literal ::= "\"" { text-content | str-interpolation } "\""
+
+// str-interpolation ::= "{" expr "}"
+
+// text-content ::= ? textual content without " (unless escaped) ?
+
+// do-while-expr ::=
+//   [ "'" identifier ":" ]
+//   "do"
+//   "{" block-contents "}"
+//   [ "while" expr ]
+
+// while-expr ::=
+//   [ "'" identifier ":" ]
+//   "while" maybe-parenthesized([ "let" declare-pattern "=" ] expr)
+//   "{" block-contents "}"
+
+// loop-expr ::=
+//   [ "'" identifier ":" ]
+//   "loop"
+//   "{" block-contents "}"
+
+// for-expr ::=
+//   [ "'" identifier ":" ]
+//   "for" maybe-parenthesized("let" declare-pattern "in" expr)
+//   "{" block-contents "}"
+
+// maybe-parenthesized(t) ::= t | "(" t ")"
+
+// anonymous-fn ::=
+//   "|" list-elements(declarable) "|"
+//   "{" block-contents "}"
+
+// stmt ::=
+//   | continue-stmt
+//   | break-stmt
+//   | return-stmt
+//   | declare-stmt
+//   | assign-stmt
+//   | expr
+
+// continue-stmt ::= "continue" [ "'" identifier ]
+
+// break-stmt ::= "break" [ "'" identifier ] [ "with" expr ]
+
+// return-stmt ::= "return" [ expr ]
+
+// declare-stmt ::= "let" declare-pattern "=" expr
+
+// assign-stmt ::= assign-pattern assign-op expr
+
+// assign-op ::= "=" | "+=" | "*=" | "^=" | "-=" | "/=" | "%=" | "<<=" | "??=" | "[]="
+
+// assign-pattern ::=
+//   | assign-location
+//   | "[" list-elements(assign-pattern) [ ".." assign-pattern ] "]"
+//   | "(" list-elements(assign-pattern) [ ".." assign-pattern ] ")"
+
+// assign-location ::=
+//   | identifier
+//   | expr "[" expr "]"
+//   | expr "." identifier
