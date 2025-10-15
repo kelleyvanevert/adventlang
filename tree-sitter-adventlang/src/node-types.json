@@ -52,6 +52,10 @@
     "named": true,
     "subtypes": [
       {
+        "type": "_expr",
+        "named": true
+      },
+      {
         "type": "break_stmt",
         "named": true
       },
@@ -301,6 +305,10 @@
         {
           "type": "_stmt",
           "named": true
+        },
+        {
+          "type": "stmt_separator",
+          "named": true
         }
       ]
     }
@@ -458,6 +466,10 @@
   {
     "type": "return",
     "named": false
+  },
+  {
+    "type": "stmt_separator",
+    "named": true
   },
   {
     "type": "true",

@@ -4,11 +4,54 @@
   "word": "identifier",
   "rules": {
     "source_file": {
-      "type": "REPEAT",
-      "content": {
-        "type": "SYMBOL",
-        "name": "_stmt"
-      }
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "SYMBOL",
+                  "name": "_stmt"
+                },
+                {
+                  "type": "REPEAT",
+                  "content": {
+                    "type": "SEQ",
+                    "members": [
+                      {
+                        "type": "SYMBOL",
+                        "name": "stmt_separator"
+                      },
+                      {
+                        "type": "SYMBOL",
+                        "name": "_stmt"
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SYMBOL",
+              "name": "stmt_separator"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        }
+      ]
     },
     "line_comment": {
       "type": "SEQ",
@@ -64,7 +107,8 @@
     },
     "identifier": {
       "type": "PATTERN",
-      "value": "(r#)?[_\\p{XID_Start}][_\\p{XID_Continue}]*"
+      "value": "(r#)?[_\\p{XID_Start}][_\\p{XID_Continue}]*",
+      "flags": "u"
     },
     "_type_identifier": {
       "type": "ALIAS",
@@ -151,6 +195,35 @@
         }
       ]
     },
+    "stmt_separator": {
+      "type": "PATTERN",
+      "value": "[ \\t\\r]*([;\\n][ \\t]*)+"
+    },
+    "_block_contents": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "_stmt"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "PATTERN",
+                "value": "[ \\t\\r]*([;\\n][ \\t]*)+"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "_stmt"
+              }
+            ]
+          }
+        }
+      ]
+    },
     "_type": {
       "type": "CHOICE",
       "members": [
@@ -212,6 +285,10 @@
         {
           "type": "SYMBOL",
           "name": "return_stmt"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_expr"
         }
       ]
     },
@@ -859,7 +936,7 @@
   "extras": [
     {
       "type": "PATTERN",
-      "value": "\\s"
+      "value": "[ \\t\\r]"
     },
     {
       "type": "SYMBOL",

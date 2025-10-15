@@ -32,7 +32,7 @@ module.exports = grammar({
   name: "adventlang",
 
   extras: $ => [
-    /\s/,
+    /[ \t\r]/,
     $.line_comment,
     $.block_comment,
   ],
@@ -75,8 +75,10 @@ module.exports = grammar({
   // ],
 
   rules: {
-    // TODO: add the actual grammar rules
-    source_file: ($) => repeat($._stmt), // "hello",
+    source_file: ($) => seq(
+      sepBy($.stmt_separator, $._stmt),
+      optional($.stmt_separator)
+    ),
 
     line_comment: $ => seq(
       "//",
@@ -91,7 +93,7 @@ module.exports = grammar({
 
     comment_text: $ => repeat1(/.|\n|\r/),
 
-    identifier: _ => /(r#)?[_\p{XID_Start}][_\p{XID_Continue}]*/,
+    identifier: _ => /(r#)?[_\p{XID_Start}][_\p{XID_Continue}]*/u,
 
     _type_identifier: $ => alias($.identifier, $.type_identifier),
 
@@ -107,6 +109,10 @@ module.exports = grammar({
       optional(","),
       ")",
     ),
+
+    stmt_separator: _ => /[ \t\r]*([;\n][ \t]*)+/,
+
+    _block_contents: $ => sepBy1(/[ \t\r]*([;\n][ \t]*)+/, $._stmt),
 
     _type: $ => choice(
       // $.abstract_type,
@@ -133,6 +139,7 @@ module.exports = grammar({
       $.continue_stmt,
       $.break_stmt,
       $.return_stmt,
+      $._expr,
       // $.declare_stmt,
     ),
 
