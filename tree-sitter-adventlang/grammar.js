@@ -27,14 +27,20 @@ const PREC = {
   closure: -1,
 };
 
-const ws = optional(/[ \t\r\n]+/);
+function blockContents($) {
+  return seq(
+    optional($._stmt_separator),
+    sepBy($._stmt_separator, $._stmt),
+    optional($._stmt_separator),
+  );
+}
 
 // prettier-ignore
 module.exports = grammar({
   name: "adventlang",
 
   extras: $ => [
-    /[ \t\r]/,
+    /\s/,
     $.line_comment,
     $.block_comment,
   ],
@@ -46,11 +52,14 @@ module.exports = grammar({
     $._type,
     $._stmt,
     $._literal,
+
+    // RUST grammar stuff
     // $._literal_pattern,
     // $._declaration_statement,
     // $._pattern,
   ],
 
+  // RUST grammar stuff
   // inline: $ => [
   //   $._path,
   //   $._type_identifier,
@@ -62,11 +71,16 @@ module.exports = grammar({
   //   $._expr_ending_with_block,
   // ],
 
-  // conflicts: $ => [
+  conflicts: $ => [
+    // the parser needs to disambiguate dynamically between assignment statements and expression statements
+    // (as soon as it runs into an "=" it's an assignment, or else it runs into a stmt separator
+    //   like a newline or something else, and in that case it's an expression statement)
+    [$.assign_location, $._expr],
+
+    // RUST grammar stuff
   //   // Local ambiguity due to anonymous types:
   //   // See https://internals.rust-lang.org/t/pre-rfc-deprecating-anonymous-parameters/3710
   //   [$._type, $._pattern],
-  //   [$.nil_type, $.tuple_pattern],
   //   [$.scoped_identifier, $.scoped_type_identifier],
   //   [$.parameters, $._pattern],
   //   [$.parameters, $.tuple_struct_pattern],
@@ -74,7 +88,7 @@ module.exports = grammar({
   //   [$.array_expression],
   //   [$.visibility_modifier],
   //   [$.visibility_modifier, $.scoped_identifier, $.scoped_type_identifier],
-  // ],
+  ],
 
   rules: {
     source_file: ($) => seq(
@@ -174,20 +188,20 @@ module.exports = grammar({
       $.break_stmt,
       $.return_stmt,
       $.declare_stmt,
-      $._expr,
+      $.assign_stmt,
+      $.expr_stmt,
     ),
 
+    expr_stmt: $ => $._expr,
+
     named_fn_item: $ => seq(
-      "fn", ws,
-      $.identifier, ws,
+      "fn",
+      $.identifier,
       optional(seq("<", field("generic", listElements($._type)), ">")),
       seq("(", field("parameter", listElements($.declarable)), ")"),
       optional(seq("->", field("return", $._type))),
       "{",
-      seq(
-        sepBy($._stmt_separator, $._stmt),
-        optional($._stmt_separator)
-      ),
+      blockContents($),
       "}",
     ),
 
@@ -202,9 +216,9 @@ module.exports = grammar({
       optional(seq("with", $._expr)),
     ),
 
-    return_stmt: $ => seq(
-      "return",
-      optional($._expr),
+    return_stmt: $ => choice(
+      prec.left(seq("return", $._expr)),
+      prec(-1, "return"),
     ),
 
     declare_stmt: $ => seq(
@@ -224,6 +238,24 @@ module.exports = grammar({
 
     declarable: $ => seq($.declare_pattern, optional(seq("=", $._expr))),
 
+    assign_stmt: $ => seq(
+      $.assign_pattern,
+      alias(choice("=", "+=", "*=", "^=", "-=", "/=", "%=", "<<=", "??=", "[]="), $.assign_op),
+      $._expr,
+    ),
+
+    assign_pattern: $ => choice(
+      $.assign_location,
+      seq("[", listElements($.assign_pattern), optional(seq("..", $.assign_pattern)), "]"),
+      seq("(", listElements($.assign_pattern), optional(seq("..", $.assign_pattern)), ")"),
+    ),
+
+    assign_location: $ => choice(
+      $.identifier,
+      seq($._expr, "[", $._expr, "]"),
+      seq($._expr, token.immediate("."), $.identifier),
+    ),
+
     _expr: $ => choice(
       $.unary_expression,
       $.binary_expression,
@@ -235,8 +267,19 @@ module.exports = grammar({
       // while
       // loop
       // for
-      // anonymous fn
+      $.anonymous_fn,
       // list
+      //   | "(" list-elements(expr) [ ".." expr ] ")"
+      //   | "[" list-elements(expr) [ ".." expr ] "]"
+      //   | expr [ "?" ] "[" expr "]"
+      //   | expr [ "?" ] "." identifier
+      //   | expr "(" list-elements(argument) ")" [ anonymous-fn ]
+      //   | expr anonymous-fn
+      //   | expr postfix-op
+      //   | expr [ "?" ] ":" "[" expr "]"
+      //   | expr [ "?" ] ":" identifier [ expr ] { "'" identifier expr }
+      //   | expr infix-op expr
+
     ),
 
     unary_expression: $ => prec(PREC.unary, seq(
@@ -265,6 +308,11 @@ module.exports = grammar({
         field("right", $._expr),
       ))));
     },
+
+    anonymous_fn: $ => seq(
+      "|", listElements($.declarable), "|",
+      "{", blockContents($), "}",
+    ),
 
     tuple_expression: $ => seq(
       "(",
@@ -314,35 +362,6 @@ function listElements(rule, sep = ",") {
   return optional(seq(sepBy1(sep, rule), optional(sep)));
 }
 
-// declarable ::= declare-pattern [ "=" expr ]
-
-// expr ::=
-//   | "true"
-//   | "false"
-//   | "nil"
-//   | raw-str-literal
-//   | str-literal
-//   | float
-//   | int
-//   | regex
-//   | do-while-expr
-//   | while-expr
-//   | loop-expr
-//   | for-expr
-//   | identifier
-//   | anonymous-fn
-//   | "(" list-elements(expr) [ ".." expr ] ")"
-//   | "[" list-elements(expr) [ ".." expr ] "]"
-//   | expr [ "?" ] "[" expr "]"
-//   | expr [ "?" ] "." identifier
-//   | expr "(" list-elements(argument) ")" [ anonymous-fn ]
-//   | expr anonymous-fn
-//   | expr postfix-op
-//   | expr [ "?" ] ":" "[" expr "]"
-//   | expr [ "?" ] ":" identifier [ expr ] { "'" identifier expr }
-//   | expr infix-op expr
-//   | "(" expr ")"
-
 // argument ::= [ identifier "=" ] expr
 
 // postfix-op ::= "!"
@@ -379,37 +398,3 @@ function listElements(rule, sep = ",") {
 //   "{" block-contents "}"
 
 // maybe-parenthesized(t) ::= t | "(" t ")"
-
-// anonymous-fn ::=
-//   "|" list-elements(declarable) "|"
-//   "{" block-contents "}"
-
-// stmt ::=
-//   | continue-stmt
-//   | break-stmt
-//   | return-stmt
-//   | declare-stmt
-//   | assign-stmt
-//   | expr
-
-// continue-stmt ::= "continue" [ "'" identifier ]
-
-// break-stmt ::= "break" [ "'" identifier ] [ "with" expr ]
-
-// return-stmt ::= "return" [ expr ]
-
-// declare-stmt ::= "let" declare-pattern "=" expr
-
-// assign-stmt ::= assign-pattern assign-op expr
-
-// assign-op ::= "=" | "+=" | "*=" | "^=" | "-=" | "/=" | "%=" | "<<=" | "??=" | "[]="
-
-// assign-pattern ::=
-//   | assign-location
-//   | "[" list-elements(assign-pattern) [ ".." assign-pattern ] "]"
-//   | "(" list-elements(assign-pattern) [ ".." assign-pattern ] ")"
-
-// assign-location ::=
-//   | identifier
-//   | expr "[" expr "]"
-//   | expr "." identifier

@@ -8,6 +8,10 @@
         "named": true
       },
       {
+        "type": "anonymous_fn",
+        "named": true
+      },
+      {
         "type": "binary_expression",
         "named": true
       },
@@ -52,7 +56,7 @@
     "named": true,
     "subtypes": [
       {
-        "type": "_expr",
+        "type": "assign_stmt",
         "named": true
       },
       {
@@ -65,6 +69,10 @@
       },
       {
         "type": "declare_stmt",
+        "named": true
+      },
+      {
+        "type": "expr_stmt",
         "named": true
       },
       {
@@ -118,6 +126,82 @@
         "named": true
       }
     ]
+  },
+  {
+    "type": "anonymous_fn",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "_stmt",
+          "named": true
+        },
+        {
+          "type": "declarable",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "assign_location",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "_expr",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "assign_pattern",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "assign_location",
+          "named": true
+        },
+        {
+          "type": "assign_pattern",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "assign_stmt",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "_expr",
+          "named": true
+        },
+        {
+          "type": "assign_op",
+          "named": true
+        },
+        {
+          "type": "assign_pattern",
+          "named": true
+        }
+      ]
+    }
   },
   {
     "type": "binary_expression",
@@ -362,6 +446,21 @@
       "types": [
         {
           "type": "_type",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "expr_stmt",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "_expr",
           "named": true
         }
       ]
@@ -669,6 +768,10 @@
     "named": false
   },
   {
+    "type": ".",
+    "named": false
+  },
+  {
     "type": "..",
     "named": false
   },
@@ -739,6 +842,10 @@
   {
     "type": "^",
     "named": false
+  },
+  {
+    "type": "assign_op",
+    "named": true
   },
   {
     "type": "break",
