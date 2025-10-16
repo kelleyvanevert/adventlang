@@ -16,7 +16,19 @@
         "named": true
       },
       {
+        "type": "do_while_expr",
+        "named": true
+      },
+      {
+        "type": "for_expr",
+        "named": true
+      },
+      {
         "type": "identifier",
+        "named": true
+      },
+      {
+        "type": "loop_expr",
         "named": true
       },
       {
@@ -29,6 +41,10 @@
       },
       {
         "type": "unary_expression",
+        "named": true
+      },
+      {
+        "type": "while_expr",
         "named": true
       }
     ]
@@ -47,6 +63,10 @@
       },
       {
         "type": "nil_literal",
+        "named": true
+      },
+      {
+        "type": "str_literal",
         "named": true
       }
     ]
@@ -452,6 +472,29 @@
     }
   },
   {
+    "type": "do_while_expr",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "_expr",
+          "named": true
+        },
+        {
+          "type": "_stmt",
+          "named": true
+        },
+        {
+          "type": "label",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "expr_stmt",
     "named": true,
     "fields": {},
@@ -476,6 +519,33 @@
       "types": [
         {
           "type": "_type",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "for_expr",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "_expr",
+          "named": true
+        },
+        {
+          "type": "_stmt",
+          "named": true
+        },
+        {
+          "type": "declare_pattern",
+          "named": true
+        },
+        {
+          "type": "label",
           "named": true
         }
       ]
@@ -517,6 +587,25 @@
       "types": [
         {
           "type": "_type",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "loop_expr",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "_stmt",
+          "named": true
+        },
+        {
+          "type": "label",
           "named": true
         }
       ]
@@ -667,6 +756,25 @@
     }
   },
   {
+    "type": "str_literal",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "escape_sequence",
+          "named": true
+        },
+        {
+          "type": "string_character",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "tuple_expression",
     "named": true,
     "fields": {},
@@ -712,11 +820,42 @@
     }
   },
   {
+    "type": "while_expr",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "_expr",
+          "named": true
+        },
+        {
+          "type": "_stmt",
+          "named": true
+        },
+        {
+          "type": "declare_pattern",
+          "named": true
+        },
+        {
+          "type": "label",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "!",
     "named": false
   },
   {
     "type": "!=",
+    "named": false
+  },
+  {
+    "type": "\"",
     "named": false
   },
   {
@@ -864,6 +1003,14 @@
     "named": false
   },
   {
+    "type": "do",
+    "named": false
+  },
+  {
+    "type": "escape_sequence",
+    "named": true
+  },
+  {
     "type": "false",
     "named": false
   },
@@ -872,8 +1019,16 @@
     "named": false
   },
   {
+    "type": "for",
+    "named": false
+  },
+  {
     "type": "identifier",
     "named": true
+  },
+  {
+    "type": "in",
+    "named": false
   },
   {
     "type": "let",
@@ -881,6 +1036,10 @@
   },
   {
     "type": "list",
+    "named": false
+  },
+  {
+    "type": "loop",
     "named": false
   },
   {
@@ -896,6 +1055,10 @@
     "named": false
   },
   {
+    "type": "string_character",
+    "named": true
+  },
+  {
     "type": "true",
     "named": false
   },
@@ -906,6 +1069,10 @@
   {
     "type": "type_identifier",
     "named": true
+  },
+  {
+    "type": "while",
+    "named": false
   },
   {
     "type": "with",

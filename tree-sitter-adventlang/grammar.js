@@ -47,6 +47,10 @@ module.exports = grammar({
 
   word: $ => $.identifier,
 
+  externals: $ => [
+    $.string_content, // stolen from the Rust tree sitter code
+  ],
+
   supertypes: $ => [
     $._expr,
     $._type,
@@ -76,6 +80,10 @@ module.exports = grammar({
     // (as soon as it runs into an "=" it's an assignment, or else it runs into a stmt separator
     //   like a newline or something else, and in that case it's an expression statement)
     [$.assign_location, $._expr],
+
+    // I don't actually understand how these conflict could occur
+    [$.while_expr, $.parenthesized_expression],
+    [$.do_while_expr, $.parenthesized_expression],
 
     // RUST grammar stuff
   //   // Local ambiguity due to anonymous types:
@@ -109,7 +117,7 @@ module.exports = grammar({
 
     comment_text: $ => repeat1(/.|\n|\r/),
 
-    identifier: _ => /(r#)?[_\p{XID_Start}][_\p{XID_Continue}]*/u,
+    identifier: $ => /(r#)?[_\p{XID_Start}][_\p{XID_Continue}]*/u,
 
     _type_identifier: $ => alias($.identifier, $.type_identifier),
 
@@ -117,7 +125,7 @@ module.exports = grammar({
 
     label: $ => seq("'", $.identifier),
 
-    nil_type: _ => "nil",
+    nil_type: $ => "nil",
 
     tuple_type: $ => choice(
       seq(
@@ -131,23 +139,12 @@ module.exports = grammar({
     ),
 
     list_type: $ => choice(
-      seq(
-        "[",
-        $._type,
-        "]",
-      ),
+      seq("[", $._type, "]"),
       "list",
     ),
 
     dict_type: $ => choice(
-      seq(
-        "dict",
-        "[",
-        $._type,
-        ",",
-        $._type,
-        "]",
-      ),
+      seq("dict", "[", $._type, ",", $._type, "]"),
       "dict",
     ),
 
@@ -161,14 +158,12 @@ module.exports = grammar({
           "(", listElements($._type), ")"
         ),
       ),
-      optional(
-        seq("->", $._type),
-      ),
+      optional(seq("->", $._type)),
     ),
 
     parenthesized_type: $ => seq("(", $._type, ")"),
 
-    _stmt_separator: _ => /[ \t\r]*([;\n][ \t]*)+/,
+    _stmt_separator: $ => /[ \t\r]*([;\n][ \t]*)+/,
 
     _type: $ => choice(
       $.tuple_type,
@@ -221,12 +216,7 @@ module.exports = grammar({
       prec(-1, "return"),
     ),
 
-    declare_stmt: $ => seq(
-      "let",
-      $.declare_pattern,
-      "=",
-      $._expr,
-    ),
+    declare_stmt: $ => seq("let", $.declare_pattern, "=", $._expr),
 
     declare_guard: $ => "some",
 
@@ -262,12 +252,15 @@ module.exports = grammar({
       $._literal,
       prec.left($.identifier),
       $.tuple_expression,
-      $.parenthesized_expression,
       // do while
-      // while
       // loop
       // for
       $.anonymous_fn,
+      $.parenthesized_expression,
+      $.do_while_expr,
+      $.while_expr,
+      $.loop_expr,
+      $.for_expr,
       // list
       //   | "(" list-elements(expr) [ ".." expr ] ")"
       //   | "[" list-elements(expr) [ ".." expr ] "]"
@@ -279,7 +272,39 @@ module.exports = grammar({
       //   | expr [ "?" ] ":" "[" expr "]"
       //   | expr [ "?" ] ":" identifier [ expr ] { "'" identifier expr }
       //   | expr infix-op expr
+    ),
 
+    // do-while-expr ::=
+    //   [ "'" identifier ":" ]
+    //   "do"
+    //   "{" block-contents "}"
+    //   [ "while" expr ]
+
+    do_while_expr: $ => seq(
+      optional(seq($.label, ":")),
+      "do",
+      "{", blockContents($), "}",
+      optional(seq("while", maybeParenthesized($._expr))),
+    ),
+
+    while_expr: $ => seq(
+      optional(seq($.label, ":")),
+      "while",
+      maybeParenthesized(seq(optional(seq("let", $.declare_pattern, "=")), $._expr)),
+      "{", blockContents($), "}",
+    ),
+
+    loop_expr: $ => seq(
+      optional(seq($.label, ":")),
+      "loop",
+      "{", blockContents($), "}",
+    ),
+
+    for_expr: $ => seq(
+      optional(seq($.label, ":")),
+      "for",
+      maybeParenthesized(seq("let", $.declare_pattern, "in", $._expr)),
+      "{", blockContents($), "}",
     ),
 
     unary_expression: $ => prec(PREC.unary, seq(
@@ -325,7 +350,7 @@ module.exports = grammar({
     parenthesized_expression: $ => seq("(", $._expr, ")"),
 
     _literal: $ => choice(
-      // str
+      $.str_literal,
       // raw str
       // dict
       // list
@@ -337,15 +362,38 @@ module.exports = grammar({
       $.integer_literal,
     ),
 
-    nil_literal: _ => "nil",
+    nil_literal: $ => "nil",
 
-    boolean_literal: _ => choice("true", "false"),
+    boolean_literal: $ => choice("true", "false"),
 
-    integer_literal: _ => choice(
+    integer_literal: $ => choice(
       /[0-9][0-9_]*/,
       /0x[0-9a-fA-F_]+/,
       /0b[01_]+/,
       /0o[0-7_]+/,
+    ),
+
+    str_literal: $ => seq(
+      '"',
+      repeat(choice(
+        $.escape_sequence,
+        // $.string_content,
+        $.string_character,
+      )),
+      token.immediate('"'),
+    ),
+
+    string_character: $ => token.immediate(/[^"\\]+/),
+
+    escape_sequence: $ => token.immediate(
+      seq("\\",
+        choice(
+          /[^xu]/,
+          /u[0-9a-fA-F]{4}/,
+          /u\{[0-9a-fA-F]+\}/,
+          /x[0-9a-fA-F]{2}/,
+        ),
+      )
     ),
   },
 });
@@ -362,7 +410,9 @@ function listElements(rule, sep = ",") {
   return optional(seq(sepBy1(sep, rule), optional(sep)));
 }
 
-// argument ::= [ identifier "=" ] expr
+function maybeParenthesized(rule) {
+  return choice(seq("(", rule, ")"), rule);
+}
 
 // postfix-op ::= "!"
 
@@ -373,28 +423,3 @@ function listElements(rule, sep = ",") {
 // str-literal ::= "\"" { text-content | str-interpolation } "\""
 
 // str-interpolation ::= "{" expr "}"
-
-// text-content ::= ? textual content without " (unless escaped) ?
-
-// do-while-expr ::=
-//   [ "'" identifier ":" ]
-//   "do"
-//   "{" block-contents "}"
-//   [ "while" expr ]
-
-// while-expr ::=
-//   [ "'" identifier ":" ]
-//   "while" maybe-parenthesized([ "let" declare-pattern "=" ] expr)
-//   "{" block-contents "}"
-
-// loop-expr ::=
-//   [ "'" identifier ":" ]
-//   "loop"
-//   "{" block-contents "}"
-
-// for-expr ::=
-//   [ "'" identifier ":" ]
-//   "for" maybe-parenthesized("let" declare-pattern "in" expr)
-//   "{" block-contents "}"
-
-// maybe-parenthesized(t) ::= t | "(" t ")"
