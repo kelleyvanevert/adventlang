@@ -9,7 +9,7 @@
 
 const PREC = {
   call: 15,
-  field: 14,
+  member: 14,
   try: 13,
   unary: 12,
   cast: 11,
@@ -47,9 +47,10 @@ module.exports = grammar({
 
   word: $ => $.identifier,
 
-  externals: $ => [
-    $.string_content, // stolen from the Rust tree sitter code
-  ],
+  // RUST grammar stuff
+  // externals: $ => [
+  //   $.string_content, // stolen from the Rust tree sitter code
+  // ],
 
   supertypes: $ => [
     $._expr,
@@ -84,6 +85,8 @@ module.exports = grammar({
     // I don't actually understand how these conflict could occur
     [$.while_expr, $.parenthesized_expression],
     [$.do_while_expr, $.parenthesized_expression],
+
+    [$.assign_pattern, $.list_expr],
 
     // RUST grammar stuff
   //   // Local ambiguity due to anonymous types:
@@ -183,11 +186,11 @@ module.exports = grammar({
       $.break_stmt,
       $.return_stmt,
       $.declare_stmt,
-      $.assign_stmt,
       $.expr_stmt,
+      $.assign_stmt,
     ),
 
-    expr_stmt: $ => $._expr,
+    expr_stmt: $ => prec(1, $._expr),
 
     named_fn_item: $ => seq(
       "fn",
@@ -234,51 +237,69 @@ module.exports = grammar({
       $._expr,
     ),
 
-    assign_pattern: $ => choice(
+    assign_pattern: $ => prec.left(PREC.assign, choice(
       $.assign_location,
       seq("[", listElements($.assign_pattern), optional(seq("..", $.assign_pattern)), "]"),
       seq("(", listElements($.assign_pattern), optional(seq("..", $.assign_pattern)), ")"),
-    ),
+    )),
 
-    assign_location: $ => choice(
+    assign_location: $ => prec.dynamic(-1, choice(
       $.identifier,
-      seq($._expr, "[", $._expr, "]"),
-      seq($._expr, token.immediate("."), $.identifier),
-    ),
+      $.member_assign_location,
+      $.index_assign_location,
+    )),
+
+    member_assign_location: $ => prec.left(PREC.member, seq($.assign_location, ".", $._field_identifier)),
+
+    index_assign_location: $ => prec.left(PREC.member, seq($.assign_location, "[", $._expr, "]")),
 
     _expr: $ => choice(
       $.unary_expression,
       $.binary_expression,
       $._literal,
       prec.left($.identifier),
-      $.tuple_expression,
-      // do while
-      // loop
-      // for
+      $.list_expr,
+      $.tuple_expr,
       $.anonymous_fn,
       $.parenthesized_expression,
       $.do_while_expr,
       $.while_expr,
       $.loop_expr,
       $.for_expr,
+
+      $.member_expr,
+      $.index_expr,
+
+      $.postfix_index_expr,
+      $.postfix_application,
       // list
-      //   | "(" list-elements(expr) [ ".." expr ] ")"
-      //   | "[" list-elements(expr) [ ".." expr ] "]"
-      //   | expr [ "?" ] "[" expr "]"
-      //   | expr [ "?" ] "." identifier
       //   | expr "(" list-elements(argument) ")" [ anonymous-fn ]
       //   | expr anonymous-fn
-      //   | expr postfix-op
-      //   | expr [ "?" ] ":" "[" expr "]"
       //   | expr [ "?" ] ":" identifier [ expr ] { "'" identifier expr }
-      //   | expr infix-op expr
     ),
 
-    // do-while-expr ::=
-    //   [ "'" identifier ":" ]
-    //   "do"
-    //   "{" block-contents "}"
-    //   [ "while" expr ]
+    member_expr: $ => prec.left(PREC.member, seq($._expr, optional("?"), ".", $._field_identifier)),
+
+    index_expr: $ => prec.left(PREC.member, seq($._expr, optional("?"), "[", $._expr, "]")),
+
+    postfix_index_expr: $ => prec.left(PREC.member, seq($._expr, optional("?"), ":", "[", $._expr, "]")),
+
+    postfix_application: $ => prec.left(PREC.member, seq(field("left", $._expr), optional("?"), ":", field("fn", $._field_identifier), optional(field("right", $._expr)))),
+
+    list_expr: $ => seq(
+      "[",
+      listElements($._expr),
+      optional(seq("..", $._expr)),
+      "]",
+    ),
+
+    tuple_expr: $ => seq(
+      "(",
+      seq($._expr, ","),
+      repeat(seq($._expr, ",")),
+      optional($._expr),
+      ")",
+    ),
 
     do_while_expr: $ => seq(
       optional(seq($.label, ":")),
@@ -334,18 +355,10 @@ module.exports = grammar({
       ))));
     },
 
-    anonymous_fn: $ => seq(
+    anonymous_fn: $ => prec(PREC.closure, seq(
       "|", listElements($.declarable), "|",
       "{", blockContents($), "}",
-    ),
-
-    tuple_expression: $ => seq(
-      "(",
-      seq($._expr, ","),
-      repeat(seq($._expr, ",")),
-      optional($._expr),
-      ")",
-    ),
+    )),
 
     parenthesized_expression: $ => seq("(", $._expr, ")"),
 
@@ -379,11 +392,12 @@ module.exports = grammar({
         $.escape_sequence,
         // $.string_content,
         $.string_character,
+        $.string_interpolation,
       )),
       token.immediate('"'),
     ),
 
-    string_character: $ => token.immediate(/[^"\\]+/),
+    string_character: $ => token.immediate(/[^"\\{]+/),
 
     escape_sequence: $ => token.immediate(
       seq("\\",
@@ -395,6 +409,8 @@ module.exports = grammar({
         ),
       )
     ),
+
+    string_interpolation: $ => seq("{", $._expr, "}"),
   },
 });
 
