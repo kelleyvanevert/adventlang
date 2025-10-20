@@ -80,7 +80,7 @@ module.exports = grammar({
     // the parser needs to disambiguate dynamically between assignment statements and expression statements
     // (as soon as it runs into an "=" it's an assignment, or else it runs into a stmt separator
     //   like a newline or something else, and in that case it's an expression statement)
-    [$.assign_location, $._expr],
+    [$.lookup, $._expr],
 
     // I don't actually understand how these conflict could occur
     [$.while_expr, $.parenthesized_expression],
@@ -103,19 +103,22 @@ module.exports = grammar({
 
   rules: {
     source_file: ($) => seq(
+      optional($._stmt_separator),
       sepBy($._stmt_separator, $._stmt),
-      optional($._stmt_separator)
+      optional($._stmt_separator),
     ),
 
     line_comment: $ => seq(
       "//",
       token.immediate(prec(1, /.*/)),
+      /\s*/, // (necessary because of the way I separate statements..)
     ),
 
     block_comment: $ => seq(
       "/*",
       optional($.comment_text),
       "*/",
+      /\s*/, // (necessary because of the way I separate statements..)
     ),
 
     comment_text: $ => repeat1(/.|\n|\r/),
@@ -166,7 +169,7 @@ module.exports = grammar({
 
     parenthesized_type: $ => seq("(", $._type, ")"),
 
-    _stmt_separator: $ => /[ \t\r]*([;\n][ \t]*)+/,
+    _stmt_separator: $ => prec(-1, /[ \t\r]*([;\n][ \t]*)+/),
 
     _type: $ => choice(
       $.tuple_type,
@@ -190,7 +193,7 @@ module.exports = grammar({
       $.assign_stmt,
     ),
 
-    expr_stmt: $ => prec(1, $._expr),
+    expr_stmt: $ => $._expr,
 
     named_fn_item: $ => seq(
       "fn",
@@ -238,20 +241,20 @@ module.exports = grammar({
     ),
 
     assign_pattern: $ => prec.left(PREC.assign, choice(
-      $.assign_location,
+      $.lookup,
       seq("[", listElements($.assign_pattern), optional(seq("..", $.assign_pattern)), "]"),
       seq("(", listElements($.assign_pattern), optional(seq("..", $.assign_pattern)), ")"),
     )),
 
-    assign_location: $ => prec.dynamic(-1, choice(
+    lookup: $ => prec.dynamic(-1, choice(
       $.identifier,
-      $.member_assign_location,
-      $.index_assign_location,
+      $.member_lookup,
+      $.index_lookup,
     )),
 
-    member_assign_location: $ => prec.left(PREC.member, seq($.assign_location, ".", $._field_identifier)),
+    member_lookup: $ => prec.left(PREC.member, seq($.lookup, ".", $._field_identifier)),
 
-    index_assign_location: $ => prec.left(PREC.member, seq($.assign_location, "[", $._expr, "]")),
+    index_lookup: $ => prec.left(PREC.member, seq($.lookup, "[", $._expr, "]")),
 
     _expr: $ => choice(
       $.unary_expression,
@@ -272,10 +275,12 @@ module.exports = grammar({
 
       $.postfix_index_expr,
       $.postfix_application,
+
+      $.block_expr,
+
+      $.application,
       // list
       //   | expr "(" list-elements(argument) ")" [ anonymous-fn ]
-      //   | expr anonymous-fn
-      //   | expr [ "?" ] ":" identifier [ expr ] { "'" identifier expr }
     ),
 
     member_expr: $ => prec.left(PREC.member, seq($._expr, optional("?"), ".", $._field_identifier)),
@@ -284,7 +289,21 @@ module.exports = grammar({
 
     postfix_index_expr: $ => prec.left(PREC.member, seq($._expr, optional("?"), ":", "[", $._expr, "]")),
 
-    postfix_application: $ => prec.left(PREC.member, seq(field("left", $._expr), optional("?"), ":", field("fn", $._field_identifier), optional(field("right", $._expr)))),
+    postfix_application: $ => prec.left(PREC.member, seq(
+      field("left", $._expr),
+      optional("?"),
+      ":",
+      field("fn", $._field_identifier),
+      optional(field("right", $._expr)),
+      repeat(seq("'", $.identifier, $._expr)),
+    )),
+
+    application: $ => seq(
+      $.lookup, // instead of generalized `expr`, because I'm gonna have to statically type it anyway..
+      "(",
+      listElements(seq(optional(seq($.identifier, "=")), $._expr)),
+      ")",
+    ),
 
     list_expr: $ => seq(
       "[",
@@ -304,7 +323,7 @@ module.exports = grammar({
     do_while_expr: $ => seq(
       optional(seq($.label, ":")),
       "do",
-      "{", blockContents($), "}",
+      $.block_expr,
       optional(seq("while", maybeParenthesized($._expr))),
     ),
 
@@ -312,21 +331,23 @@ module.exports = grammar({
       optional(seq($.label, ":")),
       "while",
       maybeParenthesized(seq(optional(seq("let", $.declare_pattern, "=")), $._expr)),
-      "{", blockContents($), "}",
+      $.block_expr,
     ),
 
     loop_expr: $ => seq(
       optional(seq($.label, ":")),
       "loop",
-      "{", blockContents($), "}",
+      $.block_expr,
     ),
 
     for_expr: $ => seq(
       optional(seq($.label, ":")),
       "for",
       maybeParenthesized(seq("let", $.declare_pattern, "in", $._expr)),
-      "{", blockContents($), "}",
+      $.block_expr,
     ),
+
+    block_expr: $ => seq("{", blockContents($), "}"),
 
     unary_expression: $ => prec(PREC.unary, seq(
       choice("-", "*", "!"),
@@ -356,8 +377,11 @@ module.exports = grammar({
     },
 
     anonymous_fn: $ => prec(PREC.closure, seq(
-      "|", listElements($.declarable), "|",
-      "{", blockContents($), "}",
+      choice(
+        "||",
+        seq("|", listElements($.declarable), "|"),
+      ),
+      $.block_expr,
     )),
 
     parenthesized_expression: $ => seq("(", $._expr, ")"),
@@ -366,10 +390,9 @@ module.exports = grammar({
       $.str_literal,
       // raw str
       // dict
-      // list
-      // tuple
       // float
-      // regex
+      $.regex_literal,
+      $.float_literal,
       $.nil_literal,
       $.boolean_literal,
       $.integer_literal,
@@ -385,6 +408,18 @@ module.exports = grammar({
       /0b[01_]+/,
       /0o[0-7_]+/,
     ),
+
+    float_literal: $ => token(choice(
+      // Standard decimal floats
+      /[0-9]+\.[0-9]+([eE][+-]?[0-9]+)?/,     // 123.456, 123.456e10
+      /[0-9]+[eE][+-]?[0-9]+/,                // 123e10, 123E-10
+      /\.[0-9]+([eE][+-]?[0-9]+)?/,           // .456, .456e10
+
+      // With underscores for readability (like in Rust/Python)
+      /[0-9][0-9_]*\.[0-9][0-9_]*([eE][+-]?[0-9_]+)?/,  // 1_000.456_789
+      /[0-9][0-9_]*[eE][+-]?[0-9_]+/,                   // 1_000e10
+      /\.[0-9][0-9_]*([eE][+-]?[0-9_]+)?/,              // .456_789
+    )),
 
     str_literal: $ => seq(
       '"',
@@ -411,6 +446,22 @@ module.exports = grammar({
     ),
 
     string_interpolation: $ => seq("{", $._expr, "}"),
+
+    regex_literal: $ => seq(
+      "/",
+      $.regex_pattern,
+      token.immediate("/"),
+      optional($.regex_flags)
+    ),
+
+    regex_pattern: $ => repeat1(choice(
+      $.regex_char,
+      $.regex_escape
+    )),
+
+    regex_char: $ => token.immediate(/[^/\\\n]+/),  // Any char except /, \, or newline
+    regex_escape: $ => token.immediate(/\\./),  // Backslash followed by any character
+    regex_flags: $ => token.immediate(/[a-zA-Z]+/),  // Common flags like 'g', 'i', 'm', etc.
   },
 });
 

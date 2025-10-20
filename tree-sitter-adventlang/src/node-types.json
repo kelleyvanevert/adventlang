@@ -12,7 +12,15 @@
         "named": true
       },
       {
+        "type": "application",
+        "named": true
+      },
+      {
         "type": "binary_expression",
+        "named": true
+      },
+      {
+        "type": "block_expr",
         "named": true
       },
       {
@@ -78,11 +86,19 @@
         "named": true
       },
       {
+        "type": "float_literal",
+        "named": true
+      },
+      {
         "type": "integer_literal",
         "named": true
       },
       {
         "type": "nil_literal",
+        "named": true
+      },
+      {
+        "type": "regex_literal",
         "named": true
       },
       {
@@ -173,10 +189,10 @@
     "fields": {},
     "children": {
       "multiple": true,
-      "required": false,
+      "required": true,
       "types": [
         {
-          "type": "_stmt",
+          "type": "block_expr",
           "named": true
         },
         {
@@ -187,23 +203,19 @@
     }
   },
   {
-    "type": "assign_location",
+    "type": "application",
     "named": true,
     "fields": {},
     "children": {
-      "multiple": false,
+      "multiple": true,
       "required": true,
       "types": [
         {
-          "type": "identifier",
+          "type": "_expr",
           "named": true
         },
         {
-          "type": "index_assign_location",
-          "named": true
-        },
-        {
-          "type": "member_assign_location",
+          "type": "lookup",
           "named": true
         }
       ]
@@ -218,11 +230,11 @@
       "required": false,
       "types": [
         {
-          "type": "assign_location",
+          "type": "assign_pattern",
           "named": true
         },
         {
-          "type": "assign_pattern",
+          "type": "lookup",
           "named": true
         }
       ]
@@ -376,6 +388,21 @@
     }
   },
   {
+    "type": "block_expr",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "_stmt",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "boolean_literal",
     "named": true,
     "fields": {}
@@ -505,14 +532,10 @@
     "fields": {},
     "children": {
       "multiple": true,
-      "required": false,
+      "required": true,
       "types": [
         {
           "type": "_expr",
-          "named": true
-        },
-        {
-          "type": "_stmt",
           "named": true
         },
         {
@@ -565,34 +588,11 @@
           "named": true
         },
         {
-          "type": "_stmt",
-          "named": true
-        },
-        {
           "type": "declare_pattern",
           "named": true
         },
         {
           "type": "label",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
-    "type": "index_assign_location",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": true,
-      "required": true,
-      "types": [
-        {
-          "type": "_expr",
-          "named": true
-        },
-        {
-          "type": "assign_location",
           "named": true
         }
       ]
@@ -608,6 +608,25 @@
       "types": [
         {
           "type": "_expr",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "index_lookup",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "_expr",
+          "named": true
+        },
+        {
+          "type": "lookup",
           "named": true
         }
       ]
@@ -670,26 +689,30 @@
     }
   },
   {
-    "type": "loop_expr",
+    "type": "lookup",
     "named": true,
     "fields": {},
     "children": {
-      "multiple": true,
-      "required": false,
+      "multiple": false,
+      "required": true,
       "types": [
         {
-          "type": "_stmt",
+          "type": "identifier",
           "named": true
         },
         {
-          "type": "label",
+          "type": "index_lookup",
+          "named": true
+        },
+        {
+          "type": "member_lookup",
           "named": true
         }
       ]
     }
   },
   {
-    "type": "member_assign_location",
+    "type": "loop_expr",
     "named": true,
     "fields": {},
     "children": {
@@ -697,11 +720,11 @@
       "required": true,
       "types": [
         {
-          "type": "assign_location",
+          "type": "block_expr",
           "named": true
         },
         {
-          "type": "field_identifier",
+          "type": "label",
           "named": true
         }
       ]
@@ -721,6 +744,25 @@
         },
         {
           "type": "field_identifier",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "member_lookup",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "field_identifier",
+          "named": true
+        },
+        {
+          "type": "lookup",
           "named": true
         }
       ]
@@ -873,6 +915,16 @@
           }
         ]
       }
+    },
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "_expr",
+          "named": true
+        }
+      ]
     }
   },
   {
@@ -885,6 +937,44 @@
       "types": [
         {
           "type": "_expr",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "regex_literal",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "regex_flags",
+          "named": true
+        },
+        {
+          "type": "regex_pattern",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "regex_pattern",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "regex_char",
+          "named": true
+        },
+        {
+          "type": "regex_escape",
           "named": true
         }
       ]
@@ -1014,10 +1104,6 @@
       "types": [
         {
           "type": "_expr",
-          "named": true
-        },
-        {
-          "type": "_stmt",
           "named": true
         },
         {
@@ -1204,6 +1290,10 @@
     "named": true
   },
   {
+    "type": "float_literal",
+    "named": true
+  },
+  {
     "type": "fn",
     "named": false
   },
@@ -1237,6 +1327,18 @@
   },
   {
     "type": "primitive_type",
+    "named": true
+  },
+  {
+    "type": "regex_char",
+    "named": true
+  },
+  {
+    "type": "regex_escape",
+    "named": true
+  },
+  {
+    "type": "regex_flags",
     "named": true
   },
   {
