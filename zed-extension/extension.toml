@@ -1,0 +1,12 @@
+id = "adventlang"
+name = "Adventlang"
+version = "0.0.1"
+schema_version = 1
+authors = ["Kelley van Evert <hello@klve.nl>"]
+description = "Adventlang language support for Zed"
+repository = "https://github.com/kelleyvanevert/adventlang"
+
+[grammars.adventlang]
+repository = "https://github.com/kelleyvanevert/adventlang"
+rev = "8b8918be48230ed56ff6ff2817ed9dc9c1bbd7d1"
+path = "tree-sitter-adventlang"

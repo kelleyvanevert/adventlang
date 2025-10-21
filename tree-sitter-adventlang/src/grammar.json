@@ -1573,7 +1573,7 @@
       "members": [
         {
           "type": "SYMBOL",
-          "name": "application"
+          "name": "regular_call_expr"
         },
         {
           "type": "SYMBOL",
@@ -1581,7 +1581,7 @@
         },
         {
           "type": "SYMBOL",
-          "name": "postfix_application"
+          "name": "postfix_call_expr"
         },
         {
           "type": "SYMBOL",
@@ -1760,7 +1760,7 @@
         ]
       }
     },
-    "postfix_application": {
+    "postfix_call_expr": {
       "type": "PREC_LEFT",
       "value": 15,
       "content": {
@@ -1792,7 +1792,7 @@
           },
           {
             "type": "FIELD",
-            "name": "fn",
+            "name": "function",
             "content": {
               "type": "SYMBOL",
               "name": "_field_identifier"
@@ -1837,12 +1837,16 @@
         ]
       }
     },
-    "application": {
+    "regular_call_expr": {
       "type": "SEQ",
       "members": [
         {
-          "type": "SYMBOL",
-          "name": "lookup"
+          "type": "FIELD",
+          "name": "function",
+          "content": {
+            "type": "SYMBOL",
+            "name": "lookup"
+          }
         },
         {
           "type": "STRING",

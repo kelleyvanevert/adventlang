@@ -12,10 +12,6 @@
         "named": true
       },
       {
-        "type": "application",
-        "named": true
-      },
-      {
         "type": "binary_expression",
         "named": true
       },
@@ -60,11 +56,15 @@
         "named": true
       },
       {
-        "type": "postfix_application",
+        "type": "postfix_call_expr",
         "named": true
       },
       {
         "type": "postfix_index_expr",
+        "named": true
+      },
+      {
+        "type": "regular_call_expr",
         "named": true
       },
       {
@@ -201,25 +201,6 @@
         },
         {
           "type": "declarable",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
-    "type": "application",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": true,
-      "required": true,
-      "types": [
-        {
-          "type": "_expr",
-          "named": true
-        },
-        {
-          "type": "lookup",
           "named": true
         }
       ]
@@ -955,10 +936,10 @@
     }
   },
   {
-    "type": "postfix_application",
+    "type": "postfix_call_expr",
     "named": true,
     "fields": {
-      "fn": {
+      "function": {
         "multiple": false,
         "required": true,
         "types": [
@@ -1007,6 +988,32 @@
     "children": {
       "multiple": true,
       "required": true,
+      "types": [
+        {
+          "type": "_expr",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "regular_call_expr",
+    "named": true,
+    "fields": {
+      "function": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "lookup",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": true,
+      "required": false,
       "types": [
         {
           "type": "_expr",

@@ -1,0 +1,10 @@
+name = "Adventlang"
+grammar = "adventlang"
+path_suffixes = ["al"]
+line_comments = ["// "]
+tab_size = 4
+hard_tabs = false
+
+[grammars.adventlang]
+repository = "https://github.com/kelleyvanevert/adventlang"
+rev = "8b8918be48230ed56ff6ff2817ed9dc9c1bbd7d1"

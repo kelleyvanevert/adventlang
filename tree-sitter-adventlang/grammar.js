@@ -232,10 +232,10 @@ module.exports = grammar({
     index_lookup: $ => prec.left(PREC.member, seq($.lookup, "[", $._expr, "]")),
 
     _expr: $ => choice(
-      $.application,
+      $.regular_call_expr,
 
       $.postfix_index_expr,
-      $.postfix_application,
+      $.postfix_call_expr,
 
       $._literal,
       $.list_expr,
@@ -264,20 +264,20 @@ module.exports = grammar({
 
     postfix_index_expr: $ => prec.left(PREC.member, seq($._expr, optional("?"), ":", "[", $._expr, "]")),
 
-    postfix_application: $ => prec.left(PREC.member, seq(
+    postfix_call_expr: $ => prec.left(PREC.member, seq(
       field("left", $._expr),
 
       // ugly, but it works...
       optional("?"),
       ":",
 
-      field("fn", $._field_identifier),
+      field("function", $._field_identifier),
       optional(field("right", $._expr)),
       repeat(seq("'", $.identifier, $._expr)),
     )),
 
-    application: $ => seq(
-      $.lookup, // instead of generalized `expr`, because I'm gonna have to statically type it anyway..
+    regular_call_expr: $ => seq(
+      field("function", $.lookup), // instead of generalized `expr`, because I'm gonna have to statically type it anyway..
       "(",
       listElements(seq(optional(seq($.identifier, "=")), $._expr)),
       ")",
