@@ -358,6 +358,10 @@
             "named": false
           },
           {
+            "type": "^",
+            "named": false
+          },
+          {
             "type": "||",
             "named": false
           }
@@ -1012,44 +1016,6 @@
     }
   },
   {
-    "type": "regex_literal",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": true,
-      "required": true,
-      "types": [
-        {
-          "type": "regex_flags",
-          "named": true
-        },
-        {
-          "type": "regex_pattern",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
-    "type": "regex_pattern",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": true,
-      "required": true,
-      "types": [
-        {
-          "type": "regex_char",
-          "named": true
-        },
-        {
-          "type": "regex_escape",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
     "type": "return_stmt",
     "named": true,
     "fields": {},
@@ -1327,6 +1293,10 @@
     "named": false
   },
   {
+    "type": "^",
+    "named": false
+  },
+  {
     "type": "assign_op",
     "named": true
   },
@@ -1411,15 +1381,7 @@
     "named": true
   },
   {
-    "type": "regex_char",
-    "named": true
-  },
-  {
-    "type": "regex_escape",
-    "named": true
-  },
-  {
-    "type": "regex_flags",
+    "type": "regex_literal",
     "named": true
   },
   {

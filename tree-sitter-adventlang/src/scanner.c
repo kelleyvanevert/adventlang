@@ -7,61 +7,47 @@
 enum TokenType {
   WS_PRECEDING_COLON,
   WS_PRECEDING_QUESTION_MARK,
+  WS_PRECEDING_BINOP,
 };
 
-static const char *OPERATORS[] = {
-    ":",  "*",  "/",  "%", "+", "-", "<<", ">>", "!=",
-    "==", "<=", ">=", "<", ">", "^", "&&", "||", "??",
-};
+static const char SINGLE_CHAR_OPS[] = {'^', '/', '+', '*', '-', '>',
+                                       '<', '=', '?', ':', '%'};
 
-static bool is_operator_start(int32_t c) {
-  // For performance, prefilter valid starting characters
-  switch (c) {
-  case ':':
-  case '*':
-  case '/':
-  case '%':
-  case '+':
-  case '-':
-  case '<':
-  case '>':
-  case '!':
-  case '=':
-  case '^':
-  case '&':
-  case '|':
-  case '?':
-    return true;
-  default:
-    return false;
+static const char *DOUBLE_CHAR_OPS[] = {
+    // logical
+    "&&", "||", "??",
+
+    // bitwise
+    ".|", ".&", ".^",
+
+    // comparison
+    "==", "!=", "<=", ">=", "<<", ">>"};
+
+static bool is_single_char_op(int32_t c) {
+  for (size_t i = 0; i < sizeof(SINGLE_CHAR_OPS); i++) {
+    if (SINGLE_CHAR_OPS[i] == c) {
+      return true;
+    }
   }
+
+  return false;
 }
 
-static bool match_operator(TSLexer *lexer) {
-  // Try to match any operator string at current position
-  for (unsigned i = 0; i < sizeof(OPERATORS) / sizeof(OPERATORS[0]); i++) {
-    const char *op = OPERATORS[i];
-    unsigned j = 0;
-    int32_t lookahead = lexer->lookahead;
-    bool match = true;
-
-    // Peek ahead through the operator characters
-    while (op[j] != '\0') {
-      if (lookahead != (int32_t)op[j]) {
-        match = false;
-        break;
-      }
-      lexer->advance(lexer, false); // peek, don’t consume
-      lookahead = lexer->lookahead;
-      j++;
-    }
-
-    // If we matched, return true
-    if (match)
+static bool is_first_char_of_double_char_op(int32_t c) {
+  for (size_t i = 0; i < 11; i++) {
+    if (DOUBLE_CHAR_OPS[i][0] == c) {
       return true;
+    }
+  }
 
-    // Reset lexer state before trying next operator
-    // (Tree-sitter doesn’t support true rewind, so we can’t consume here)
+  return false;
+}
+
+static bool is_double_char_op(int32_t a, int32_t b) {
+  for (size_t i = 0; i < 11; i++) {
+    if (DOUBLE_CHAR_OPS[i][0] == a && DOUBLE_CHAR_OPS[i][1] == b) {
+      return true;
+    }
   }
 
   return false;
@@ -91,8 +77,6 @@ static inline bool process_ws_preceding_colon(TSLexer *lexer) {
 
     advance(lexer);
   }
-
-  return false;
 }
 
 static inline bool process_ws_preceding_question_mark(TSLexer *lexer) {
@@ -115,14 +99,57 @@ static inline bool process_ws_preceding_question_mark(TSLexer *lexer) {
 
     advance(lexer);
   }
+}
 
-  return false;
+static inline bool process_ws_preceding_binop(TSLexer *lexer) {
+  for (;;) {
+    if (is_single_char_op(lexer->lookahead)) {
+      lexer->result_symbol = WS_PRECEDING_BINOP;
+      lexer->mark_end(lexer);
+      return true;
+    }
+
+    if (is_first_char_of_double_char_op(lexer->lookahead)) {
+      int32_t a = lexer->lookahead;
+      lexer->mark_end(lexer);
+      advance(lexer);
+      if (lexer->eof(lexer)) {
+        return false;
+      }
+
+      int32_t b = lexer->lookahead;
+
+      if (is_double_char_op(a, b)) {
+        lexer->result_symbol = WS_PRECEDING_BINOP;
+        return true;
+      } else {
+        return false;
+      }
+    }
+
+    if (lexer->eof(lexer)) {
+      return false;
+    }
+
+    if (!iswspace(lexer->lookahead)) {
+      return false;
+    }
+
+    advance(lexer);
+  }
 }
 
 bool tree_sitter_adventlang_external_scanner_scan(void *payload, TSLexer *lexer,
                                                   const bool *valid_symbols) {
 
   bool done = false;
+
+  if (valid_symbols[WS_PRECEDING_BINOP]) {
+    done = process_ws_preceding_binop(lexer);
+    if (done) {
+      return true;
+    }
+  }
 
   if (valid_symbols[WS_PRECEDING_QUESTION_MARK]) {
     done = process_ws_preceding_question_mark(lexer);

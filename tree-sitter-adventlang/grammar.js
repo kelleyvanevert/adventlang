@@ -8,11 +8,12 @@
 // @ts-check
 
 const PREC = {
-  call: 15,
-  member: 14,
-  try: 13,
-  unary: 12,
-  cast: 11,
+  call: 16,
+  member: 15,
+  try: 14,
+  unary: 13,
+  cast: 12,
+  exponential: 11,
   multiplicative: 10,
   additive: 9,
   shift: 8,
@@ -43,15 +44,17 @@ module.exports = grammar({
     /\s/,
     $.line_comment,
     $.block_comment,
+    $._ws_preceding_binop,
+    $._ws_preceding_colon,
+    $._ws_preceding_question_mark,
   ],
 
   word: $ => $.identifier,
 
-  // RUST grammar stuff
   externals: $ => [
-  //   $.string_content, // stolen from the Rust tree sitter code
     $._ws_preceding_colon,
     $._ws_preceding_question_mark,
+    $._ws_preceding_binop,
   ],
 
   supertypes: $ => [
@@ -59,24 +62,7 @@ module.exports = grammar({
     $._type,
     $._stmt,
     $._literal,
-
-    // RUST grammar stuff
-    // $._literal_pattern,
-    // $._declaration_statement,
-    // $._pattern,
   ],
-
-  // RUST grammar stuff
-  // inline: $ => [
-  //   $._path,
-  //   $._type_identifier,
-  //   $._tokens,
-  //   $._field_identifier,
-  //   $._non_special_token,
-  //   $._declaration_statement,
-  //   $._reserved_identifier,
-  //   $._expr_ending_with_block,
-  // ],
 
   conflicts: $ => [
     // the parser needs to disambiguate dynamically between assignment statements and expression statements
@@ -90,18 +76,6 @@ module.exports = grammar({
     [$.do_while_expr, $.parenthesized_expression],
 
     [$.assign_pattern, $.list_expr],
-
-    // RUST grammar stuff
-  //   // Local ambiguity due to anonymous types:
-  //   // See https://internals.rust-lang.org/t/pre-rfc-deprecating-anonymous-parameters/3710
-  //   [$._type, $._pattern],
-  //   [$.scoped_identifier, $.scoped_type_identifier],
-  //   [$.parameters, $._pattern],
-  //   [$.parameters, $.tuple_struct_pattern],
-  //   [$.type_parameters, $.for_lifetimes],
-  //   [$.array_expression],
-  //   [$.visibility_modifier],
-  //   [$.visibility_modifier, $.scoped_identifier, $.scoped_type_identifier],
   ],
 
   rules: {
@@ -114,14 +88,12 @@ module.exports = grammar({
     line_comment: $ => seq(
       "//",
       token.immediate(prec(1, /.*/)),
-      /\s*/, // (necessary because of the way I separate statements..)
     ),
 
     block_comment: $ => seq(
       "/*",
       optional($.comment_text),
       "*/",
-      /\s*/, // (necessary because of the way I separate statements..)
     ),
 
     comment_text: $ => repeat1(/.|\n|\r/),
@@ -296,8 +268,7 @@ module.exports = grammar({
       field("left", $._expr),
 
       // ugly, but it works...
-      optional(seq($._ws_preceding_question_mark, "?")),
-      $._ws_preceding_colon,
+      optional("?"),
       ":",
 
       field("fn", $._field_identifier),
@@ -396,6 +367,7 @@ module.exports = grammar({
         [PREC.shift, choice("<<", ">>")],
         [PREC.additive, choice("+", "-")],
         [PREC.multiplicative, choice("*", "/", "%")],
+        [PREC.exponential, "^"],
       ];
 
       // @ts-ignore
@@ -478,21 +450,12 @@ module.exports = grammar({
 
     string_interpolation: $ => seq("{", $._expr, "}"),
 
-    regex_literal: $ => seq(
+    regex_literal: $ => token(seq(
       "/",
-      $.regex_pattern,
+      /[^/]+/,
       token.immediate("/"),
-      optional($.regex_flags)
-    ),
-
-    regex_pattern: $ => repeat1(choice(
-      $.regex_char,
-      $.regex_escape
+      optional(token.immediate(/[gim]+/)),
     )),
-
-    regex_char: $ => token.immediate(/[^/\\\n]+/),  // Any char except /, \, or newline
-    regex_escape: $ => token.immediate(/\\./),  // Backslash followed by any character
-    regex_flags: $ => token.immediate(/[a-zA-Z]+/),  // Common flags like 'g', 'i', 'm', etc.
   },
 });
 
@@ -511,5 +474,3 @@ function listElements(rule, sep = ",") {
 function maybeParenthesized(rule) {
   return choice(seq("(", rule, ")"), rule);
 }
-
-// raw-str-literal ::= "r\"" text-content "\""

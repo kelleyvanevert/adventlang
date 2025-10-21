@@ -82,10 +82,6 @@
               "value": ".*"
             }
           }
-        },
-        {
-          "type": "PATTERN",
-          "value": "\\s*"
         }
       ]
     },
@@ -111,10 +107,6 @@
         {
           "type": "STRING",
           "value": "*/"
-        },
-        {
-          "type": "PATTERN",
-          "value": "\\s*"
         }
       ]
     },
@@ -1532,7 +1524,7 @@
     },
     "member_lookup": {
       "type": "PREC_LEFT",
-      "value": 14,
+      "value": 15,
       "content": {
         "type": "SEQ",
         "members": [
@@ -1553,7 +1545,7 @@
     },
     "index_lookup": {
       "type": "PREC_LEFT",
-      "value": 14,
+      "value": 15,
       "content": {
         "type": "SEQ",
         "members": [
@@ -1659,7 +1651,7 @@
     },
     "member_expr": {
       "type": "PREC_LEFT",
-      "value": 14,
+      "value": 15,
       "content": {
         "type": "SEQ",
         "members": [
@@ -1692,7 +1684,7 @@
     },
     "index_expr": {
       "type": "PREC_LEFT",
-      "value": 14,
+      "value": 15,
       "content": {
         "type": "SEQ",
         "members": [
@@ -1729,7 +1721,7 @@
     },
     "postfix_index_expr": {
       "type": "PREC_LEFT",
-      "value": 14,
+      "value": 15,
       "content": {
         "type": "SEQ",
         "members": [
@@ -1770,7 +1762,7 @@
     },
     "postfix_application": {
       "type": "PREC_LEFT",
-      "value": 14,
+      "value": 15,
       "content": {
         "type": "SEQ",
         "members": [
@@ -1786,26 +1778,13 @@
             "type": "CHOICE",
             "members": [
               {
-                "type": "SEQ",
-                "members": [
-                  {
-                    "type": "SYMBOL",
-                    "name": "_ws_preceding_question_mark"
-                  },
-                  {
-                    "type": "STRING",
-                    "value": "?"
-                  }
-                ]
+                "type": "STRING",
+                "value": "?"
               },
               {
                 "type": "BLANK"
               }
             ]
-          },
-          {
-            "type": "SYMBOL",
-            "name": "_ws_preceding_colon"
           },
           {
             "type": "STRING",
@@ -2780,7 +2759,7 @@
     },
     "unary_expression": {
       "type": "PREC",
-      "value": 12,
+      "value": 13,
       "content": {
         "type": "SEQ",
         "members": [
@@ -3172,12 +3151,45 @@
               }
             ]
           }
+        },
+        {
+          "type": "PREC_LEFT",
+          "value": 11,
+          "content": {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "FIELD",
+                "name": "left",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "_expr"
+                }
+              },
+              {
+                "type": "FIELD",
+                "name": "operator",
+                "content": {
+                  "type": "STRING",
+                  "value": "^"
+                }
+              },
+              {
+                "type": "FIELD",
+                "name": "right",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "_expr"
+                }
+              }
+            ]
+          }
         }
       ]
     },
     "anonymous_fn": {
       "type": "PREC_LEFT",
-      "value": 15,
+      "value": 16,
       "content": {
         "type": "SEQ",
         "members": [
@@ -3470,72 +3482,41 @@
       ]
     },
     "regex_literal": {
-      "type": "SEQ",
-      "members": [
-        {
-          "type": "STRING",
-          "value": "/"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "regex_pattern"
-        },
-        {
-          "type": "IMMEDIATE_TOKEN",
-          "content": {
-            "type": "STRING",
-            "value": "/"
-          }
-        },
-        {
-          "type": "CHOICE",
-          "members": [
-            {
-              "type": "SYMBOL",
-              "name": "regex_flags"
-            },
-            {
-              "type": "BLANK"
-            }
-          ]
-        }
-      ]
-    },
-    "regex_pattern": {
-      "type": "REPEAT1",
+      "type": "TOKEN",
       "content": {
-        "type": "CHOICE",
+        "type": "SEQ",
         "members": [
           {
-            "type": "SYMBOL",
-            "name": "regex_char"
+            "type": "STRING",
+            "value": "/"
           },
           {
-            "type": "SYMBOL",
-            "name": "regex_escape"
+            "type": "PATTERN",
+            "value": "[^/]+"
+          },
+          {
+            "type": "IMMEDIATE_TOKEN",
+            "content": {
+              "type": "STRING",
+              "value": "/"
+            }
+          },
+          {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "IMMEDIATE_TOKEN",
+                "content": {
+                  "type": "PATTERN",
+                  "value": "[gim]+"
+                }
+              },
+              {
+                "type": "BLANK"
+              }
+            ]
           }
         ]
-      }
-    },
-    "regex_char": {
-      "type": "IMMEDIATE_TOKEN",
-      "content": {
-        "type": "PATTERN",
-        "value": "[^/\\\\\\n]+"
-      }
-    },
-    "regex_escape": {
-      "type": "IMMEDIATE_TOKEN",
-      "content": {
-        "type": "PATTERN",
-        "value": "\\\\."
-      }
-    },
-    "regex_flags": {
-      "type": "IMMEDIATE_TOKEN",
-      "content": {
-        "type": "PATTERN",
-        "value": "[a-zA-Z]+"
       }
     }
   },
@@ -3551,6 +3532,18 @@
     {
       "type": "SYMBOL",
       "name": "block_comment"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_ws_preceding_binop"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_ws_preceding_colon"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_ws_preceding_question_mark"
     }
   ],
   "conflicts": [
@@ -3584,6 +3577,10 @@
     {
       "type": "SYMBOL",
       "name": "_ws_preceding_question_mark"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_ws_preceding_binop"
     }
   ],
   "inline": [],
