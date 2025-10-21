@@ -17,7 +17,7 @@
 ; ; ; Function calls
 
 (regular_call_expr
-  function: (identifier) @function)
+  function: (lookup (identifier) @function))
 
 (postfix_call_expr
   function: (identifier) @function)
@@ -46,7 +46,7 @@
 ; "}" @punctuation.bracket
 
 ; "::" @punctuation.delimiter
-; ":" @punctuation.delimiter
+":" @punctuation.delimiter
 ; "." @punctuation.delimiter
 ; "," @punctuation.delimiter
 ; ";" @punctuation.delimiter

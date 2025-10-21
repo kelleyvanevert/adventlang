@@ -271,7 +271,7 @@ module.exports = grammar({
       optional("?"),
       ":",
 
-      field("function", $._field_identifier),
+      field("function", $.identifier),
       optional(field("right", $._expr)),
       repeat(seq("'", $.identifier, $._expr)),
     )),

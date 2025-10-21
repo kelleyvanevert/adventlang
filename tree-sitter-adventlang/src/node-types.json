@@ -944,7 +944,7 @@
         "required": true,
         "types": [
           {
-            "type": "field_identifier",
+            "type": "identifier",
             "named": true
           }
         ]
