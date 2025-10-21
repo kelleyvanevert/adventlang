@@ -19,37 +19,20 @@
           ]
         },
         {
-          "type": "CHOICE",
-          "members": [
-            {
-              "type": "SEQ",
-              "members": [
-                {
-                  "type": "SYMBOL",
-                  "name": "_stmt"
-                },
-                {
-                  "type": "REPEAT",
-                  "content": {
-                    "type": "SEQ",
-                    "members": [
-                      {
-                        "type": "SYMBOL",
-                        "name": "_stmt_separator"
-                      },
-                      {
-                        "type": "SYMBOL",
-                        "name": "_stmt"
-                      }
-                    ]
-                  }
-                }
-              ]
-            },
-            {
-              "type": "BLANK"
-            }
-          ]
+          "type": "REPEAT",
+          "content": {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "SYMBOL",
+                "name": "_stmt_separator"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "_stmt"
+              }
+            ]
+          }
         },
         {
           "type": "CHOICE",
@@ -156,8 +139,12 @@
           "value": "'"
         },
         {
-          "type": "SYMBOL",
-          "name": "identifier"
+          "type": "IMMEDIATE_TOKEN",
+          "content": {
+            "type": "PATTERN",
+            "value": "(r#)?[_\\p{XID_Start}][_\\p{XID_Continue}]*",
+            "flags": "u"
+          }
         }
       ]
     },
@@ -1592,12 +1579,8 @@
           "name": "_literal"
         },
         {
-          "type": "PREC_LEFT",
-          "value": 0,
-          "content": {
-            "type": "SYMBOL",
-            "name": "identifier"
-          }
+          "type": "SYMBOL",
+          "name": "identifier"
         },
         {
           "type": "SYMBOL",
@@ -1799,11 +1782,11 @@
             "value": ":"
           },
           {
-            "type": "FIELD",
-            "name": "fn",
+            "type": "IMMEDIATE_TOKEN",
             "content": {
-              "type": "SYMBOL",
-              "name": "_field_identifier"
+              "type": "PATTERN",
+              "value": "(r#)?[_\\p{XID_Start}][_\\p{XID_Continue}]*",
+              "flags": "u"
             }
           },
           {
@@ -1832,8 +1815,12 @@
                   "value": "'"
                 },
                 {
-                  "type": "SYMBOL",
-                  "name": "identifier"
+                  "type": "IMMEDIATE_TOKEN",
+                  "content": {
+                    "type": "PATTERN",
+                    "value": "(r#)?[_\\p{XID_Start}][_\\p{XID_Continue}]*",
+                    "flags": "u"
+                  }
                 },
                 {
                   "type": "SYMBOL",

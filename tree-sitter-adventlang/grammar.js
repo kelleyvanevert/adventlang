@@ -35,6 +35,8 @@ function blockContents($) {
   );
 }
 
+const ID_REGEX = /(r#)?[_\p{XID_Start}][_\p{XID_Continue}]*/u;
+
 // prettier-ignore
 module.exports = grammar({
   name: "adventlang",
@@ -104,7 +106,7 @@ module.exports = grammar({
   rules: {
     source_file: ($) => seq(
       optional($._stmt_separator),
-      sepBy($._stmt_separator, $._stmt),
+      repeat(seq($._stmt_separator, $._stmt)),
       optional($._stmt_separator),
     ),
 
@@ -129,7 +131,7 @@ module.exports = grammar({
 
     _field_identifier: $ => alias($.identifier, $.field_identifier),
 
-    label: $ => seq("'", $.identifier),
+    label: $ => seq("'", token.immediate(ID_REGEX)),
 
     nil_type: $ => "nil",
 
@@ -260,7 +262,7 @@ module.exports = grammar({
       $.unary_expression,
       $.binary_expression,
       $._literal,
-      prec.left($.identifier),
+      $.identifier,
       $.list_expr,
       $.tuple_expr,
       $.anonymous_fn,
@@ -293,9 +295,9 @@ module.exports = grammar({
       field("left", $._expr),
       optional("?"),
       ":",
-      field("fn", $._field_identifier),
+      token.immediate(ID_REGEX),
       optional(field("right", $._expr)),
-      repeat(seq("'", $.identifier, $._expr)),
+      repeat(seq("'", token.immediate(ID_REGEX), $._expr)),
     )),
 
     application: $ => seq(
