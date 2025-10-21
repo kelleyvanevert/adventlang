@@ -50,7 +50,7 @@ module.exports = grammar({
   // RUST grammar stuff
   externals: $ => [
   //   $.string_content, // stolen from the Rust tree sitter code
-    $.ws_then_colon,
+    $._ws_then_colon,
     $.ws_then_question_mark,
   ],
 
@@ -260,13 +260,17 @@ module.exports = grammar({
     index_lookup: $ => prec.left(PREC.member, seq($.lookup, "[", $._expr, "]")),
 
     _expr: $ => choice(
-      $.unary_expression,
-      $.binary_expression,
+      $.application,
+
+      $.postfix_index_expr,
+      $.postfix_application,
+
       $._literal,
-      prec.left($.identifier),
       $.list_expr,
       $.tuple_expr,
       $.anonymous_fn,
+      $.unary_expression,
+      $.binary_expression,
       $.parenthesized_expression,
       $.do_while_expr,
       $.while_expr,
@@ -277,12 +281,9 @@ module.exports = grammar({
       $.member_expr,
       $.index_expr,
 
-      $.postfix_index_expr,
-      $.postfix_application,
-
       $.block_expr,
 
-      $.application,
+      $.identifier,
     ),
 
     member_expr: $ => prec.left(PREC.member, seq($._expr, optional("?"), ".", $._field_identifier)),
@@ -296,7 +297,7 @@ module.exports = grammar({
 
       // ugly, but it works...
       optional($.ws_then_question_mark),
-      $.ws_then_colon,
+      $._ws_then_colon,
 
       field("fn", $._field_identifier),
       optional(field("right", $._expr)),
@@ -384,9 +385,12 @@ module.exports = grammar({
       const table = [
         [PREC.and, "&&"],
         [PREC.or, choice("||", "??")],
-        [PREC.bitand, "&"],
-        [PREC.bitor, "|"],
-        [PREC.bitxor, "^"],
+
+        // compromise syntax for now, because otherwise I can't get it to disambiguate well from anonymous functions sometimes
+        [PREC.bitand, ".&"],
+        [PREC.bitor, ".|"],
+        [PREC.bitxor, ".^"],
+
         [PREC.comparative, choice("==", "!=", "<", "<=", ">", ">=")],
         [PREC.shift, choice("<<", ">>")],
         [PREC.additive, choice("+", "-")],
@@ -507,12 +511,4 @@ function maybeParenthesized(rule) {
   return choice(seq("(", rule, ")"), rule);
 }
 
-// postfix-op ::= "!"
-
-// infix-op ::= "*" | "/" | "%" | "+" | "-" | "<<" | ">>" | "!=" | "==" | "<=" | ">=" | "<" | ">" | "^" | "&&" | "||" | "??"
-
 // raw-str-literal ::= "r\"" text-content "\""
-
-// str-literal ::= "\"" { text-content | str-interpolation } "\""
-
-// str-interpolation ::= "{" expr "}"

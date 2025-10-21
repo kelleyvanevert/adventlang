@@ -294,10 +294,6 @@
             "named": false
           },
           {
-            "type": "&",
-            "named": false
-          },
-          {
             "type": "&&",
             "named": false
           },
@@ -311,6 +307,18 @@
           },
           {
             "type": "-",
+            "named": false
+          },
+          {
+            "type": ".&",
+            "named": false
+          },
+          {
+            "type": ".^",
+            "named": false
+          },
+          {
+            "type": ".|",
             "named": false
           },
           {
@@ -347,14 +355,6 @@
           },
           {
             "type": "??",
-            "named": false
-          },
-          {
-            "type": "^",
-            "named": false
-          },
-          {
-            "type": "|",
             "named": false
           },
           {
@@ -987,14 +987,10 @@
     },
     "children": {
       "multiple": true,
-      "required": true,
+      "required": false,
       "types": [
         {
           "type": "_expr",
-          "named": true
-        },
-        {
-          "type": "ws_then_colon",
           "named": true
         },
         {
@@ -1211,10 +1207,6 @@
     "named": false
   },
   {
-    "type": "&",
-    "named": false
-  },
-  {
     "type": "&&",
     "named": false
   },
@@ -1259,7 +1251,19 @@
     "named": false
   },
   {
+    "type": ".&",
+    "named": false
+  },
+  {
     "type": "..",
+    "named": false
+  },
+  {
+    "type": ".^",
+    "named": false
+  },
+  {
+    "type": ".|",
     "named": false
   },
   {
@@ -1324,10 +1328,6 @@
   },
   {
     "type": "]",
-    "named": false
-  },
-  {
-    "type": "^",
     "named": false
   },
   {
@@ -1453,10 +1453,6 @@
   {
     "type": "with",
     "named": false
-  },
-  {
-    "type": "ws_then_colon",
-    "named": true
   },
   {
     "type": "ws_then_question_mark",

@@ -1581,23 +1581,19 @@
       "members": [
         {
           "type": "SYMBOL",
-          "name": "unary_expression"
+          "name": "application"
         },
         {
           "type": "SYMBOL",
-          "name": "binary_expression"
+          "name": "postfix_index_expr"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "postfix_application"
         },
         {
           "type": "SYMBOL",
           "name": "_literal"
-        },
-        {
-          "type": "PREC_LEFT",
-          "value": 0,
-          "content": {
-            "type": "SYMBOL",
-            "name": "identifier"
-          }
         },
         {
           "type": "SYMBOL",
@@ -1610,6 +1606,14 @@
         {
           "type": "SYMBOL",
           "name": "anonymous_fn"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "unary_expression"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "binary_expression"
         },
         {
           "type": "SYMBOL",
@@ -1645,19 +1649,11 @@
         },
         {
           "type": "SYMBOL",
-          "name": "postfix_index_expr"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "postfix_application"
-        },
-        {
-          "type": "SYMBOL",
           "name": "block_expr"
         },
         {
           "type": "SYMBOL",
-          "name": "application"
+          "name": "identifier"
         }
       ]
     },
@@ -1800,7 +1796,7 @@
           },
           {
             "type": "SYMBOL",
-            "name": "ws_then_colon"
+            "name": "_ws_then_colon"
           },
           {
             "type": "FIELD",
@@ -2896,7 +2892,7 @@
                 "name": "operator",
                 "content": {
                   "type": "STRING",
-                  "value": "&"
+                  "value": ".&"
                 }
               },
               {
@@ -2929,7 +2925,7 @@
                 "name": "operator",
                 "content": {
                   "type": "STRING",
-                  "value": "|"
+                  "value": ".|"
                 }
               },
               {
@@ -2962,7 +2958,7 @@
                 "name": "operator",
                 "content": {
                   "type": "STRING",
-                  "value": "^"
+                  "value": ".^"
                 }
               },
               {
@@ -3570,7 +3566,7 @@
   "externals": [
     {
       "type": "SYMBOL",
-      "name": "ws_then_colon"
+      "name": "_ws_then_colon"
     },
     {
       "type": "SYMBOL",
