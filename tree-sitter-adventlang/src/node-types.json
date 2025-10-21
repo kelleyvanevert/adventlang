@@ -840,6 +840,16 @@
           }
         ]
       },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
       "parameter": {
         "multiple": true,
         "required": false,
@@ -867,14 +877,10 @@
     },
     "children": {
       "multiple": true,
-      "required": true,
+      "required": false,
       "types": [
         {
           "type": "_stmt",
-          "named": true
-        },
-        {
-          "type": "identifier",
           "named": true
         }
       ]

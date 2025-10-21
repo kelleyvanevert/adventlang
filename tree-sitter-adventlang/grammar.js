@@ -172,7 +172,7 @@ module.exports = grammar({
 
     named_fn_item: $ => seq(
       "fn",
-      $.identifier,
+      field("name", $.identifier),
       optional(seq("<", field("generic", listElements($._type)), ">")),
       seq("(", field("parameter", listElements($.declarable)), ")"),
       optional(seq("->", field("return", $._type))),

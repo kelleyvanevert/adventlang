@@ -32,8 +32,7 @@
 
 ; ; ; Function definitions
 
-; ; (function_item (identifier) @function)
-; ; (function_signature_item (identifier) @function)
+(named_fn_item (name) @function)
 
 (line_comment) @comment
 (block_comment) @comment
@@ -67,6 +66,8 @@
 "while" @keyword
 
 (str_literal) @string
+
+(regex_literal) @string.regex
 
 (boolean_literal) @constant.builtin
 (integer_literal) @constant.builtin
