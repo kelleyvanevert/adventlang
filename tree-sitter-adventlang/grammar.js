@@ -47,11 +47,12 @@ module.exports = grammar({
 
   word: $ => $.identifier,
 
-  // // RUST grammar stuff
-  // externals: $ => [
-  //   // $.string_content, // stolen from the Rust tree sitter code
-  //   $.pre_op_ws,
-  // ],
+  // RUST grammar stuff
+  externals: $ => [
+  //   $.string_content, // stolen from the Rust tree sitter code
+    $.ws_then_colon,
+    $.ws_then_question_mark,
+  ],
 
   supertypes: $ => [
     $._expr,
@@ -85,6 +86,7 @@ module.exports = grammar({
 
     // I don't actually understand how these conflict could occur
     [$.while_expr, $.parenthesized_expression],
+    [$.if_expr, $.parenthesized_expression],
     [$.do_while_expr, $.parenthesized_expression],
 
     [$.assign_pattern, $.list_expr],
@@ -105,7 +107,7 @@ module.exports = grammar({
   rules: {
     source_file: ($) => seq(
       optional($._stmt_separator),
-      repeat(seq($._stmt_separator, $._stmt)),
+      sepBy($._stmt_separator, $._stmt),
       optional($._stmt_separator),
     ),
 
@@ -261,13 +263,14 @@ module.exports = grammar({
       $.unary_expression,
       $.binary_expression,
       $._literal,
-      $.identifier,
+      prec.left($.identifier),
       $.list_expr,
       $.tuple_expr,
       $.anonymous_fn,
       $.parenthesized_expression,
       $.do_while_expr,
       $.while_expr,
+      $.if_expr,
       $.loop_expr,
       $.for_expr,
 
@@ -280,8 +283,6 @@ module.exports = grammar({
       $.block_expr,
 
       $.application,
-      // list
-      //   | expr "(" list-elements(argument) ")" [ anonymous-fn ]
     ),
 
     member_expr: $ => prec.left(PREC.member, seq($._expr, optional("?"), ".", $._field_identifier)),
@@ -292,18 +293,15 @@ module.exports = grammar({
 
     postfix_application: $ => prec.left(PREC.member, seq(
       field("left", $._expr),
-      $.postfix_op,
+
+      // ugly, but it works...
+      optional($.ws_then_question_mark),
+      $.ws_then_colon,
+
+      field("fn", $._field_identifier),
       optional(field("right", $._expr)),
       repeat(seq("'", $.identifier, $._expr)),
     )),
-
-    postfix_op: $ => seq(
-      // optional($.pre_op_ws),//
-      // optional("?"),
-      // $.pre_op_ws,
-      ":",
-      field("fn", $.identifier),
-    ),
 
     application: $ => seq(
       $.lookup, // instead of generalized `expr`, because I'm gonna have to statically type it anyway..
@@ -340,6 +338,27 @@ module.exports = grammar({
       maybeParenthesized(seq(optional(seq("let", $.declare_pattern, "=")), $._expr)),
       $.block_expr,
     ),
+
+    if_expr: $ => seq(
+      optional(seq($.label, ":")),
+      "if",
+      maybeParenthesized(seq(optional(seq("let", $.declare_pattern, "=")), $._expr)),
+      $.block_expr,
+      repeat($.else_if),
+      optional($.else),
+    ),
+
+    else_if: $ => prec.left(2, seq(
+      "else",
+      "if",
+      maybeParenthesized(seq(optional(seq("let", $.declare_pattern, "=")), $._expr)),
+      $.block_expr,
+    )),
+
+    else: $ => prec.left(1, seq(
+      "else",
+      $.block_expr,
+    )),
 
     loop_expr: $ => seq(
       optional(seq($.label, ":")),
@@ -383,7 +402,7 @@ module.exports = grammar({
       ))));
     },
 
-    anonymous_fn: $ => prec(PREC.closure, seq(
+    anonymous_fn: $ => prec.left(PREC.call, seq(
       choice(
         "||",
         seq("|", listElements($.declarable), "|"),

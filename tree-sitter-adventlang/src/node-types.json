@@ -36,6 +36,10 @@
         "named": true
       },
       {
+        "type": "if_expr",
+        "named": true
+      },
+      {
         "type": "index_expr",
         "named": true
       },
@@ -546,6 +550,40 @@
     }
   },
   {
+    "type": "else",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "block_expr",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "else_if",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "_expr",
+          "named": true
+        },
+        {
+          "type": "declare_pattern",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "expr_stmt",
     "named": true,
     "fields": {},
@@ -589,6 +627,37 @@
         },
         {
           "type": "declare_pattern",
+          "named": true
+        },
+        {
+          "type": "label",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "if_expr",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "_expr",
+          "named": true
+        },
+        {
+          "type": "declare_pattern",
+          "named": true
+        },
+        {
+          "type": "else",
+          "named": true
+        },
+        {
+          "type": "else_if",
           "named": true
         },
         {
@@ -885,6 +954,16 @@
     "type": "postfix_application",
     "named": true,
     "fields": {
+      "fn": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "field_identifier",
+            "named": true
+          }
+        ]
+      },
       "left": {
         "multiple": false,
         "required": true,
@@ -915,7 +994,11 @@
           "named": true
         },
         {
-          "type": "postfix_op",
+          "type": "ws_then_colon",
+          "named": true
+        },
+        {
+          "type": "ws_then_question_mark",
           "named": true
         }
       ]
@@ -934,22 +1017,6 @@
           "named": true
         }
       ]
-    }
-  },
-  {
-    "type": "postfix_op",
-    "named": true,
-    "fields": {
-      "fn": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "identifier",
-            "named": true
-          }
-        ]
-      }
     }
   },
   {
@@ -1288,6 +1355,10 @@
     "named": false
   },
   {
+    "type": "else",
+    "named": false
+  },
+  {
     "type": "escape_sequence",
     "named": true
   },
@@ -1314,6 +1385,10 @@
   {
     "type": "identifier",
     "named": true
+  },
+  {
+    "type": "if",
+    "named": false
   },
   {
     "type": "in",
@@ -1378,6 +1453,14 @@
   {
     "type": "with",
     "named": false
+  },
+  {
+    "type": "ws_then_colon",
+    "named": true
+  },
+  {
+    "type": "ws_then_question_mark",
+    "named": true
   },
   {
     "type": "{",
