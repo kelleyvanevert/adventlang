@@ -5,8 +5,8 @@
 #include <wctype.h>
 
 enum TokenType {
-  WS_THEN_COLON,
-  WS_THEN_QUESTION_MARK,
+  WS_PRECEDING_COLON,
+  WS_PRECEDING_QUESTION_MARK,
 };
 
 static const char *OPERATORS[] = {
@@ -71,13 +71,12 @@ static inline void advance(TSLexer *lexer) { lexer->advance(lexer, false); }
 
 static inline void skip(TSLexer *lexer) { lexer->advance(lexer, true); }
 
-static inline bool process_ws_then_colon(TSLexer *lexer) {
-  lexer->result_symbol = WS_THEN_COLON;
+static inline bool process_ws_preceding_colon(TSLexer *lexer) {
+  lexer->result_symbol = WS_PRECEDING_COLON;
   lexer->mark_end(lexer);
 
   for (;;) {
     if (lexer->lookahead == ':') {
-      advance(lexer);
       lexer->mark_end(lexer);
       return true;
     }
@@ -96,13 +95,12 @@ static inline bool process_ws_then_colon(TSLexer *lexer) {
   return false;
 }
 
-static inline bool process_ws_then_question_mark(TSLexer *lexer) {
-  lexer->result_symbol = WS_THEN_QUESTION_MARK;
+static inline bool process_ws_preceding_question_mark(TSLexer *lexer) {
+  lexer->result_symbol = WS_PRECEDING_QUESTION_MARK;
   lexer->mark_end(lexer);
 
   for (;;) {
     if (lexer->lookahead == '?') {
-      advance(lexer);
       lexer->mark_end(lexer);
       return true;
     }
@@ -126,15 +124,15 @@ bool tree_sitter_adventlang_external_scanner_scan(void *payload, TSLexer *lexer,
 
   bool done = false;
 
-  if (valid_symbols[WS_THEN_QUESTION_MARK]) {
-    done = process_ws_then_question_mark(lexer);
+  if (valid_symbols[WS_PRECEDING_QUESTION_MARK]) {
+    done = process_ws_preceding_question_mark(lexer);
     if (done) {
       return true;
     }
   }
 
-  if (valid_symbols[WS_THEN_COLON]) {
-    done = process_ws_then_colon(lexer);
+  if (valid_symbols[WS_PRECEDING_COLON]) {
+    done = process_ws_preceding_colon(lexer);
     if (done) {
       return true;
     }

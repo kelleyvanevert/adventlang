@@ -1786,8 +1786,17 @@
             "type": "CHOICE",
             "members": [
               {
-                "type": "SYMBOL",
-                "name": "ws_then_question_mark"
+                "type": "SEQ",
+                "members": [
+                  {
+                    "type": "SYMBOL",
+                    "name": "_ws_preceding_question_mark"
+                  },
+                  {
+                    "type": "STRING",
+                    "value": "?"
+                  }
+                ]
               },
               {
                 "type": "BLANK"
@@ -1796,7 +1805,11 @@
           },
           {
             "type": "SYMBOL",
-            "name": "_ws_then_colon"
+            "name": "_ws_preceding_colon"
+          },
+          {
+            "type": "STRING",
+            "value": ":"
           },
           {
             "type": "FIELD",
@@ -3566,11 +3579,11 @@
   "externals": [
     {
       "type": "SYMBOL",
-      "name": "_ws_then_colon"
+      "name": "_ws_preceding_colon"
     },
     {
       "type": "SYMBOL",
-      "name": "ws_then_question_mark"
+      "name": "_ws_preceding_question_mark"
     }
   ],
   "inline": [],

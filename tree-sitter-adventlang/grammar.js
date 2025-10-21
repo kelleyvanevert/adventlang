@@ -50,8 +50,8 @@ module.exports = grammar({
   // RUST grammar stuff
   externals: $ => [
   //   $.string_content, // stolen from the Rust tree sitter code
-    $._ws_then_colon,
-    $.ws_then_question_mark,
+    $._ws_preceding_colon,
+    $._ws_preceding_question_mark,
   ],
 
   supertypes: $ => [
@@ -296,8 +296,9 @@ module.exports = grammar({
       field("left", $._expr),
 
       // ugly, but it works...
-      optional($.ws_then_question_mark),
-      $._ws_then_colon,
+      optional(seq($._ws_preceding_question_mark, "?")),
+      $._ws_preceding_colon,
+      ":",
 
       field("fn", $._field_identifier),
       optional(field("right", $._expr)),

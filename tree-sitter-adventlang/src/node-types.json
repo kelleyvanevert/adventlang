@@ -992,10 +992,6 @@
         {
           "type": "_expr",
           "named": true
-        },
-        {
-          "type": "ws_then_question_mark",
-          "named": true
         }
       ]
     }
@@ -1453,10 +1449,6 @@
   {
     "type": "with",
     "named": false
-  },
-  {
-    "type": "ws_then_question_mark",
-    "named": true
   },
   {
     "type": "{",
