@@ -32,17 +32,18 @@
 
 ; ; ; Function definitions
 
-(named_fn_item (name) @function)
+(named_fn_item
+  name: (identifier) @function)
 
 (line_comment) @comment
 (block_comment) @comment
 
-; "(" @punctuation.bracket
-; ")" @punctuation.bracket
-; "[" @punctuation.bracket
-; "]" @punctuation.bracket
-; "{" @punctuation.bracket
-; "}" @punctuation.bracket
+"(" @punctuation.bracket
+")" @punctuation.bracket
+"[" @punctuation.bracket
+"]" @punctuation.bracket
+"{" @punctuation.bracket
+"}" @punctuation.bracket
 
 ; "::" @punctuation.delimiter
 ":" @punctuation.delimiter
@@ -64,6 +65,7 @@
 "let" @keyword
 "return" @keyword
 "while" @keyword
+(declare_guard) @keyword
 
 (str_literal) @string
 
@@ -73,7 +75,7 @@
 (integer_literal) @constant.builtin
 (float_literal) @constant.builtin
 
-; (escape_sequence) @escape
+(escape_sequence) @escape
 
 ; "*" @operator
 ; "&" @operator
