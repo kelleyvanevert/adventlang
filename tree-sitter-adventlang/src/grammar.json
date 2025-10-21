@@ -139,12 +139,8 @@
           "value": "'"
         },
         {
-          "type": "IMMEDIATE_TOKEN",
-          "content": {
-            "type": "PATTERN",
-            "value": "(r#)?[_\\p{XID_Start}][_\\p{XID_Continue}]*",
-            "flags": "u"
-          }
+          "type": "SYMBOL",
+          "name": "identifier"
         }
       ]
     },
@@ -1766,28 +1762,8 @@
             }
           },
           {
-            "type": "CHOICE",
-            "members": [
-              {
-                "type": "STRING",
-                "value": "?"
-              },
-              {
-                "type": "BLANK"
-              }
-            ]
-          },
-          {
-            "type": "STRING",
-            "value": ":"
-          },
-          {
-            "type": "IMMEDIATE_TOKEN",
-            "content": {
-              "type": "PATTERN",
-              "value": "(r#)?[_\\p{XID_Start}][_\\p{XID_Continue}]*",
-              "flags": "u"
-            }
+            "type": "SYMBOL",
+            "name": "postfix_op"
           },
           {
             "type": "CHOICE",
@@ -1815,12 +1791,8 @@
                   "value": "'"
                 },
                 {
-                  "type": "IMMEDIATE_TOKEN",
-                  "content": {
-                    "type": "PATTERN",
-                    "value": "(r#)?[_\\p{XID_Start}][_\\p{XID_Continue}]*",
-                    "flags": "u"
-                  }
+                  "type": "SYMBOL",
+                  "name": "identifier"
                 },
                 {
                   "type": "SYMBOL",
@@ -1831,6 +1803,23 @@
           }
         ]
       }
+    },
+    "postfix_op": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": ":"
+        },
+        {
+          "type": "FIELD",
+          "name": "fn",
+          "content": {
+            "type": "SYMBOL",
+            "name": "identifier"
+          }
+        }
+      ]
     },
     "application": {
       "type": "SEQ",

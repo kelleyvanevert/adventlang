@@ -640,7 +640,17 @@
   {
     "type": "label",
     "named": true,
-    "fields": {}
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "identifier",
+          "named": true
+        }
+      ]
+    }
   },
   {
     "type": "line_comment",
@@ -898,10 +908,14 @@
     },
     "children": {
       "multiple": true,
-      "required": false,
+      "required": true,
       "types": [
         {
           "type": "_expr",
+          "named": true
+        },
+        {
+          "type": "postfix_op",
           "named": true
         }
       ]
@@ -920,6 +934,22 @@
           "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "postfix_op",
+    "named": true,
+    "fields": {
+      "fn": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {

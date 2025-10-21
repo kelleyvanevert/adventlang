@@ -35,8 +35,6 @@ function blockContents($) {
   );
 }
 
-const ID_REGEX = /(r#)?[_\p{XID_Start}][_\p{XID_Continue}]*/u;
-
 // prettier-ignore
 module.exports = grammar({
   name: "adventlang",
@@ -49,9 +47,10 @@ module.exports = grammar({
 
   word: $ => $.identifier,
 
-  // RUST grammar stuff
+  // // RUST grammar stuff
   // externals: $ => [
-  //   $.string_content, // stolen from the Rust tree sitter code
+  //   // $.string_content, // stolen from the Rust tree sitter code
+  //   $.pre_op_ws,
   // ],
 
   supertypes: $ => [
@@ -131,7 +130,7 @@ module.exports = grammar({
 
     _field_identifier: $ => alias($.identifier, $.field_identifier),
 
-    label: $ => seq("'", token.immediate(ID_REGEX)),
+    label: $ => seq("'", $.identifier),
 
     nil_type: $ => "nil",
 
@@ -293,12 +292,18 @@ module.exports = grammar({
 
     postfix_application: $ => prec.left(PREC.member, seq(
       field("left", $._expr),
-      optional("?"),
-      ":",
-      token.immediate(ID_REGEX),
+      $.postfix_op,
       optional(field("right", $._expr)),
-      repeat(seq("'", token.immediate(ID_REGEX), $._expr)),
+      repeat(seq("'", $.identifier, $._expr)),
     )),
+
+    postfix_op: $ => seq(
+      // optional($.pre_op_ws),//
+      // optional("?"),
+      // $.pre_op_ws,
+      ":",
+      field("fn", $.identifier),
+    ),
 
     application: $ => seq(
       $.lookup, // instead of generalized `expr`, because I'm gonna have to statically type it anyway..
