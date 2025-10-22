@@ -190,17 +190,32 @@
   {
     "type": "anonymous_fn",
     "named": true,
-    "fields": {},
+    "fields": {
+      "parameters": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": ",",
+            "named": false
+          },
+          {
+            "type": "declarable",
+            "named": true
+          },
+          {
+            "type": "|",
+            "named": false
+          }
+        ]
+      }
+    },
     "children": {
-      "multiple": true,
+      "multiple": false,
       "required": true,
       "types": [
         {
           "type": "block_expr",
-          "named": true
-        },
-        {
-          "type": "declarable",
           "named": true
         }
       ]

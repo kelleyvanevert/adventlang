@@ -382,7 +382,7 @@ module.exports = grammar({
     anonymous_fn: $ => prec.left(PREC.call, seq(
       choice(
         "||",
-        seq("|", listElements($.declarable), "|"),
+        field("parameters", seq("|", listElements($.declarable), "|")),
       ),
       $.block_expr,
     )),
