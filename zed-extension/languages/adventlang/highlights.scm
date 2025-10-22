@@ -14,7 +14,7 @@
 ((identifier) @constructor
  (#match? @constructor "^[A-Z]"))
 
-; ; ; Function calls
+; Function calls
 
 (regular_call_expr
   function: (lookup (identifier) @function))
@@ -22,15 +22,7 @@
 (postfix_call_expr
   function: (identifier) @function)
 
-; ; (regular_call_expr
-; ;   function: (field_expression
-; ;     field: (field_identifier) @function.method))
-; ; (regular_call_expr
-; ;   function: (scoped_identifier
-; ;     "::"
-; ;     name: (identifier) @function))
-
-; ; ; Function definitions
+; Function definitions
 
 (named_fn_item
   name: (identifier) @function)
@@ -45,15 +37,12 @@
 "{" @punctuation.bracket
 "}" @punctuation.bracket
 
-; "::" @punctuation.delimiter
 ":" @punctuation.delimiter
-; "." @punctuation.delimiter
-; "," @punctuation.delimiter
 ; ";" @punctuation.delimiter
 
-; ; (parameter (identifier) @variable.parameter)
+; (parameter (identifier) @variable.parameter)
 
-; (label @label)
+(label) @label
 
 "break" @keyword
 "continue" @keyword
@@ -65,6 +54,7 @@
 "let" @keyword
 "return" @keyword
 "while" @keyword
+"loop" @keyword
 (declare_guard) @keyword
 
 (str_literal) @string
@@ -77,6 +67,23 @@
 
 (escape_sequence) @escape
 
-; "*" @operator
-; "&" @operator
-; "'" @operator
+".|" @operator
+".^" @operator
+".&" @operator
+"=" @operator
+"&&" @operator
+"||" @operator
+"??" @operator
+"==" @operator
+"!=" @operator
+"<" @operator
+"<=" @operator
+">" @operator
+">=" @operator
+"<<" @operator
+">>" @operator
+"+" @operator
+"-" @operator
+"*" @operator
+"/" @operator
+"%" @operator

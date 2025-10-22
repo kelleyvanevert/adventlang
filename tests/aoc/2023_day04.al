@@ -19,7 +19,7 @@ fn solve(input: str) {
       }
       let wins = yours :filter |n| { n :in winning } :len
 
-      if (wins > 0) {
+      'bla: if (wins > 0) {
         2 ^ (wins - 1)
       } else {
         0
