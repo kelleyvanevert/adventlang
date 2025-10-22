@@ -48,7 +48,8 @@
     "generate": "tree-sitter generate",
     "preplay": "tree-sitter build --wasm",
     "play": "tree-sitter playground",
+    "test": "tree-sitter test",
     "play:watch": "ls grammar.js src/scanner.c | entr -r sh -c 'tree-sitter generate && tree-sitter build --wasm && tree-sitter playground --quiet'",
-    "test": "node --test bindings/node/*_test.js"
+    "test:node": "node --test bindings/node/*_test.js"
   }
 }

@@ -452,9 +452,12 @@ module.exports = grammar({
 
     regex_literal: $ => token(seq(
       "/",
-      /[^/]+/,
+      repeat1(choice(
+        token.immediate(/[^/\\\n]+/),         // Any char except /, \, or newline
+        token.immediate(/\\./),               // Backslash followed by any character
+      )),
       token.immediate("/"),
-      optional(token.immediate(/[gim]+/)),
+      optional(token.immediate(/[a-zA-Z]+/)), // Common flags like 'g', 'i', 'm', etc.
     )),
   },
 });

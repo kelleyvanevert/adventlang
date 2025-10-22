@@ -1,0 +1,87 @@
+===============
+Line comment should not be parsed as regex
+===============
+
+ // this is a comment
+
+---
+
+(source_file
+    (line_comment)
+)
+
+===============
+Regex
+===============
+
+ /^[a-z]/
+
+---
+
+(source_file
+    (expr_stmt
+        (regex_literal)
+    )
+)
+
+===============
+Regex with escaped character
+===============
+
+ /^[a-z]\//
+
+---
+
+(source_file
+    (expr_stmt
+        (regex_literal)
+    )
+)
+
+===============
+Small example 1
+===============
+
+fn kelley() {
+  return a + b
+}
+
+---
+
+(source_file
+  (named_fn_item
+    name: (identifier)
+    (return_stmt
+      (binary_expression
+        left: (identifier)
+        right: (identifier)
+      )
+    )
+  )
+)
+
+===============
+Small example 2
+===============
+
+fn is_digit(s) {
+  s :in digits
+}
+
+---
+
+(source_file
+    (named_fn_item
+        name: (identifier)
+        parameter: (declarable
+            (declare_pattern
+            (identifier)))
+        (expr_stmt
+            (postfix_call_expr
+                left: (identifier)
+                function: (identifier)
+                right: (identifier)
+            )
+        )
+    )
+)

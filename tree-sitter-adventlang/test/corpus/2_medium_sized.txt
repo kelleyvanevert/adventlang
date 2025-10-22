@@ -1,0 +1,68 @@
+===============
+Medium sized 1
+===============
+
+fn solve(input) {
+  let values = input :lines :map |line: str| {
+    let digits = line :chars :filter is_digit
+    int(digits[0] + digits[-1])
+  }
+
+  values :sum
+}
+
+---
+
+(source_file
+  (named_fn_item
+    name: (identifier)
+    parameter: (declarable
+      (declare_pattern
+        (identifier)))
+    (declare_stmt
+      (declare_pattern
+        (identifier))
+      (postfix_call_expr
+        left: (postfix_call_expr
+          left: (identifier)
+          function: (identifier))
+        function: (identifier)
+        right: (anonymous_fn
+          (declarable
+            (declare_pattern
+              (identifier)
+              (primitive_type)))
+          (block_expr
+            (declare_stmt
+              (declare_pattern
+                (identifier))
+              (postfix_call_expr
+                left: (postfix_call_expr
+                  left: (identifier)
+                  function: (identifier))
+                function: (identifier)
+                right: (identifier)))
+            (expr_stmt
+              (regular_call_expr
+                function: (lookup
+                  (identifier))
+                (binary_expression
+                  left: (index_expr
+                    (identifier)
+                    (integer_literal))
+                  right: (index_expr
+                    (identifier)
+                    (unary_expression
+                      (integer_literal))))))
+          )
+        )
+      )
+    )
+    (expr_stmt
+      (postfix_call_expr
+        left: (identifier)
+        function: (identifier)
+      )
+    )
+  )
+)

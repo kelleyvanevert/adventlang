@@ -3499,8 +3499,26 @@
             "value": "/"
           },
           {
-            "type": "PATTERN",
-            "value": "[^/]+"
+            "type": "REPEAT1",
+            "content": {
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "IMMEDIATE_TOKEN",
+                  "content": {
+                    "type": "PATTERN",
+                    "value": "[^/\\\\\\n]+"
+                  }
+                },
+                {
+                  "type": "IMMEDIATE_TOKEN",
+                  "content": {
+                    "type": "PATTERN",
+                    "value": "\\\\."
+                  }
+                }
+              ]
+            }
           },
           {
             "type": "IMMEDIATE_TOKEN",
@@ -3516,7 +3534,7 @@
                 "type": "IMMEDIATE_TOKEN",
                 "content": {
                   "type": "PATTERN",
-                  "value": "[gim]+"
+                  "value": "[a-zA-Z]+"
                 }
               },
               {
