@@ -5,5 +5,7 @@ edition = "2024"
 
 [dependencies]
 parser_combinators = { path = "../parser_combinators" }
+tree-sitter-adventlang = { path = "../tree-sitter-adventlang" }
 regex = "1.11.1"
 either = "1.15.0"
+tree-sitter = "0.25.10"

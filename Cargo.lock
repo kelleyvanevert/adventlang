@@ -305,6 +305,8 @@ dependencies = [
  "either",
  "parser_combinators",
  "regex",
+ "tree-sitter",
+ "tree-sitter-adventlang",
 ]
 
 [[package]]
