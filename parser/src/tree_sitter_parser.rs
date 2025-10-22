@@ -1,8 +1,8 @@
 use tree_sitter::Node;
 
 use crate::ast::{
-    Block, Declarable, DeclareGuardExpr, DeclarePattern, Document, Expr, FnDecl, Identifier, Item,
-    Stmt, Type, TypeVar,
+    Block, Declarable, DeclareGuardExpr, DeclarePattern, Document, Expr, FnDecl, FnType,
+    Identifier, Item, Stmt, Type, TypeVar,
 };
 
 #[cfg(test)]
@@ -62,6 +62,8 @@ impl<'a> Converter<'a> {
 
     fn as_type(&self, node: Node) -> Type {
         match node.kind() {
+            "parenthesized_type" => node.map_child("child", |node| self.as_type(node)),
+            "type_identifier" => Type::TypeVar(self.as_typevar(node)),
             "nil_type" => Type::Nil,
             "bool_type" => Type::Bool,
             "str_type" => Type::Str,
@@ -69,6 +71,44 @@ impl<'a> Converter<'a> {
             "float_type" => Type::Float,
             "num_type" => Type::Num,
             "regex_type" => Type::Regex,
+            "tuple_type" => {
+                let elements = node.map_children("element", |node| self.as_type(node));
+                if elements.len() == 0 {
+                    Type::Tuple(None)
+                } else {
+                    Type::Tuple(Some(elements))
+                }
+            }
+            "list_type" => {
+                Type::List(node.map_opt_child("elements", |node| self.as_type(node).into()))
+            }
+            "dict_type" => {
+                let key = node.map_opt_child("key", |node| self.as_type(node));
+                let val = node.map_opt_child("val", |node| self.as_type(node));
+                match (key, val) {
+                    (Some(key), Some(val)) => Type::Dict(Some((key.into(), val.into()))),
+                    _ => Type::Dict(None),
+                }
+            }
+            "nullable_type" => {
+                Type::Nullable(node.map_child("child", |node| self.as_type(node).into()))
+            }
+            "fn_type" => {
+                let generics = node.map_children("generic", |node| self.as_typevar(node));
+                let params = node.map_children("param", |node| self.as_type(node));
+                let ret = node.map_opt_child("return", |node| self.as_type(node));
+
+                // todo improve, this is not correct
+                if ret.is_some() || (generics.len() + params.len() > 0) {
+                    Type::Fun(Some(FnType {
+                        generics,
+                        params,
+                        ret: ret.unwrap().into(),
+                    }))
+                } else {
+                    Type::Fun(None)
+                }
+            }
             kind => panic!("can't interpret as type: {kind}"),
         }
     }
@@ -77,22 +117,13 @@ impl<'a> Converter<'a> {
         match node.kind() {
             "integer_literal" => Expr::Int(self.as_int(node)),
             "binary_expression" => Expr::BinaryExpr {
-                left: self
-                    .as_expr(node.child_by_field_name("left").unwrap())
-                    .into(),
-                op: self.as_string(node.child_by_field_name("operator").unwrap()),
-                right: self
-                    .as_expr(node.child_by_field_name("right").unwrap())
-                    .into(),
+                left: node.map_child("left", |node| self.as_expr(node).into()),
+                op: node.map_child("operator", |node| self.as_string(node).into()),
+                right: node.map_child("right", |node| self.as_expr(node).into()),
             },
             "list_expr" => Expr::ListLiteral {
-                elements: node
-                    .children_by_field_name("element", &mut node.walk())
-                    .map(|child| self.as_expr(child))
-                    .collect::<Vec<_>>(),
-                splat: node
-                    .child_by_field_name("splat")
-                    .map(|child| self.as_expr(child).into()),
+                elements: node.map_children("element", |child| self.as_expr(child)),
+                splat: node.map_opt_child("splat", |child| self.as_expr(child).into()),
             },
             kind => panic!("can't interpret as expr: {kind}"),
         }
@@ -110,36 +141,24 @@ impl<'a> Converter<'a> {
 
                 DeclarePattern::Declare {
                     guard,
-                    ty: node
-                        .child_by_field_name("type")
-                        .map(|node| self.as_type(node)),
+                    ty: node.map_opt_child("type", |node| self.as_type(node)),
                 }
             }
             "declare_list" => DeclarePattern::List {
-                elements: node
-                    .children_by_field_name("element", &mut node.walk())
-                    .map(|child| self.as_declarable(child))
-                    .collect::<Vec<_>>(),
-
-                rest: node.child_by_field_name("splat").map(|child| {
+                elements: node.map_children("element", |child| self.as_declarable(child)),
+                rest: node.map_opt_child("splat", |child| {
                     (
                         self.as_identifier(child),
-                        node.child_by_field_name("splat_type")
-                            .map(|child| self.as_type(child)),
+                        node.map_opt_child("splat_type", |child| self.as_type(child)),
                     )
                 }),
             },
             "declare_tuple" => DeclarePattern::Tuple {
-                elements: node
-                    .children_by_field_name("element", &mut node.walk())
-                    .map(|child| self.as_declarable(child))
-                    .collect::<Vec<_>>(),
-
-                rest: node.child_by_field_name("splat").map(|child| {
+                elements: node.map_children("element", |child| self.as_declarable(child)),
+                rest: node.map_opt_child("splat", |child| {
                     (
                         self.as_identifier(child),
-                        node.child_by_field_name("splat_type")
-                            .map(|child| self.as_type(child)),
+                        node.map_opt_child("splat_type", |child| self.as_type(child)),
                     )
                 }),
             },
@@ -211,5 +230,29 @@ impl<'a> Converter<'a> {
             .unwrap()
             .parse()
             .unwrap()
+    }
+}
+
+trait NodeExt {
+    fn map_children<T, F: FnMut(Node) -> T>(&self, name: &str, f: F) -> Vec<T>;
+
+    fn map_opt_child<T, F: FnMut(Node) -> T>(&self, name: &str, f: F) -> Option<T>;
+
+    fn map_child<T, F: FnMut(Node) -> T>(&self, name: &str, f: F) -> T;
+}
+
+impl NodeExt for Node<'_> {
+    fn map_children<T, F: FnMut(Node) -> T>(&self, name: &str, f: F) -> Vec<T> {
+        self.children_by_field_name(name, &mut self.walk())
+            .map(f)
+            .collect::<Vec<_>>()
+    }
+
+    fn map_opt_child<T, F: FnMut(Node) -> T>(&self, name: &str, f: F) -> Option<T> {
+        self.child_by_field_name(name).map(f)
+    }
+
+    fn map_child<T, F: FnMut(Node) -> T>(&self, name: &str, f: F) -> T {
+        self.map_opt_child(name, f).unwrap()
     }
 }

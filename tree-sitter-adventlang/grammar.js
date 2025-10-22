@@ -110,25 +110,25 @@ module.exports = grammar({
     tuple_type: $ => choice(
       seq(
         "(",
-        seq($._type, ","),
-        repeat(seq($._type, ",")),
-        optional($._type),
+        seq(field("element", $._type), ","),
+        repeat(seq(field("element", $._type), ",")),
+        optional(field("element", $._type)),
         ")",
       ),
       "tuple",
     ),
 
     list_type: $ => choice(
-      seq("[", $._type, "]"),
+      seq("[", field("elements", $._type), "]"),
       "list",
     ),
 
     dict_type: $ => choice(
-      seq("dict", "[", $._type, ",", $._type, "]"),
+      seq("dict", "[", field("key", $._type), ",", field("val", $._type), "]"),
       "dict",
     ),
 
-    nullable_type: $ => seq("?", $._type),
+    nullable_type: $ => seq("?", field("child", $._type)),
 
     fn_type: $ => seq(
       "fn",
@@ -138,10 +138,10 @@ module.exports = grammar({
           "(", listElements("param", $._type), ")"
         ),
       ),
-      optional(seq("->", $._type)),
+      optional(seq("->", field("return", $._type))),
     ),
 
-    parenthesized_type: $ => seq("(", $._type, ")"),
+    parenthesized_type: $ => seq("(", field("child", $._type), ")"),
 
     _stmt_separator: $ => prec(-1, /[ \t\r]*([;\n][ \t]*)+/),
 
