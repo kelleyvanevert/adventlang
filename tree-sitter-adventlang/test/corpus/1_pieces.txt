@@ -87,9 +87,9 @@ fn is_digit(s) {
 (source_file
     (named_fn_item
         name: (identifier)
-        parameter: (declarable
-            (declare_pattern
-            (identifier)))
+        param: (declarable
+            (declare_var
+                name: (identifier)))
         (expr_stmt
             (postfix_call_expr
                 left: (identifier)

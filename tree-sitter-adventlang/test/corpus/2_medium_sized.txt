@@ -14,55 +14,47 @@ fn solve(input) {
 ---
 
 (source_file
-  (named_fn_item
-    name: (identifier)
-    parameter: (declarable
-      (declare_pattern
+    (named_fn_item
+    (identifier)
+    (declarable
+        (declare_var
         (identifier)))
     (declare_stmt
-      (declare_pattern
+        (declare_var
         (identifier))
-      (postfix_call_expr
-        left: (postfix_call_expr
-          left: (identifier)
-          function: (identifier))
-        function: (identifier)
-        right: (anonymous_fn
-          (declarable
-            (declare_pattern
-              (identifier)
-              (primitive_type)))
-          (block_expr
+        (postfix_call_expr
+        (postfix_call_expr
+            (identifier)
+            (identifier))
+        (identifier)
+        (anonymous_fn
+            (declarable
+            (declare_var
+                (identifier)
+                (str_type)))
+            (block_expr
             (declare_stmt
-              (declare_pattern
+                (declare_var
                 (identifier))
-              (postfix_call_expr
-                left: (postfix_call_expr
-                  left: (identifier)
-                  function: (identifier))
-                function: (identifier)
-                right: (identifier)))
+                (postfix_call_expr
+                (postfix_call_expr
+                    (identifier)
+                    (identifier))
+                (identifier)
+                (identifier)))
             (expr_stmt
-              (regular_call_expr
-                function: (lookup
-                  (identifier))
+                (regular_call_expr
+                (lookup
+                    (identifier))
                 (binary_expression
-                  left: (index_expr
+                    (index_expr
                     (identifier)
                     (integer_literal))
-                  right: (index_expr
+                    (index_expr
                     (identifier)
                     (unary_expression
-                      (integer_literal))))))
-          )
-        )
-      )
-    )
+                        (integer_literal))))))))))
     (expr_stmt
-      (postfix_call_expr
-        left: (identifier)
-        function: (identifier)
-      )
-    )
-  )
-)
+        (postfix_call_expr
+        (identifier)
+        (identifier)))))

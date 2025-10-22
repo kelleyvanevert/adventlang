@@ -1,7 +1,15 @@
 ; Identifiers
 
 (type_identifier) @type
-(primitive_type) @type.builtin
+[
+  (nil_type)
+  (bool_type)
+  (str_type)
+  (int_type)
+  (float_type)
+  (num_type)
+  (regex_type)
+] @type.builtin
 (field_identifier) @property
 
 ; ; Identifier conventions

@@ -62,6 +62,7 @@ module.exports = grammar({
     $._type,
     $._stmt,
     $._literal,
+    $._declare_pattern,
   ],
 
   conflicts: $ => [
@@ -106,8 +107,6 @@ module.exports = grammar({
 
     label: $ => seq("'", $.identifier),
 
-    nil_type: $ => "nil",
-
     tuple_type: $ => choice(
       seq(
         "(",
@@ -135,8 +134,8 @@ module.exports = grammar({
       "fn",
       optional(
         seq(
-          optional(seq("<", listElements($._type_identifier), ">")),
-          "(", listElements($._type), ")"
+          optional(seq("<", listElements("generic", $._type_identifier), ">")),
+          "(", listElements("param", $._type), ")"
         ),
       ),
       optional(seq("->", $._type)),
@@ -150,8 +149,13 @@ module.exports = grammar({
       $.tuple_type,
       $.list_type,
       $.dict_type,
-      $.nil_type,
-      alias(choice("bool", "str", "int", "float", "num", "regex"), $.primitive_type),
+      alias("nil", $.nil_type),
+      alias("bool", $.bool_type),
+      alias("str", $.str_type),
+      alias("int", $.int_type),
+      alias("float", $.float_type),
+      alias("num", $.num_type),
+      alias("regex", $.regex_type),
       $.fn_type,
       $.nullable_type,
       $._type_identifier,
@@ -173,8 +177,8 @@ module.exports = grammar({
     named_fn_item: $ => seq(
       "fn",
       field("name", $.identifier),
-      optional(seq("<", field("generic", listElements($._type)), ">")),
-      seq("(", field("parameter", listElements($.declarable)), ")"),
+      optional(seq("<", listElements("generic", $._type_identifier), ">")),
+      seq("(", listElements("param", $.declarable), ")"),
       optional(seq("->", field("return", $._type))),
       "{",
       blockContents($),
@@ -197,17 +201,21 @@ module.exports = grammar({
       prec(-1, "return"),
     ),
 
-    declare_stmt: $ => seq("let", $.declare_pattern, "=", $._expr),
+    declare_stmt: $ => seq("let", $._declare_pattern, "=", $._expr),
 
     declare_guard: $ => "some",
 
-    declare_pattern: $ => choice(
-      seq(optional($.declare_guard), $.identifier, optional(seq(":", $._type))),
-      seq("[", listElements($.declarable), optional(seq("..", $.identifier, optional(seq(":", $._type)))), "]"),
-      seq("(", listElements($.declarable), optional(seq("..", $.identifier, optional(seq(":", $._type)))), ")"),
+    _declare_pattern: $ => choice(
+      $.declare_var,
+      $.declare_list,
+      $.declare_tuple,
     ),
 
-    declarable: $ => seq($.declare_pattern, optional(seq("=", $._expr))),
+    declare_var:   $ => seq(optional($.declare_guard), field("name", $.identifier), optional(seq(":", field("type", $._type)))),
+    declare_list:  $ => seq("[", listElements("element", $.declarable), optional(seq("..", field("splat", $.identifier), optional(seq(":", field("splat_type", $._type))))), "]"),
+    declare_tuple: $ => seq("(", listElements("element", $.declarable), optional(seq("..", field("splat", $.identifier), optional(seq(":", field("splat_type", $._type))))), ")"),
+
+    declarable: $ => seq($._declare_pattern, optional(seq("=", field("fallback", $._expr)))),
 
     assign_stmt: $ => seq(
       $.assign_pattern,
@@ -217,8 +225,8 @@ module.exports = grammar({
 
     assign_pattern: $ => prec.left(PREC.assign, choice(
       $.lookup,
-      seq("[", listElements($.assign_pattern), optional(seq("..", $.assign_pattern)), "]"),
-      seq("(", listElements($.assign_pattern), optional(seq("..", $.assign_pattern)), ")"),
+      seq("[", listElements("element", $.assign_pattern), optional(seq("..", $.assign_pattern)), "]"),
+      seq("(", listElements("element", $.assign_pattern), optional(seq("..", $.assign_pattern)), ")"),
     )),
 
     lookup: $ => prec.dynamic(-1, choice(
@@ -279,14 +287,14 @@ module.exports = grammar({
     regular_call_expr: $ => seq(
       field("function", $.lookup), // instead of generalized `expr`, because I'm gonna have to statically type it anyway..
       "(",
-      listElements(seq(optional(seq($.identifier, "=")), $._expr)),
+      listElements("argument", seq(optional(seq($.identifier, "=")), $._expr)),
       ")",
     ),
 
     list_expr: $ => seq(
       "[",
-      listElements($._expr),
-      optional(seq("..", $._expr)),
+      listElements("element", $._expr),
+      optional(seq("..", field("splat", $._expr))),
       "]",
     ),
 
@@ -308,14 +316,14 @@ module.exports = grammar({
     while_expr: $ => seq(
       optional(seq($.label, ":")),
       "while",
-      maybeParenthesized(seq(optional(seq("let", $.declare_pattern, "=")), $._expr)),
+      maybeParenthesized(seq(optional(seq("let", $._declare_pattern, "=")), $._expr)),
       $.block_expr,
     ),
 
     if_expr: $ => seq(
       optional(seq($.label, ":")),
       "if",
-      maybeParenthesized(seq(optional(seq("let", $.declare_pattern, "=")), $._expr)),
+      maybeParenthesized(seq(optional(seq("let", $._declare_pattern, "=")), $._expr)),
       $.block_expr,
       repeat($.else_if),
       optional($.else),
@@ -324,7 +332,7 @@ module.exports = grammar({
     else_if: $ => prec.left(2, seq(
       "else",
       "if",
-      maybeParenthesized(seq(optional(seq("let", $.declare_pattern, "=")), $._expr)),
+      maybeParenthesized(seq(optional(seq("let", $._declare_pattern, "=")), $._expr)),
       $.block_expr,
     )),
 
@@ -342,7 +350,7 @@ module.exports = grammar({
     for_expr: $ => seq(
       optional(seq($.label, ":")),
       "for",
-      maybeParenthesized(seq("let", $.declare_pattern, "in", $._expr)),
+      maybeParenthesized(seq("let", $._declare_pattern, "in", $._expr)),
       $.block_expr,
     ),
 
@@ -382,7 +390,7 @@ module.exports = grammar({
     anonymous_fn: $ => prec.left(PREC.call, seq(
       choice(
         "||",
-        field("parameters", seq("|", listElements($.declarable), "|")),
+        seq("|", listElements("param", $.declarable), "|"),
       ),
       $.block_expr,
     )),
@@ -470,8 +478,8 @@ function sepBy(sep, rule) {
   return optional(sepBy1(sep, rule));
 }
 
-function listElements(rule, sep = ",") {
-  return optional(seq(sepBy1(sep, rule), optional(sep)));
+function listElements(fieldName, rule, sep = ",") {
+  return optional(seq(sepBy1(sep, field(fieldName, rule)), optional(sep)));
 }
 
 function maybeParenthesized(rule) {
