@@ -27,12 +27,7 @@
     }
   },
   "bindings": {
-    "c": false,
-    "go": false,
     "node": true,
-    "python": false,
-    "rust": true,
-    "swift": false,
-    "zig": false
+    "rust": true
   }
 }
