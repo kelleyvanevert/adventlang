@@ -25,10 +25,24 @@ Regex
 )
 
 ===============
-Regex with escaped character
+Regex with escaped characters 1
 ===============
 
  /^[a-z]\//
+
+---
+
+(source_file
+    (expr_stmt
+        (regex_literal)
+    )
+)
+
+===============
+Regex with escaped characters 2
+===============
+
+ /[-!@^&*#+%$=\/]/
 
 ---
 
