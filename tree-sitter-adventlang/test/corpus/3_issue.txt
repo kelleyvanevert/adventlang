@@ -1,0 +1,19 @@
+===============
+Precedence issue example 1
+===============
+
+line :starts_with t[0]
+
+---
+
+(source_file
+    (expr_stmt
+        (postfix_call_expr
+            left: (identifier)
+            function: (identifier)
+            right: (index_expr
+                container: (identifier)
+                index: (integer_literal)
+            )
+        )
+    ))

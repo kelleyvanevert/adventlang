@@ -468,7 +468,7 @@ module.exports = grammar({
     boolean_literal: $ => choice("true", "false"),
 
     integer_literal: $ => choice(
-      /[0-9][0-9_]*/,
+      /-?[0-9][0-9_]*/,
       /0x[0-9a-fA-F_]+/,
       /0b[01_]+/,
       /0o[0-7_]+/,

@@ -228,12 +228,9 @@ Some(
                                                                                             ),
                                                                                         ),
                                                                                         coalesce: false,
-                                                                                        index: UnaryExpr {
-                                                                                            expr: Int(
-                                                                                                1,
-                                                                                            ),
-                                                                                            op: "-",
-                                                                                        },
+                                                                                        index: Int(
+                                                                                            -1,
+                                                                                        ),
                                                                                     },
                                                                                 },
                                                                             },
@@ -609,12 +606,9 @@ Some(
                                                                                             ),
                                                                                         ),
                                                                                         coalesce: false,
-                                                                                        index: UnaryExpr {
-                                                                                            expr: Int(
-                                                                                                1,
-                                                                                            ),
-                                                                                            op: "-",
-                                                                                        },
+                                                                                        index: Int(
+                                                                                            -1,
+                                                                                        ),
                                                                                     },
                                                                                 },
                                                                             },

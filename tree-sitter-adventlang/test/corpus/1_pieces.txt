@@ -65,14 +65,11 @@ fn kelley() {
 (source_file
   (named_fn_item
     name: (identifier)
-    (return_stmt
-      expr: (binary_expr
-        left: (identifier)
-        right: (identifier)
-      )
-    )
-  )
-)
+        body: (block_expr
+          (return_stmt
+            expr: (binary_expr
+              left: (identifier)
+              right: (identifier))))))
 
 ===============
 Small example 2
@@ -85,17 +82,14 @@ fn is_digit(s) {
 ---
 
 (source_file
-    (named_fn_item
+      (named_fn_item
         name: (identifier)
         param: (declarable
-            (declare_var
-                name: (identifier)))
-        (expr_stmt
+          (declare_var
+            name: (identifier)))
+        body: (block_expr
+          (expr_stmt
             (postfix_call_expr
-                left: (identifier)
-                function: (identifier)
-                right: (identifier)
-            )
-        )
-    )
-)
+              left: (identifier)
+              function: (identifier)
+              right: (identifier))))))

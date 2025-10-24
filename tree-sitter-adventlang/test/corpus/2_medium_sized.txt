@@ -13,47 +13,48 @@ fn solve(input) {
 
 ---
 
-(source_file
-    (named_fn_item
-    (identifier)
-    (declarable
-        (declare_var
-        (identifier)))
-    (declare_stmt
-        (declare_var
-        (identifier))
-        (postfix_call_expr
-        (postfix_call_expr
-            (identifier)
-            (identifier))
+    (source_file
+      (named_fn_item
         (identifier)
-        (anonymous_fn
-            (declarable
+        (declarable
+          (declare_var
+            (identifier)))
+        (block_expr
+          (declare_stmt
             (declare_var
+              (identifier))
+            (postfix_call_expr
+              (postfix_call_expr
                 (identifier)
-                (str_type)))
-            (block_expr
-            (declare_stmt
-                (declare_var
                 (identifier))
-                (postfix_call_expr
-                (postfix_call_expr
+              (identifier)
+              (anonymous_fn
+                (declarable
+                  (declare_var
                     (identifier)
-                    (identifier))
-                (identifier)
-                (identifier)))
-            (expr_stmt
-                (regular_call_expr
-                (identifier)
-                (binary_expr
-                    (index_expr
-                    (identifier)
-                    (integer_literal))
-                    (index_expr
-                    (identifier)
-                    (unary_expression
-                        (integer_literal))))))))))
-    (expr_stmt
-        (postfix_call_expr
-        (identifier)
-        (identifier)))))
+                    (str_type)))
+                (block_expr
+                  (declare_stmt
+                    (declare_var
+                      (identifier))
+                    (postfix_call_expr
+                      (postfix_call_expr
+                        (identifier)
+                        (identifier))
+                      (identifier)
+                      (identifier)))
+                  (expr_stmt
+                    (regular_call_expr
+                      (identifier)
+                      (call_arg
+                        (binary_expr
+                          (index_expr
+                            (identifier)
+                            (integer_literal))
+                          (index_expr
+                            (identifier)
+                            (integer_literal))))))))))
+          (expr_stmt
+            (postfix_call_expr
+              (identifier)
+              (identifier))))))
