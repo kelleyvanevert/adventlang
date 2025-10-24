@@ -44,9 +44,8 @@ fn solve(input) {
                 (identifier)))
             (expr_stmt
                 (regular_call_expr
-                (lookup
-                    (identifier))
-                (binary_expression
+                (identifier)
+                (binary_expr
                     (index_expr
                     (identifier)
                     (integer_literal))

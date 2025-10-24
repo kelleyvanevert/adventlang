@@ -125,7 +125,7 @@ impl<'a> Converter<'a> {
 
     fn as_expr(&self, node: Node) -> Expr {
         match node.kind() {
-            "parenthesized_expression" => node.map_child("child", |node| self.as_expr(node)),
+            "parenthesized_expr" => node.map_child("child", |node| self.as_expr(node)),
             "integer_literal" => Expr::Int(self.as_int(node)),
             "boolean_literal" => Expr::Bool(self.as_str(node) == "true"),
             "nil_literal" => Expr::NilLiteral,
@@ -136,7 +136,7 @@ impl<'a> Converter<'a> {
                 op: node.map_child("op", |node| self.as_string(node).into()),
                 expr: node.map_child("expr", |node| self.as_expr(node).into()),
             },
-            "binary_expression" => Expr::BinaryExpr {
+            "binary_expr" => Expr::BinaryExpr {
                 left: node.map_child("left", |node| self.as_expr(node).into()),
                 op: node.map_child("operator", |node| self.as_string(node).into()),
                 right: node.map_child("right", |node| self.as_expr(node).into()),
@@ -187,7 +187,7 @@ impl<'a> Converter<'a> {
                 cond: None,
             },
             "regular_call_expr" => Expr::Invocation {
-                expr: Expr::from(node.map_child("function", |node| self.as_lookup(node))).into(),
+                expr: node.map_child("function", |node| self.as_expr(node)).into(),
                 postfix: false,
                 coalesce: node.has_child("coalesce"),
                 args: node.map_children("argument", |node| Argument {

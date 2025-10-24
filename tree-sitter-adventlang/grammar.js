@@ -72,9 +72,9 @@ module.exports = grammar({
     [$.lookup, $._expr],
 
     // I don't actually understand how these conflict could occur
-    [$.while_expr, $.parenthesized_expression],
-    [$.if_expr, $.parenthesized_expression],
-    [$.do_while_expr, $.parenthesized_expression],
+    [$.while_expr, $.parenthesized_expr],
+    [$.if_expr, $.parenthesized_expr],
+    [$.do_while_expr, $.parenthesized_expr],
 
     [$.assign_list, $.list_expr],
   ],
@@ -258,8 +258,8 @@ module.exports = grammar({
       $.tuple_expr,
       $.anonymous_fn,
       $.unary_expression,
-      $.binary_expression,
-      $.parenthesized_expression,
+      $.binary_expr,
+      $.parenthesized_expr,
       $.do_while_expr,
       $.while_expr,
       $.if_expr,
@@ -300,13 +300,13 @@ module.exports = grammar({
 
     postfix_named_arg: $ => seq("'", field("name", $.identifier), field("expr", $._expr)),
 
-    regular_call_expr: $ => seq(
-      field("function", $.lookup), // instead of generalized `expr`, because I'm gonna have to statically type it anyway..
+    regular_call_expr: $ => prec.left(PREC.call, seq(
+      field("function", $._expr), // instead of generalized `expr`, because I'm gonna have to statically type it anyway..
       optional(field("coalesce", "?")),
       "(",
       listElements("argument", seq(optional(seq(field("name", $.identifier), "=")), field("expr", $._expr))),
       ")",
-    ),
+    )),
 
     list_expr: $ => seq(
       "[",
@@ -371,7 +371,7 @@ module.exports = grammar({
       field("expr", $._expr),
     )),
 
-    binary_expression: $ => {
+    binary_expr: $ => {
       const table = [
         [PREC.and, "&&"],
         [PREC.or, choice("||", "??")],
@@ -405,7 +405,7 @@ module.exports = grammar({
       field("body", $.block_expr),
     )),
 
-    parenthesized_expression: $ => seq("(", field("child", $._expr), ")"),
+    parenthesized_expr: $ => seq("(", field("child", $._expr), ")"),
 
     _literal: $ => choice(
       $.str_literal,

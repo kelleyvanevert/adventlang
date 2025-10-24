@@ -66,7 +66,7 @@ fn kelley() {
   (named_fn_item
     name: (identifier)
     (return_stmt
-      (binary_expression
+      expr: (binary_expr
         left: (identifier)
         right: (identifier)
       )

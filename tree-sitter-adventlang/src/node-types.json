@@ -30,7 +30,7 @@
         "named": true
       },
       {
-        "type": "binary_expression",
+        "type": "binary_expr",
         "named": true
       },
       {
@@ -70,7 +70,7 @@
         "named": true
       },
       {
-        "type": "parenthesized_expression",
+        "type": "parenthesized_expr",
         "named": true
       },
       {
@@ -404,7 +404,7 @@
     }
   },
   {
-    "type": "binary_expression",
+    "type": "binary_expr",
     "named": true,
     "fields": {
       "left": {
@@ -1292,7 +1292,7 @@
     }
   },
   {
-    "type": "parenthesized_expression",
+    "type": "parenthesized_expr",
     "named": true,
     "fields": {
       "child": {
@@ -1480,7 +1480,7 @@
         "required": true,
         "types": [
           {
-            "type": "lookup",
+            "type": "_expr",
             "named": true
           }
         ]
