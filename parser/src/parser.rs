@@ -1756,7 +1756,7 @@ mod tests {
     there"
             ),
             r"
-    hello 
+    hello
     there"
                 .to_string()
         );
@@ -1774,7 +1774,7 @@ mod tests {
     let rest = r"
     hello //comment
     there
-    " 
+    "
     bla"#
                 .to_string()
         );

@@ -76,7 +76,7 @@ module.exports = grammar({
     [$.if_expr, $.parenthesized_expression],
     [$.do_while_expr, $.parenthesized_expression],
 
-    [$.assign_pattern, $.list_expr],
+    [$.assign_list, $.list_expr],
   ],
 
   rules: {
@@ -187,21 +187,21 @@ module.exports = grammar({
 
     continue_stmt: $ => seq(
       "continue",
-      optional($.label),
+      optional(field("label", $.label)),
     ),
 
     break_stmt: $ => seq(
       "break",
-      optional($.label),
-      optional(seq("with", $._expr)),
+      optional(field("label", $.label)),
+      optional(seq("with", field("expr", $._expr))),
     ),
 
     return_stmt: $ => choice(
-      prec.left(seq("return", $._expr)),
+      prec.left(seq("return", field("expr", $._expr))),
       prec(-1, "return"),
     ),
 
-    declare_stmt: $ => seq("let", $._declare_pattern, "=", $._expr),
+    declare_stmt: $ => seq("let", field("pattern", $._declare_pattern), "=", field("expr", $._expr)),
 
     declare_guard: $ => "some",
 
@@ -218,16 +218,20 @@ module.exports = grammar({
     declarable: $ => seq($._declare_pattern, optional(seq("=", field("fallback", $._expr)))),
 
     assign_stmt: $ => seq(
-      $.assign_pattern,
-      alias(choice("=", "+=", "*=", "^=", "-=", "/=", "%=", "<<=", "??=", "[]="), $.assign_op),
-      $._expr,
+      field("pattern", $.assign_pattern),
+      field("op", choice("=", "+=", "*=", "^=", "-=", "/=", "%=", "<<=", "??=", "[]=")),
+      field("expr", $._expr),
     ),
 
     assign_pattern: $ => prec.left(PREC.assign, choice(
-      $.lookup,
-      seq("[", listElements("element", $.assign_pattern), optional(seq("..", $.assign_pattern)), "]"),
-      seq("(", listElements("element", $.assign_pattern), optional(seq("..", $.assign_pattern)), ")"),
+      $.assign_location,
+      $.assign_list,
+      $.assign_tuple,
     )),
+
+    assign_location: $ => $.lookup,
+    assign_list:     $ => seq("[", listElements("element", $.assign_pattern), optional(seq("..", field("splat", $.assign_pattern))), "]"),
+    assign_tuple:    $ => seq("(", listElements("element", $.assign_pattern), ")"),
 
     lookup: $ => prec.dynamic(-1, choice(
       $.identifier,
@@ -235,9 +239,13 @@ module.exports = grammar({
       $.index_lookup,
     )),
 
-    member_lookup: $ => prec.left(PREC.member, seq($.lookup, ".", $._field_identifier)),
+    member_lookup: $ => prec.left(PREC.member, seq(
+      field("container", $.lookup), ".", field("member", $._field_identifier)
+    )),
 
-    index_lookup: $ => prec.left(PREC.member, seq($.lookup, "[", $._expr, "]")),
+    index_lookup: $ => prec.left(PREC.member, seq(
+      field("container", $.lookup), "[", field("index", $._expr), "]"
+    )),
 
     _expr: $ => choice(
       $.regular_call_expr,
@@ -266,28 +274,37 @@ module.exports = grammar({
       $.identifier,
     ),
 
-    member_expr: $ => prec.left(PREC.member, seq($._expr, optional("?"), ".", $._field_identifier)),
+    member_expr: $ => prec.left(PREC.member, seq(
+      field("container", $._expr), optional(field("coalesce", "?")), ".", field("member", $._field_identifier),
+    )),
 
-    index_expr: $ => prec.left(PREC.member, seq($._expr, optional("?"), "[", $._expr, "]")),
+    index_expr: $ => prec.left(PREC.member, seq(
+      field("container", $._expr), optional(field("coalesce", "?")), "[", field("index", $._expr), "]",
+    )),
 
-    postfix_index_expr: $ => prec.left(PREC.member, seq($._expr, optional("?"), ":", "[", $._expr, "]")),
+    postfix_index_expr: $ => prec.left(PREC.member, seq(
+      field("container", $._expr), optional(field("coalesce", "?")), ":", "[", field("index", $._expr), "]",
+    )),
 
     postfix_call_expr: $ => prec.left(PREC.member, seq(
       field("left", $._expr),
 
       // ugly, but it works...
-      optional("?"),
+      optional(field("coalesce", "?")),
       ":",
 
       field("function", $.identifier),
       optional(field("right", $._expr)),
-      repeat(seq("'", $.identifier, $._expr)),
+      repeat(field("named_arg", $.postfix_named_arg)),
     )),
+
+    postfix_named_arg: $ => seq("'", field("name", $.identifier), field("expr", $._expr)),
 
     regular_call_expr: $ => seq(
       field("function", $.lookup), // instead of generalized `expr`, because I'm gonna have to statically type it anyway..
+      optional(field("coalesce", "?")),
       "(",
-      listElements("argument", seq(optional(seq($.identifier, "=")), $._expr)),
+      listElements("argument", seq(optional(seq(field("name", $.identifier), "=")), field("expr", $._expr))),
       ")",
     ),
 
@@ -300,65 +317,58 @@ module.exports = grammar({
 
     tuple_expr: $ => seq(
       "(",
-      seq($._expr, ","),
-      repeat(seq($._expr, ",")),
-      optional($._expr),
+      seq(field("element", $._expr), ","),
+      repeat(seq(field("element", $._expr), ",")),
+      optional(field("element", $._expr)),
       ")",
     ),
 
     do_while_expr: $ => seq(
-      optional(seq($.label, ":")),
+      optional(seq(field("label", $.label), ":")),
       "do",
-      $.block_expr,
-      optional(seq("while", maybeParenthesized($._expr))),
+      field("body", $.block_expr),
+      optional(seq("while", maybeParenthesized(field("cond", $._expr)))),
     ),
 
     while_expr: $ => seq(
-      optional(seq($.label, ":")),
+      optional(seq(field("label", $.label), ":")),
       "while",
-      maybeParenthesized(seq(optional(seq("let", $._declare_pattern, "=")), $._expr)),
-      $.block_expr,
+      maybeParenthesized(seq(optional(seq("let", field("pattern", $._declare_pattern), "=")), field("cond", $._expr))),
+      field("body", $.block_expr),
     ),
 
     if_expr: $ => seq(
-      optional(seq($.label, ":")),
+      // optional(seq(field("label", $.label), ":")),
       "if",
-      maybeParenthesized(seq(optional(seq("let", $._declare_pattern, "=")), $._expr)),
-      $.block_expr,
-      repeat($.else_if),
-      optional($.else),
+      maybeParenthesized(seq(optional(seq("let", field("pattern", $._declare_pattern), "=")), field("cond", $._expr))),
+      field("body", $.block_expr),
+      optional(seq(
+        "else",
+        choice(
+          field("else_if", $.if_expr),
+          field("else", $.block_expr),
+        ),
+      )),
     ),
 
-    else_if: $ => prec.left(2, seq(
-      "else",
-      "if",
-      maybeParenthesized(seq(optional(seq("let", $._declare_pattern, "=")), $._expr)),
-      $.block_expr,
-    )),
-
-    else: $ => prec.left(1, seq(
-      "else",
-      $.block_expr,
-    )),
-
     loop_expr: $ => seq(
-      optional(seq($.label, ":")),
+      optional(seq(field("label", $.label), ":")),
       "loop",
-      $.block_expr,
+      field("body", $.block_expr),
     ),
 
     for_expr: $ => seq(
-      optional(seq($.label, ":")),
+      optional(seq(field("label", $.label), ":")),
       "for",
-      maybeParenthesized(seq("let", $._declare_pattern, "in", $._expr)),
-      $.block_expr,
+      maybeParenthesized(seq("let", field("pattern", $._declare_pattern), "in", field("range", $._expr))),
+      field("body", $.block_expr),
     ),
 
     block_expr: $ => seq("{", blockContents($), "}"),
 
     unary_expression: $ => prec(PREC.unary, seq(
-      choice("-", "*", "!"),
-      $._expr,
+      field("op", choice("-", "*", "!")),
+      field("expr", $._expr),
     )),
 
     binary_expression: $ => {
@@ -392,10 +402,10 @@ module.exports = grammar({
         "||",
         seq("|", listElements("param", $.declarable), "|"),
       ),
-      $.block_expr,
+      field("body", $.block_expr),
     )),
 
-    parenthesized_expression: $ => seq("(", $._expr, ")"),
+    parenthesized_expression: $ => seq("(", field("child", $._expr), ")"),
 
     _literal: $ => choice(
       $.str_literal,
@@ -456,7 +466,7 @@ module.exports = grammar({
       )
     ),
 
-    string_interpolation: $ => seq("{", $._expr, "}"),
+    string_interpolation: $ => seq("{", field("interpolation", $._expr), "}"),
 
     regex_literal: $ => token(seq(
       "/",

@@ -120,9 +120,9 @@ impl Display for DeclarePattern {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AssignLocationExpr {
-    Id(Identifier),           // assign fn/closure locals
-    Index(Expr, Expr),        // assign list/tuple elements
-    Member(Expr, Identifier), // assign struct/object members
+    Id(Identifier),                              // assign fn/closure locals
+    Index(Box<AssignLocationExpr>, Expr),        // assign list/tuple elements
+    Member(Box<AssignLocationExpr>, Identifier), // assign struct/object members
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -150,7 +150,7 @@ impl TryFrom<Expr> for AssignLocationExpr {
                 coalesce: false,
                 index,
             } => Ok(AssignLocationExpr::Index(
-                expr.as_ref().clone(),
+                Box::new(expr.as_ref().clone().try_into().unwrap()),
                 index.as_ref().clone(),
             )),
             Expr::Member {
@@ -158,7 +158,7 @@ impl TryFrom<Expr> for AssignLocationExpr {
                 coalesce: false,
                 member,
             } => Ok(AssignLocationExpr::Member(
-                expr.as_ref().clone(),
+                Box::new(expr.as_ref().clone().try_into().unwrap()),
                 member.clone(),
             )),
             _ => Err(()),
@@ -332,12 +332,12 @@ impl From<AssignLocationExpr> for Expr {
         match location {
             AssignLocationExpr::Id(id) => Expr::Variable(id),
             AssignLocationExpr::Index(container, index) => Expr::Index {
-                expr: container.into(),
+                expr: Expr::from(container.as_ref().to_owned()).into(),
                 coalesce: false,
                 index: index.into(),
             },
             AssignLocationExpr::Member(container, member) => Expr::Member {
-                expr: container.into(),
+                expr: Expr::from(container.as_ref().to_owned()).into(),
                 coalesce: false,
                 member,
             },
