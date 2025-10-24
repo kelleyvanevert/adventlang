@@ -70,6 +70,7 @@ impl<'a> Converter<'a> {
             match child.kind() {
                 "named_fn_item" => block.items.push(self.as_item(child)),
                 "{" | "}" => {}
+                "line_comment" => {}
                 _ => block.stmts.push(self.as_stmt(child)),
             }
         }

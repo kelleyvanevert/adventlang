@@ -33,7 +33,7 @@ mod tests {
         let doc = parse_document(&content);
         assert!(doc.is_some());
 
-        // let doc2 = parse_document_ts(&content);
-        // assert!(doc2.is_some());
+        let doc2 = parse_document_ts(&content);
+        assert!(doc2.is_some());
     }
 }

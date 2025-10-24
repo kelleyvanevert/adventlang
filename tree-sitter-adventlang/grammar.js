@@ -326,9 +326,9 @@ module.exports = grammar({
 
     dict_expr: $ => seq(
       "@{",
-      sepBy(
-        ",",
-        field("pair", $.dict_pair),
+      listElements(
+        "pair",
+        $.dict_pair,
       ),
       "}",
     ),
