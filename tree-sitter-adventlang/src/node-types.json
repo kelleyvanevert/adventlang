@@ -582,6 +582,32 @@
     }
   },
   {
+    "type": "call_arg",
+    "named": true,
+    "fields": {
+      "expr": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "_expr",
+            "named": true
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "comment_text",
     "named": true,
     "fields": {}
@@ -1274,6 +1300,16 @@
     "type": "named_fn_item",
     "named": true,
     "fields": {
+      "body": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "block_expr",
+            "named": true
+          }
+        ]
+      },
       "generic": {
         "multiple": true,
         "required": false,
@@ -1314,16 +1350,6 @@
           }
         ]
       }
-    },
-    "children": {
-      "multiple": true,
-      "required": false,
-      "types": [
-        {
-          "type": "_stmt",
-          "named": true
-        }
-      ]
     }
   },
   {
@@ -1538,8 +1564,8 @@
         "required": false,
         "types": [
           {
-            "type": "=",
-            "named": false
+            "type": "call_arg",
+            "named": true
           }
         ]
       },
@@ -1553,32 +1579,12 @@
           }
         ]
       },
-      "expr": {
-        "multiple": true,
-        "required": false,
-        "types": [
-          {
-            "type": "_expr",
-            "named": true
-          }
-        ]
-      },
       "function": {
         "multiple": false,
         "required": true,
         "types": [
           {
             "type": "_expr",
-            "named": true
-          }
-        ]
-      },
-      "name": {
-        "multiple": true,
-        "required": false,
-        "types": [
-          {
-            "type": "identifier",
             "named": true
           }
         ]

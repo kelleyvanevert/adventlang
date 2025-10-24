@@ -77,7 +77,8 @@ module.exports = grammar({
 
     [$.assign_list, $.list_expr],
 
-    // [$._non_binary_expr, $._expr],
+    [$._postfix_call],
+    [$._expr, $._postfix_call],
   ],
 
   rules: {
@@ -181,9 +182,7 @@ module.exports = grammar({
       optional(seq("<", listElements("generic", $._type_identifier), ">")),
       seq("(", listElements("param", $.declarable), ")"),
       optional(seq("->", field("return", $._type))),
-      "{",
-      blockContents($),
-      "}",
+      field("body", $.block_expr),
     ),
 
     continue_stmt: $ => seq(
@@ -276,7 +275,7 @@ module.exports = grammar({
       $.identifier,
     ),
 
-    _non_binary_expr: $ => prec(90, choice(
+    _non_binary_expr: $ => prec.right(90, choice(
       $._literal,
       $.list_expr,
       $.tuple_expr,
@@ -307,16 +306,20 @@ module.exports = grammar({
       field("container", $._expr), optional(field("coalesce", "?")), "[", field("index", $._expr), "]",
     )),
 
-    postfix_index_expr: $ => prec.left(40, seq(
+    postfix_index_expr: $ => prec.left(30, seq(
       field("container", $._expr), optional(field("coalesce", "?")), ":", "[", field("index", $._expr), "]",
     )),
 
-    postfix_call_expr: $ => prec.left(70, seq(
+    postfix_call_expr: $ => prec.left(30, seq(
       field("left", $._expr),
 
       optional(field("coalesce", "?")),
       ":",
 
+      $._postfix_call,
+    )),
+
+    _postfix_call: $ => prec.dynamic(70, seq(
       field("function", $.identifier),
 
       optional(field("right", $._non_binary_expr)),
@@ -325,13 +328,15 @@ module.exports = grammar({
 
     postfix_named_arg: $ => seq("'", field("name", $.identifier), field("expr", $._expr)),
 
-    regular_call_expr: $ => prec.left(30, seq(
+    regular_call_expr: $ => prec.left(25, seq(
       field("function", $._expr),
       optional(field("coalesce", "?")),
       "(",
-      listElements("argument", seq(optional(seq(field("name", $.identifier), "=")), field("expr", $._expr))),
+      listElements("argument", $.call_arg),
       ")",
     )),
+
+    call_arg: $ => seq(optional(seq(field("name", $.identifier), "=")), field("expr", $._expr)),
 
     list_expr: $ => seq(
       "[",

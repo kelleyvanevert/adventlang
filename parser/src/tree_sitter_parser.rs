@@ -2,8 +2,8 @@ use tree_sitter::Node;
 
 use crate::ast::{
     Argument, AssignLocationExpr, AssignPattern, Block, Declarable, DeclareGuardExpr,
-    DeclarePattern, Document, Expr, FnDecl, FnType, Identifier, Item, Stmt, StrLiteralPiece, Type,
-    TypeVar,
+    DeclarePattern, DictKey, Document, Expr, FnDecl, FnType, Identifier, Item, Stmt,
+    StrLiteralPiece, Type, TypeVar,
 };
 
 pub fn parse_document_ts(source: &str) -> Option<Document> {
@@ -31,17 +31,19 @@ mod tests {
 
     #[test]
     fn test() {
-        let source = r#"
-if hi {}
+        //         let source = r#"
+        // if hi {}
 
-continue 'there
+        // continue 'there
 
-let name = "hi, my name\nis {kelley}!"
+        // let name = "hi, my name\nis {kelley}!"
 
-fn bla<t>([a: int, .. rem] = [2+3]) {
+        // fn bla<t>([a: int, .. rem] = [2+3]) {
 
-}
-"#;
+        // }
+        // "#;
+
+        let source = "int(digits[0] + digits[-1])";
 
         let doc = parse_document_ts(source).expect("can parse");
 
@@ -155,6 +157,26 @@ impl<'a> Converter<'a> {
             },
             "tuple_expr" => Expr::TupleLiteral {
                 elements: node.map_children("element", |child| self.as_expr(child)),
+            },
+            "dict_expr" => Expr::DictLiteral {
+                elements: node.map_children("pair", |node| {
+                    if let Some(id) = node.map_opt_child("id_key", |node| self.as_identifier(node))
+                    {
+                        (
+                            DictKey::Identifier(id.clone()),
+                            node.map_opt_child("val", |node| self.as_expr(node))
+                                .unwrap_or(Expr::Variable(id)),
+                        )
+                    } else {
+                        let key = node.map_child("expr_key", |node| self.as_expr(node));
+
+                        (
+                            DictKey::Expr(key.clone()),
+                            node.map_opt_child("val", |node| self.as_expr(node))
+                                .unwrap_or(key),
+                        )
+                    }
+                }),
             },
             "str_literal" => {
                 let mut pieces = vec![];
@@ -366,27 +388,14 @@ impl<'a> Converter<'a> {
     }
 
     fn as_item(&self, node: Node) -> Item {
-        let mut decl = FnDecl {
-            generics: vec![],
-            ret: None,
-            params: vec![],
-            body: Block {
-                items: vec![],
-                stmts: vec![],
-            },
-        };
-
-        for child in node.children_by_field_name("generic", &mut node.walk()) {
-            decl.generics.push(self.as_typevar(child));
-        }
-
-        for child in node.children_by_field_name("param", &mut node.walk()) {
-            decl.params.push(self.as_declarable(child));
-        }
-
         Item::NamedFn {
-            name: self.as_identifier(node.child(1).unwrap()),
-            decl,
+            name: node.map_child("name", |node| self.as_identifier(node)),
+            decl: FnDecl {
+                generics: node.map_children("generic", |node| self.as_typevar(node)),
+                ret: node.map_opt_child("return", |node| self.as_type(node)),
+                params: node.map_children("param", |node| self.as_declarable(node)),
+                body: node.map_child("body", |node| self.as_block(node)),
+            },
         }
     }
 
@@ -502,7 +511,8 @@ impl NodeExt for Node<'_> {
     }
 
     fn map_child<T, F: FnMut(Node) -> T>(&self, name: &str, f: F) -> T {
-        self.map_opt_child(name, f).unwrap()
+        self.map_opt_child(name, f)
+            .expect(&format!("to have {name}"))
     }
 }
 

@@ -1,0 +1,1400 @@
+Some(
+    Document {
+        body: Block {
+            items: [
+                NamedFn {
+                    name: Identifier(
+                        "is_digit",
+                    ),
+                    decl: FnDecl {
+                        generics: [],
+                        ret: None,
+                        params: [
+                            Declarable {
+                                pattern: Declare {
+                                    guard: Unguarded(
+                                        Identifier(
+                                            "s",
+                                        ),
+                                    ),
+                                    ty: None,
+                                },
+                                fallback: None,
+                            },
+                        ],
+                        body: Block {
+                            items: [],
+                            stmts: [
+                                Expr {
+                                    expr: Invocation {
+                                        expr: Variable(
+                                            Identifier(
+                                                "in",
+                                            ),
+                                        ),
+                                        postfix: true,
+                                        coalesce: false,
+                                        args: [
+                                            Argument {
+                                                name: None,
+                                                expr: Variable(
+                                                    Identifier(
+                                                        "s",
+                                                    ),
+                                                ),
+                                            },
+                                            Argument {
+                                                name: None,
+                                                expr: Variable(
+                                                    Identifier(
+                                                        "digits",
+                                                    ),
+                                                ),
+                                            },
+                                        ],
+                                    },
+                                },
+                            ],
+                        },
+                    },
+                },
+                NamedFn {
+                    name: Identifier(
+                        "solve",
+                    ),
+                    decl: FnDecl {
+                        generics: [],
+                        ret: None,
+                        params: [
+                            Declarable {
+                                pattern: Declare {
+                                    guard: Unguarded(
+                                        Identifier(
+                                            "input",
+                                        ),
+                                    ),
+                                    ty: None,
+                                },
+                                fallback: None,
+                            },
+                        ],
+                        body: Block {
+                            items: [],
+                            stmts: [
+                                Declare {
+                                    pattern: Declare {
+                                        guard: Unguarded(
+                                            Identifier(
+                                                "values",
+                                            ),
+                                        ),
+                                        ty: None,
+                                    },
+                                    expr: Invocation {
+                                        expr: Variable(
+                                            Identifier(
+                                                "map",
+                                            ),
+                                        ),
+                                        postfix: true,
+                                        coalesce: false,
+                                        args: [
+                                            Argument {
+                                                name: None,
+                                                expr: Invocation {
+                                                    expr: Variable(
+                                                        Identifier(
+                                                            "lines",
+                                                        ),
+                                                    ),
+                                                    postfix: true,
+                                                    coalesce: false,
+                                                    args: [
+                                                        Argument {
+                                                            name: None,
+                                                            expr: Variable(
+                                                                Identifier(
+                                                                    "input",
+                                                                ),
+                                                            ),
+                                                        },
+                                                    ],
+                                                },
+                                            },
+                                            Argument {
+                                                name: None,
+                                                expr: AnonymousFn {
+                                                    decl: FnDecl {
+                                                        generics: [],
+                                                        ret: None,
+                                                        params: [
+                                                            Declarable {
+                                                                pattern: Declare {
+                                                                    guard: Unguarded(
+                                                                        Identifier(
+                                                                            "line",
+                                                                        ),
+                                                                    ),
+                                                                    ty: Some(
+                                                                        Str,
+                                                                    ),
+                                                                },
+                                                                fallback: None,
+                                                            },
+                                                        ],
+                                                        body: Block {
+                                                            items: [],
+                                                            stmts: [
+                                                                Declare {
+                                                                    pattern: Declare {
+                                                                        guard: Unguarded(
+                                                                            Identifier(
+                                                                                "digits",
+                                                                            ),
+                                                                        ),
+                                                                        ty: None,
+                                                                    },
+                                                                    expr: Invocation {
+                                                                        expr: Variable(
+                                                                            Identifier(
+                                                                                "filter",
+                                                                            ),
+                                                                        ),
+                                                                        postfix: true,
+                                                                        coalesce: false,
+                                                                        args: [
+                                                                            Argument {
+                                                                                name: None,
+                                                                                expr: Invocation {
+                                                                                    expr: Variable(
+                                                                                        Identifier(
+                                                                                            "chars",
+                                                                                        ),
+                                                                                    ),
+                                                                                    postfix: true,
+                                                                                    coalesce: false,
+                                                                                    args: [
+                                                                                        Argument {
+                                                                                            name: None,
+                                                                                            expr: Variable(
+                                                                                                Identifier(
+                                                                                                    "line",
+                                                                                                ),
+                                                                                            ),
+                                                                                        },
+                                                                                    ],
+                                                                                },
+                                                                            },
+                                                                            Argument {
+                                                                                name: None,
+                                                                                expr: Variable(
+                                                                                    Identifier(
+                                                                                        "is_digit",
+                                                                                    ),
+                                                                                ),
+                                                                            },
+                                                                        ],
+                                                                    },
+                                                                },
+                                                                Expr {
+                                                                    expr: Invocation {
+                                                                        expr: Variable(
+                                                                            Identifier(
+                                                                                "int",
+                                                                            ),
+                                                                        ),
+                                                                        postfix: false,
+                                                                        coalesce: false,
+                                                                        args: [
+                                                                            Argument {
+                                                                                name: None,
+                                                                                expr: BinaryExpr {
+                                                                                    left: Index {
+                                                                                        expr: Variable(
+                                                                                            Identifier(
+                                                                                                "digits",
+                                                                                            ),
+                                                                                        ),
+                                                                                        coalesce: false,
+                                                                                        index: Int(
+                                                                                            0,
+                                                                                        ),
+                                                                                    },
+                                                                                    op: "+",
+                                                                                    right: Index {
+                                                                                        expr: Variable(
+                                                                                            Identifier(
+                                                                                                "digits",
+                                                                                            ),
+                                                                                        ),
+                                                                                        coalesce: false,
+                                                                                        index: Int(
+                                                                                            -1,
+                                                                                        ),
+                                                                                    },
+                                                                                },
+                                                                            },
+                                                                        ],
+                                                                    },
+                                                                },
+                                                            ],
+                                                        },
+                                                    },
+                                                },
+                                            },
+                                        ],
+                                    },
+                                },
+                                Expr {
+                                    expr: Invocation {
+                                        expr: Variable(
+                                            Identifier(
+                                                "sum",
+                                            ),
+                                        ),
+                                        postfix: true,
+                                        coalesce: false,
+                                        args: [
+                                            Argument {
+                                                name: None,
+                                                expr: Variable(
+                                                    Identifier(
+                                                        "values",
+                                                    ),
+                                                ),
+                                            },
+                                        ],
+                                    },
+                                },
+                            ],
+                        },
+                    },
+                },
+                NamedFn {
+                    name: Identifier(
+                        "bonus",
+                    ),
+                    decl: FnDecl {
+                        generics: [],
+                        ret: None,
+                        params: [
+                            Declarable {
+                                pattern: Declare {
+                                    guard: Unguarded(
+                                        Identifier(
+                                            "input",
+                                        ),
+                                    ),
+                                    ty: Some(
+                                        Str,
+                                    ),
+                                },
+                                fallback: None,
+                            },
+                        ],
+                        body: Block {
+                            items: [],
+                            stmts: [
+                                Declare {
+                                    pattern: Declare {
+                                        guard: Unguarded(
+                                            Identifier(
+                                                "values",
+                                            ),
+                                        ),
+                                        ty: None,
+                                    },
+                                    expr: Invocation {
+                                        expr: Variable(
+                                            Identifier(
+                                                "map",
+                                            ),
+                                        ),
+                                        postfix: true,
+                                        coalesce: false,
+                                        args: [
+                                            Argument {
+                                                name: None,
+                                                expr: Invocation {
+                                                    expr: Variable(
+                                                        Identifier(
+                                                            "lines",
+                                                        ),
+                                                    ),
+                                                    postfix: true,
+                                                    coalesce: false,
+                                                    args: [
+                                                        Argument {
+                                                            name: None,
+                                                            expr: Variable(
+                                                                Identifier(
+                                                                    "input",
+                                                                ),
+                                                            ),
+                                                        },
+                                                    ],
+                                                },
+                                            },
+                                            Argument {
+                                                name: None,
+                                                expr: AnonymousFn {
+                                                    decl: FnDecl {
+                                                        generics: [],
+                                                        ret: None,
+                                                        params: [
+                                                            Declarable {
+                                                                pattern: Declare {
+                                                                    guard: Unguarded(
+                                                                        Identifier(
+                                                                            "line",
+                                                                        ),
+                                                                    ),
+                                                                    ty: None,
+                                                                },
+                                                                fallback: None,
+                                                            },
+                                                        ],
+                                                        body: Block {
+                                                            items: [],
+                                                            stmts: [
+                                                                Declare {
+                                                                    pattern: Declare {
+                                                                        guard: Unguarded(
+                                                                            Identifier(
+                                                                                "digits",
+                                                                            ),
+                                                                        ),
+                                                                        ty: None,
+                                                                    },
+                                                                    expr: Invocation {
+                                                                        expr: Variable(
+                                                                            Identifier(
+                                                                                "filter_map",
+                                                                            ),
+                                                                        ),
+                                                                        postfix: true,
+                                                                        coalesce: false,
+                                                                        args: [
+                                                                            Argument {
+                                                                                name: None,
+                                                                                expr: Invocation {
+                                                                                    expr: Variable(
+                                                                                        Identifier(
+                                                                                            "range",
+                                                                                        ),
+                                                                                    ),
+                                                                                    postfix: false,
+                                                                                    coalesce: false,
+                                                                                    args: [
+                                                                                        Argument {
+                                                                                            name: None,
+                                                                                            expr: Int(
+                                                                                                0,
+                                                                                            ),
+                                                                                        },
+                                                                                        Argument {
+                                                                                            name: None,
+                                                                                            expr: Invocation {
+                                                                                                expr: Variable(
+                                                                                                    Identifier(
+                                                                                                        "len",
+                                                                                                    ),
+                                                                                                ),
+                                                                                                postfix: true,
+                                                                                                coalesce: false,
+                                                                                                args: [
+                                                                                                    Argument {
+                                                                                                        name: None,
+                                                                                                        expr: Variable(
+                                                                                                            Identifier(
+                                                                                                                "line",
+                                                                                                            ),
+                                                                                                        ),
+                                                                                                    },
+                                                                                                ],
+                                                                                            },
+                                                                                        },
+                                                                                    ],
+                                                                                },
+                                                                            },
+                                                                            Argument {
+                                                                                name: None,
+                                                                                expr: AnonymousFn {
+                                                                                    decl: FnDecl {
+                                                                                        generics: [],
+                                                                                        ret: None,
+                                                                                        params: [
+                                                                                            Declarable {
+                                                                                                pattern: Declare {
+                                                                                                    guard: Unguarded(
+                                                                                                        Identifier(
+                                                                                                            "i",
+                                                                                                        ),
+                                                                                                    ),
+                                                                                                    ty: None,
+                                                                                                },
+                                                                                                fallback: None,
+                                                                                            },
+                                                                                        ],
+                                                                                        body: Block {
+                                                                                            items: [],
+                                                                                            stmts: [
+                                                                                                Expr {
+                                                                                                    expr: Invocation {
+                                                                                                        expr: Variable(
+                                                                                                            Identifier(
+                                                                                                                "find_map",
+                                                                                                            ),
+                                                                                                        ),
+                                                                                                        postfix: true,
+                                                                                                        coalesce: false,
+                                                                                                        args: [
+                                                                                                            Argument {
+                                                                                                                name: None,
+                                                                                                                expr: Variable(
+                                                                                                                    Identifier(
+                                                                                                                        "nums",
+                                                                                                                    ),
+                                                                                                                ),
+                                                                                                            },
+                                                                                                            Argument {
+                                                                                                                name: None,
+                                                                                                                expr: AnonymousFn {
+                                                                                                                    decl: FnDecl {
+                                                                                                                        generics: [],
+                                                                                                                        ret: None,
+                                                                                                                        params: [
+                                                                                                                            Declarable {
+                                                                                                                                pattern: Declare {
+                                                                                                                                    guard: Unguarded(
+                                                                                                                                        Identifier(
+                                                                                                                                            "t",
+                                                                                                                                        ),
+                                                                                                                                    ),
+                                                                                                                                    ty: None,
+                                                                                                                                },
+                                                                                                                                fallback: None,
+                                                                                                                            },
+                                                                                                                        ],
+                                                                                                                        body: Block {
+                                                                                                                            items: [],
+                                                                                                                            stmts: [
+                                                                                                                                Expr {
+                                                                                                                                    expr: If {
+                                                                                                                                        pattern: None,
+                                                                                                                                        cond: Invocation {
+                                                                                                                                            expr: Variable(
+                                                                                                                                                Identifier(
+                                                                                                                                                    "starts_with",
+                                                                                                                                                ),
+                                                                                                                                            ),
+                                                                                                                                            postfix: true,
+                                                                                                                                            coalesce: false,
+                                                                                                                                            args: [
+                                                                                                                                                Argument {
+                                                                                                                                                    name: None,
+                                                                                                                                                    expr: Invocation {
+                                                                                                                                                        expr: Variable(
+                                                                                                                                                            Identifier(
+                                                                                                                                                                "slice",
+                                                                                                                                                            ),
+                                                                                                                                                        ),
+                                                                                                                                                        postfix: true,
+                                                                                                                                                        coalesce: false,
+                                                                                                                                                        args: [
+                                                                                                                                                            Argument {
+                                                                                                                                                                name: None,
+                                                                                                                                                                expr: Variable(
+                                                                                                                                                                    Identifier(
+                                                                                                                                                                        "line",
+                                                                                                                                                                    ),
+                                                                                                                                                                ),
+                                                                                                                                                            },
+                                                                                                                                                            Argument {
+                                                                                                                                                                name: None,
+                                                                                                                                                                expr: Variable(
+                                                                                                                                                                    Identifier(
+                                                                                                                                                                        "i",
+                                                                                                                                                                    ),
+                                                                                                                                                                ),
+                                                                                                                                                            },
+                                                                                                                                                        ],
+                                                                                                                                                    },
+                                                                                                                                                },
+                                                                                                                                                Argument {
+                                                                                                                                                    name: None,
+                                                                                                                                                    expr: Index {
+                                                                                                                                                        expr: Variable(
+                                                                                                                                                            Identifier(
+                                                                                                                                                                "t",
+                                                                                                                                                            ),
+                                                                                                                                                        ),
+                                                                                                                                                        coalesce: false,
+                                                                                                                                                        index: Int(
+                                                                                                                                                            0,
+                                                                                                                                                        ),
+                                                                                                                                                    },
+                                                                                                                                                },
+                                                                                                                                            ],
+                                                                                                                                        },
+                                                                                                                                        then: Block {
+                                                                                                                                            items: [],
+                                                                                                                                            stmts: [
+                                                                                                                                                Expr {
+                                                                                                                                                    expr: Index {
+                                                                                                                                                        expr: Variable(
+                                                                                                                                                            Identifier(
+                                                                                                                                                                "t",
+                                                                                                                                                            ),
+                                                                                                                                                        ),
+                                                                                                                                                        coalesce: false,
+                                                                                                                                                        index: Int(
+                                                                                                                                                            1,
+                                                                                                                                                        ),
+                                                                                                                                                    },
+                                                                                                                                                },
+                                                                                                                                            ],
+                                                                                                                                        },
+                                                                                                                                        els: None,
+                                                                                                                                    },
+                                                                                                                                },
+                                                                                                                            ],
+                                                                                                                        },
+                                                                                                                    },
+                                                                                                                },
+                                                                                                            },
+                                                                                                        ],
+                                                                                                    },
+                                                                                                },
+                                                                                            ],
+                                                                                        },
+                                                                                    },
+                                                                                },
+                                                                            },
+                                                                        ],
+                                                                    },
+                                                                },
+                                                                Expr {
+                                                                    expr: Invocation {
+                                                                        expr: Variable(
+                                                                            Identifier(
+                                                                                "int",
+                                                                            ),
+                                                                        ),
+                                                                        postfix: false,
+                                                                        coalesce: false,
+                                                                        args: [
+                                                                            Argument {
+                                                                                name: None,
+                                                                                expr: BinaryExpr {
+                                                                                    left: Index {
+                                                                                        expr: Variable(
+                                                                                            Identifier(
+                                                                                                "digits",
+                                                                                            ),
+                                                                                        ),
+                                                                                        coalesce: false,
+                                                                                        index: Int(
+                                                                                            0,
+                                                                                        ),
+                                                                                    },
+                                                                                    op: "+",
+                                                                                    right: Index {
+                                                                                        expr: Variable(
+                                                                                            Identifier(
+                                                                                                "digits",
+                                                                                            ),
+                                                                                        ),
+                                                                                        coalesce: false,
+                                                                                        index: Int(
+                                                                                            -1,
+                                                                                        ),
+                                                                                    },
+                                                                                },
+                                                                            },
+                                                                        ],
+                                                                    },
+                                                                },
+                                                            ],
+                                                        },
+                                                    },
+                                                },
+                                            },
+                                        ],
+                                    },
+                                },
+                                Expr {
+                                    expr: Invocation {
+                                        expr: Variable(
+                                            Identifier(
+                                                "sum",
+                                            ),
+                                        ),
+                                        postfix: true,
+                                        coalesce: false,
+                                        args: [
+                                            Argument {
+                                                name: None,
+                                                expr: Variable(
+                                                    Identifier(
+                                                        "values",
+                                                    ),
+                                                ),
+                                            },
+                                        ],
+                                    },
+                                },
+                            ],
+                        },
+                    },
+                },
+            ],
+            stmts: [
+                Declare {
+                    pattern: Declare {
+                        guard: Unguarded(
+                            Identifier(
+                                "digits",
+                            ),
+                        ),
+                        ty: None,
+                    },
+                    expr: ListLiteral {
+                        elements: [
+                            StrLiteral {
+                                pieces: [
+                                    Fragment(
+                                        "0",
+                                    ),
+                                ],
+                            },
+                            StrLiteral {
+                                pieces: [
+                                    Fragment(
+                                        "1",
+                                    ),
+                                ],
+                            },
+                            StrLiteral {
+                                pieces: [
+                                    Fragment(
+                                        "2",
+                                    ),
+                                ],
+                            },
+                            StrLiteral {
+                                pieces: [
+                                    Fragment(
+                                        "3",
+                                    ),
+                                ],
+                            },
+                            StrLiteral {
+                                pieces: [
+                                    Fragment(
+                                        "4",
+                                    ),
+                                ],
+                            },
+                            StrLiteral {
+                                pieces: [
+                                    Fragment(
+                                        "5",
+                                    ),
+                                ],
+                            },
+                            StrLiteral {
+                                pieces: [
+                                    Fragment(
+                                        "6",
+                                    ),
+                                ],
+                            },
+                            StrLiteral {
+                                pieces: [
+                                    Fragment(
+                                        "7",
+                                    ),
+                                ],
+                            },
+                            StrLiteral {
+                                pieces: [
+                                    Fragment(
+                                        "8",
+                                    ),
+                                ],
+                            },
+                            StrLiteral {
+                                pieces: [
+                                    Fragment(
+                                        "9",
+                                    ),
+                                ],
+                            },
+                        ],
+                        splat: None,
+                    },
+                },
+                Declare {
+                    pattern: Declare {
+                        guard: Unguarded(
+                            Identifier(
+                                "nums",
+                            ),
+                        ),
+                        ty: None,
+                    },
+                    expr: ListLiteral {
+                        elements: [
+                            TupleLiteral {
+                                elements: [
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "0",
+                                            ),
+                                        ],
+                                    },
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "0",
+                                            ),
+                                        ],
+                                    },
+                                ],
+                            },
+                            TupleLiteral {
+                                elements: [
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "1",
+                                            ),
+                                        ],
+                                    },
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "1",
+                                            ),
+                                        ],
+                                    },
+                                ],
+                            },
+                            TupleLiteral {
+                                elements: [
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "2",
+                                            ),
+                                        ],
+                                    },
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "2",
+                                            ),
+                                        ],
+                                    },
+                                ],
+                            },
+                            TupleLiteral {
+                                elements: [
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "3",
+                                            ),
+                                        ],
+                                    },
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "3",
+                                            ),
+                                        ],
+                                    },
+                                ],
+                            },
+                            TupleLiteral {
+                                elements: [
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "4",
+                                            ),
+                                        ],
+                                    },
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "4",
+                                            ),
+                                        ],
+                                    },
+                                ],
+                            },
+                            TupleLiteral {
+                                elements: [
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "5",
+                                            ),
+                                        ],
+                                    },
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "5",
+                                            ),
+                                        ],
+                                    },
+                                ],
+                            },
+                            TupleLiteral {
+                                elements: [
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "6",
+                                            ),
+                                        ],
+                                    },
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "6",
+                                            ),
+                                        ],
+                                    },
+                                ],
+                            },
+                            TupleLiteral {
+                                elements: [
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "7",
+                                            ),
+                                        ],
+                                    },
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "7",
+                                            ),
+                                        ],
+                                    },
+                                ],
+                            },
+                            TupleLiteral {
+                                elements: [
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "8",
+                                            ),
+                                        ],
+                                    },
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "8",
+                                            ),
+                                        ],
+                                    },
+                                ],
+                            },
+                            TupleLiteral {
+                                elements: [
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "9",
+                                            ),
+                                        ],
+                                    },
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "9",
+                                            ),
+                                        ],
+                                    },
+                                ],
+                            },
+                            TupleLiteral {
+                                elements: [
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "zero",
+                                            ),
+                                        ],
+                                    },
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "0",
+                                            ),
+                                        ],
+                                    },
+                                ],
+                            },
+                            TupleLiteral {
+                                elements: [
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "one",
+                                            ),
+                                        ],
+                                    },
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "1",
+                                            ),
+                                        ],
+                                    },
+                                ],
+                            },
+                            TupleLiteral {
+                                elements: [
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "two",
+                                            ),
+                                        ],
+                                    },
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "2",
+                                            ),
+                                        ],
+                                    },
+                                ],
+                            },
+                            TupleLiteral {
+                                elements: [
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "three",
+                                            ),
+                                        ],
+                                    },
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "3",
+                                            ),
+                                        ],
+                                    },
+                                ],
+                            },
+                            TupleLiteral {
+                                elements: [
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "four",
+                                            ),
+                                        ],
+                                    },
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "4",
+                                            ),
+                                        ],
+                                    },
+                                ],
+                            },
+                            TupleLiteral {
+                                elements: [
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "five",
+                                            ),
+                                        ],
+                                    },
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "5",
+                                            ),
+                                        ],
+                                    },
+                                ],
+                            },
+                            TupleLiteral {
+                                elements: [
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "six",
+                                            ),
+                                        ],
+                                    },
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "6",
+                                            ),
+                                        ],
+                                    },
+                                ],
+                            },
+                            TupleLiteral {
+                                elements: [
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "seven",
+                                            ),
+                                        ],
+                                    },
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "7",
+                                            ),
+                                        ],
+                                    },
+                                ],
+                            },
+                            TupleLiteral {
+                                elements: [
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "eight",
+                                            ),
+                                        ],
+                                    },
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "8",
+                                            ),
+                                        ],
+                                    },
+                                ],
+                            },
+                            TupleLiteral {
+                                elements: [
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "nine",
+                                            ),
+                                        ],
+                                    },
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "9",
+                                            ),
+                                        ],
+                                    },
+                                ],
+                            },
+                            TupleLiteral {
+                                elements: [
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "ten",
+                                            ),
+                                        ],
+                                    },
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "0",
+                                            ),
+                                        ],
+                                    },
+                                ],
+                            },
+                            TupleLiteral {
+                                elements: [
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "eleven",
+                                            ),
+                                        ],
+                                    },
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "1",
+                                            ),
+                                        ],
+                                    },
+                                ],
+                            },
+                            TupleLiteral {
+                                elements: [
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "twelve",
+                                            ),
+                                        ],
+                                    },
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "2",
+                                            ),
+                                        ],
+                                    },
+                                ],
+                            },
+                            TupleLiteral {
+                                elements: [
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "thirteen",
+                                            ),
+                                        ],
+                                    },
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "3",
+                                            ),
+                                        ],
+                                    },
+                                ],
+                            },
+                            TupleLiteral {
+                                elements: [
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "fourteen",
+                                            ),
+                                        ],
+                                    },
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "4",
+                                            ),
+                                        ],
+                                    },
+                                ],
+                            },
+                            TupleLiteral {
+                                elements: [
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "fifteen",
+                                            ),
+                                        ],
+                                    },
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "5",
+                                            ),
+                                        ],
+                                    },
+                                ],
+                            },
+                            TupleLiteral {
+                                elements: [
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "sixteen",
+                                            ),
+                                        ],
+                                    },
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "6",
+                                            ),
+                                        ],
+                                    },
+                                ],
+                            },
+                            TupleLiteral {
+                                elements: [
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "seventeen",
+                                            ),
+                                        ],
+                                    },
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "7",
+                                            ),
+                                        ],
+                                    },
+                                ],
+                            },
+                            TupleLiteral {
+                                elements: [
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "eighteen",
+                                            ),
+                                        ],
+                                    },
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "8",
+                                            ),
+                                        ],
+                                    },
+                                ],
+                            },
+                            TupleLiteral {
+                                elements: [
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "nineteen",
+                                            ),
+                                        ],
+                                    },
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "9",
+                                            ),
+                                        ],
+                                    },
+                                ],
+                            },
+                            TupleLiteral {
+                                elements: [
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "twenty",
+                                            ),
+                                        ],
+                                    },
+                                    StrLiteral {
+                                        pieces: [
+                                            Fragment(
+                                                "0",
+                                            ),
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                        splat: None,
+                    },
+                },
+                Expr {
+                    expr: Invocation {
+                        expr: Variable(
+                            Identifier(
+                                "assert",
+                            ),
+                        ),
+                        postfix: false,
+                        coalesce: false,
+                        args: [
+                            Argument {
+                                name: None,
+                                expr: BinaryExpr {
+                                    left: Invocation {
+                                        expr: Variable(
+                                            Identifier(
+                                                "solve",
+                                            ),
+                                        ),
+                                        postfix: false,
+                                        coalesce: false,
+                                        args: [
+                                            Argument {
+                                                name: None,
+                                                expr: StrLiteral {
+                                                    pieces: [
+                                                        Fragment(
+                                                            "1abc2\npqr3stu8vwx\na1b2c3d4e5f\ntreb7uchet",
+                                                        ),
+                                                    ],
+                                                },
+                                            },
+                                        ],
+                                    },
+                                    op: "==",
+                                    right: Int(
+                                        142,
+                                    ),
+                                },
+                            },
+                        ],
+                    },
+                },
+                Expr {
+                    expr: Invocation {
+                        expr: Variable(
+                            Identifier(
+                                "assert",
+                            ),
+                        ),
+                        postfix: false,
+                        coalesce: false,
+                        args: [
+                            Argument {
+                                name: None,
+                                expr: BinaryExpr {
+                                    left: Invocation {
+                                        expr: Variable(
+                                            Identifier(
+                                                "bonus",
+                                            ),
+                                        ),
+                                        postfix: false,
+                                        coalesce: false,
+                                        args: [
+                                            Argument {
+                                                name: None,
+                                                expr: StrLiteral {
+                                                    pieces: [
+                                                        Fragment(
+                                                            "two1nine\neightwothree\nabcone2threexyz\nxtwone3four\n4nineeightseven2\nzoneight234\n7pqrstsixteen",
+                                                        ),
+                                                    ],
+                                                },
+                                            },
+                                        ],
+                                    },
+                                    op: "==",
+                                    right: Int(
+                                        281,
+                                    ),
+                                },
+                            },
+                        ],
+                    },
+                },
+            ],
+        },
+    },
+)
