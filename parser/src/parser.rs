@@ -585,8 +585,11 @@ fn dict_pair(s: State) -> ParseResult<State, (DictKey, Expr)> {
     alt((
         map(
             seq((
-                preceded(char('.'), identifier),
-                optional(preceded(ws1, constrained(false, expr))),
+                preceded(tag("."), identifier),
+                optional(preceded(
+                    seq((ws0, tag(":"), ws0)),
+                    constrained(false, expr),
+                )),
             )),
             |(id, value)| match value {
                 Some(value) => (DictKey::Identifier(id), value),
@@ -595,7 +598,7 @@ fn dict_pair(s: State) -> ParseResult<State, (DictKey, Expr)> {
         ),
         seq((
             map(constrained(true, expr), DictKey::Expr),
-            preceded(ws1, constrained(false, expr)),
+            preceded(seq((ws0, tag(":"), ws0)), constrained(false, expr)),
         )),
     ))
     .parse(s)

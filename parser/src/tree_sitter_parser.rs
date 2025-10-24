@@ -6,18 +6,31 @@ use crate::ast::{
     TypeVar,
 };
 
+pub fn parse_document_ts(source: &str) -> Option<Document> {
+    let mut parser = tree_sitter::Parser::new();
+    let language = tree_sitter_adventlang::LANGUAGE;
+    parser
+        .set_language(&language.into())
+        .expect("Error loading Adventlang parser");
+
+    let tree = parser.parse(source, None).unwrap();
+
+    let root_node = tree.root_node();
+
+    if root_node.has_error() {
+        return None;
+    }
+
+    let converter = Converter { source };
+    Some(converter.as_doc(root_node))
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::tree_sitter_parser::Converter;
+    use crate::tree_sitter_parser::parse_document_ts;
 
     #[test]
     fn test() {
-        let mut parser = tree_sitter::Parser::new();
-        let language = tree_sitter_adventlang::LANGUAGE;
-        parser
-            .set_language(&language.into())
-            .expect("Error loading Adventlang parser");
-
         let source = r#"
 if hi {}
 
@@ -30,13 +43,7 @@ fn bla<t>([a: int, .. rem] = [2+3]) {
 }
 "#;
 
-        let tree = parser.parse(source, None).unwrap();
-        assert!(!tree.root_node().has_error());
-
-        let node = tree.root_node();
-
-        let converter = Converter { source };
-        let doc = converter.as_doc(node);
+        let doc = parse_document_ts(source).expect("can parse");
 
         println!("{doc:?}");
     }

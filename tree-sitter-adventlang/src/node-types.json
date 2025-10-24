@@ -38,6 +38,10 @@
         "named": true
       },
       {
+        "type": "dict_expr",
+        "named": true
+      },
+      {
         "type": "do_while_expr",
         "named": true
       },
@@ -756,6 +760,58 @@
           "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "dict_expr",
+    "named": true,
+    "fields": {
+      "pair": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "dict_pair",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "dict_pair",
+    "named": true,
+    "fields": {
+      "expr_key": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "_expr",
+            "named": true
+          }
+        ]
+      },
+      "id_key": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "val": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "_expr",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -1838,6 +1894,10 @@
   },
   {
     "type": "??=",
+    "named": false
+  },
+  {
+    "type": "@{",
     "named": false
   },
   {

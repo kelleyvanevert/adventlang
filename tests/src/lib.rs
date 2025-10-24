@@ -2,7 +2,7 @@
 mod tests {
     use test_case::test_case;
 
-    use parser::parse_document;
+    use parser::{parse_document, parse_document_ts};
 
     #[test_case("2023_day01")]
     #[test_case("2023_day02")]
@@ -30,6 +30,10 @@ mod tests {
         let content =
             std::fs::read_to_string(format!("./aoc/{name}.al")).expect("can read aoc file");
 
-        assert!(parse_document(&content).is_some());
+        let doc = parse_document(&content);
+        assert!(doc.is_some());
+
+        // let doc2 = parse_document_ts(&content);
+        // assert!(doc2.is_some());
     }
 }

@@ -256,6 +256,7 @@ module.exports = grammar({
       $._literal,
       $.list_expr,
       $.tuple_expr,
+      $.dict_expr,
       $.anonymous_fn,
       $.unary_expression,
       $.binary_expr,
@@ -321,6 +322,20 @@ module.exports = grammar({
       repeat(seq(field("element", $._expr), ",")),
       optional(field("element", $._expr)),
       ")",
+    ),
+
+    dict_expr: $ => seq(
+      "@{",
+      sepBy(
+        ",",
+        field("pair", $.dict_pair),
+      ),
+      "}",
+    ),
+
+    dict_pair: $ => choice(
+      seq(".", field("id_key", $.identifier), optional(seq(":", field("val", $._expr)))),
+      seq(field("expr_key", $._expr), optional(seq(":", field("val", $._expr)))),
     ),
 
     do_while_expr: $ => seq(
