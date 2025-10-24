@@ -25,7 +25,7 @@
 ; Function calls
 
 (regular_call_expr
-  function: (expr (identifier) @function))
+  function: (identifier) @function)
 
 (postfix_call_expr
   function: (identifier) @function)
