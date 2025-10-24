@@ -1428,7 +1428,39 @@
         "required": false,
         "types": [
           {
-            "type": "_expr",
+            "type": "_literal",
+            "named": true
+          },
+          {
+            "type": "anonymous_fn",
+            "named": true
+          },
+          {
+            "type": "dict_expr",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "index_expr",
+            "named": true
+          },
+          {
+            "type": "list_expr",
+            "named": true
+          },
+          {
+            "type": "member_expr",
+            "named": true
+          },
+          {
+            "type": "parenthesized_expr",
+            "named": true
+          },
+          {
+            "type": "tuple_expr",
             "named": true
           }
         ]

@@ -1707,7 +1707,7 @@
     },
     "member_lookup": {
       "type": "PREC_LEFT",
-      "value": 15,
+      "value": 20,
       "content": {
         "type": "SEQ",
         "members": [
@@ -1736,7 +1736,7 @@
     },
     "index_lookup": {
       "type": "PREC_LEFT",
-      "value": 15,
+      "value": 20,
       "content": {
         "type": "SEQ",
         "members": [
@@ -1852,9 +1852,54 @@
         }
       ]
     },
+    "_non_binary_expr": {
+      "type": "PREC",
+      "value": 90,
+      "content": {
+        "type": "CHOICE",
+        "members": [
+          {
+            "type": "SYMBOL",
+            "name": "_literal"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "list_expr"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "tuple_expr"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "dict_expr"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "anonymous_fn"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "parenthesized_expr"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "member_expr"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "index_expr"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "identifier"
+          }
+        ]
+      }
+    },
     "member_expr": {
       "type": "PREC_LEFT",
-      "value": 15,
+      "value": 20,
       "content": {
         "type": "SEQ",
         "members": [
@@ -1899,7 +1944,7 @@
     },
     "index_expr": {
       "type": "PREC_LEFT",
-      "value": 15,
+      "value": 20,
       "content": {
         "type": "SEQ",
         "members": [
@@ -1948,7 +1993,7 @@
     },
     "postfix_index_expr": {
       "type": "PREC_LEFT",
-      "value": 15,
+      "value": 40,
       "content": {
         "type": "SEQ",
         "members": [
@@ -2001,7 +2046,7 @@
     },
     "postfix_call_expr": {
       "type": "PREC_LEFT",
-      "value": 15,
+      "value": 70,
       "content": {
         "type": "SEQ",
         "members": [
@@ -2049,7 +2094,7 @@
                 "name": "right",
                 "content": {
                   "type": "SYMBOL",
-                  "name": "_expr"
+                  "name": "_non_binary_expr"
                 }
               },
               {
@@ -2098,7 +2143,7 @@
     },
     "regular_call_expr": {
       "type": "PREC_LEFT",
-      "value": 16,
+      "value": 30,
       "content": {
         "type": "SEQ",
         "members": [
@@ -3650,7 +3695,7 @@
     },
     "anonymous_fn": {
       "type": "PREC_LEFT",
-      "value": 16,
+      "value": 30,
       "content": {
         "type": "SEQ",
         "members": [

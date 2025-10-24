@@ -8,8 +8,8 @@
 // @ts-check
 
 const PREC = {
-  call: 16,
-  member: 15,
+  call: 30,
+  member: 20,
   try: 14,
   unary: 13,
   cast: 12,
@@ -25,7 +25,6 @@ const PREC = {
   or: 2,
   range: 1,
   assign: 0,
-  closure: -1,
 };
 
 function blockContents($) {
@@ -77,6 +76,8 @@ module.exports = grammar({
     [$.do_while_expr, $.parenthesized_expr],
 
     [$.assign_list, $.list_expr],
+
+    // [$._non_binary_expr, $._expr],
   ],
 
   rules: {
@@ -275,34 +276,57 @@ module.exports = grammar({
       $.identifier,
     ),
 
-    member_expr: $ => prec.left(PREC.member, seq(
+    _non_binary_expr: $ => prec(90, choice(
+      $._literal,
+      $.list_expr,
+      $.tuple_expr,
+      $.dict_expr,
+      $.anonymous_fn,
+      // $.unary_expression,
+      // $.binary_expr,
+      $.parenthesized_expr,
+      // $.do_while_expr,
+      // $.while_expr,
+      // $.if_expr,
+      // $.loop_expr,
+      // $.for_expr,
+
+      $.member_expr,
+      $.index_expr,
+
+      // $.block_expr,
+
+      $.identifier,
+    )),
+
+    member_expr: $ => prec.left(20, seq(
       field("container", $._expr), optional(field("coalesce", "?")), ".", field("member", $._field_identifier),
     )),
 
-    index_expr: $ => prec.left(PREC.member, seq(
+    index_expr: $ => prec.left(20, seq(
       field("container", $._expr), optional(field("coalesce", "?")), "[", field("index", $._expr), "]",
     )),
 
-    postfix_index_expr: $ => prec.left(PREC.member, seq(
+    postfix_index_expr: $ => prec.left(40, seq(
       field("container", $._expr), optional(field("coalesce", "?")), ":", "[", field("index", $._expr), "]",
     )),
 
-    postfix_call_expr: $ => prec.left(PREC.member, seq(
+    postfix_call_expr: $ => prec.left(70, seq(
       field("left", $._expr),
 
-      // ugly, but it works...
       optional(field("coalesce", "?")),
       ":",
 
       field("function", $.identifier),
-      optional(field("right", $._expr)),
-      repeat(field("named_arg", $.postfix_named_arg)),
+
+      optional(field("right", $._non_binary_expr)),
+      repeat(field("named_arg", $.postfix_named_arg))
     )),
 
     postfix_named_arg: $ => seq("'", field("name", $.identifier), field("expr", $._expr)),
 
-    regular_call_expr: $ => prec.left(PREC.call, seq(
-      field("function", $._expr), // instead of generalized `expr`, because I'm gonna have to statically type it anyway..
+    regular_call_expr: $ => prec.left(30, seq(
+      field("function", $._expr),
       optional(field("coalesce", "?")),
       "(",
       listElements("argument", seq(optional(seq(field("name", $.identifier), "=")), field("expr", $._expr))),
