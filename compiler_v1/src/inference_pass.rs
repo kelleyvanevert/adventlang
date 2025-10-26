@@ -187,7 +187,9 @@ impl InferencePass {
     fn fresh_var(&mut self) -> Identifier {
         let n = self.next_var_id;
         self.next_var_id += 1;
-        let id = Identifier(format!("__{}", n).into());
+        let id = Identifier {
+            name: format!("__{}", n),
+        };
 
         id
     }
@@ -278,7 +280,7 @@ impl InferencePass {
     fn process_item(&mut self, scope: &mut Scope, item: &Item) {
         match item {
             Item::NamedFn { name, decl } => {
-                let fn_id = self.process_fn_decl(scope, Some(name.0.clone().into()), decl);
+                let fn_id = self.process_fn_decl(scope, Some(name.name.clone().into()), decl);
 
                 scope.declare_named_fn(name.clone(), fn_id);
             }
@@ -948,7 +950,10 @@ impl InferencePass {
                 return self.process_expr(
                     scope,
                     &Expr::Invocation {
-                        expr: Expr::Variable(Identifier(format!("op{op}").into())).into(),
+                        expr: Expr::Variable(Identifier {
+                            name: format!("op{op}"),
+                        })
+                        .into(),
                         postfix: false,
                         coalesce: false,
                         args: vec![
@@ -970,7 +975,10 @@ impl InferencePass {
                 return self.process_expr(
                     scope,
                     &Expr::Invocation {
-                        expr: Expr::Variable(Identifier(format!("op{op}").into())).into(),
+                        expr: Expr::Variable(Identifier {
+                            name: format!("op{op}"),
+                        })
+                        .into(),
                         postfix: false,
                         coalesce: false,
                         args: vec![Argument {
@@ -990,7 +998,10 @@ impl InferencePass {
                 return self.process_expr(
                     scope,
                     &Expr::Invocation {
-                        expr: Expr::Variable(Identifier("op[]".into())).into(),
+                        expr: Expr::Variable(Identifier {
+                            name: "op[]".into(),
+                        })
+                        .into(),
                         postfix: false,
                         coalesce: false,
                         args: vec![

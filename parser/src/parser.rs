@@ -88,8 +88,8 @@ fn regex<'a>(re: &'static str) -> impl Parser<State<'a>, Output = &'a str> {
 }
 
 fn raw_identifier(s: State) -> ParseResult<State, Identifier> {
-    map(regex(r"^[_a-zA-Z][_a-zA-Z0-9]*"), |id| {
-        Identifier(id.into())
+    map(regex(r"^[_a-zA-Z][_a-zA-Z0-9]*"), |id| Identifier {
+        name: id.to_string(),
     })
     .parse(s)
 }
@@ -99,7 +99,7 @@ fn identifier(s: State) -> ParseResult<State, Identifier> {
         ![
             "fn", "if", "else", "then", "while", "do", "for", "let", "loop", "true", "false",
         ]
-        .contains(&id.0.as_str())
+        .contains(&id.name.as_str())
     })
     .parse(s)
 }
@@ -720,7 +720,7 @@ fn expr_index_or_method_stack(s: State) -> ParseResult<State, Expr> {
                             expr: expr.into(),
                             coalesce: coalesce.is_some(),
                             index: Expr::StrLiteral {
-                                pieces: vec![StrLiteralPiece::Fragment(id.0.to_string())],
+                                pieces: vec![StrLiteralPiece::Fragment(id.name.to_string())],
                             }
                             .into(),
                         };
@@ -1588,7 +1588,7 @@ mod tests {
     use crate::ast::*;
 
     fn id(id: &str) -> Identifier {
-        Identifier(id.into())
+        Identifier { name: id.into() }
     }
 
     fn tv(id: &str) -> TypeVar {
@@ -1596,7 +1596,7 @@ mod tests {
     }
 
     fn var(name: &str) -> Expr {
-        Expr::Variable(Identifier(name.into()))
+        Expr::Variable(Identifier { name: name.into() })
     }
 
     fn empty_block() -> Expr {

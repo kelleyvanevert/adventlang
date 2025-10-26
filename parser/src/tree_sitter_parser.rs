@@ -527,7 +527,9 @@ impl<'a> Converter<'a> {
     }
 
     fn as_identifier(&self, node: Node) -> Identifier {
-        Identifier(self.as_str(node).trim().into())
+        Identifier {
+            name: self.as_str(node).trim().into(),
+        }
     }
 
     fn as_label(&self, node: Node) -> Identifier {

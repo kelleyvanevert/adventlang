@@ -1,23 +1,25 @@
 use std::fmt::Display;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Identifier(pub String);
+pub struct Identifier {
+    pub name: String,
+}
 
 impl<'a> From<&'a str> for Identifier {
     fn from(id: &'a str) -> Self {
-        Identifier(id.into())
+        Identifier { name: id.into() }
     }
 }
 
 impl From<String> for Identifier {
     fn from(id: String) -> Self {
-        Identifier(id.into())
+        Identifier { name: id }
     }
 }
 
 impl Display for Identifier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        write!(f, "{}", self.name)
     }
 }
 

@@ -135,7 +135,9 @@ impl DesugarPass {
     fn fresh_var(&mut self) -> ast::Identifier {
         let n = self.next_var_id;
         self.next_var_id += 1;
-        let id = ast::Identifier(format!("__{}", n).into());
+        let id = ast::Identifier {
+            name: format!("__{}", n),
+        };
 
         id
     }
@@ -224,7 +226,7 @@ impl DesugarPass {
     fn process_item(&mut self, scope: &mut Scope, item: &ast::Item) {
         match item {
             ast::Item::NamedFn { name, decl } => {
-                let fn_id = self.process_fn_decl(scope, Some(name.0.clone().into()), decl);
+                let fn_id = self.process_fn_decl(scope, Some(name.name.clone().into()), decl);
 
                 scope.declare_named_fn(name.clone(), fn_id);
             }
@@ -462,7 +464,10 @@ impl DesugarPass {
                 return self.process_expr(
                     scope,
                     &ast::Expr::Invocation {
-                        expr: ast::Expr::Variable(ast::Identifier(format!("op{op}").into())).into(),
+                        expr: ast::Expr::Variable(ast::Identifier {
+                            name: format!("op{op}"),
+                        })
+                        .into(),
                         postfix: false,
                         coalesce: false,
                         args: vec![
@@ -484,7 +489,10 @@ impl DesugarPass {
                 return self.process_expr(
                     scope,
                     &ast::Expr::Invocation {
-                        expr: ast::Expr::Variable(ast::Identifier(format!("op{op}").into())).into(),
+                        expr: ast::Expr::Variable(ast::Identifier {
+                            name: format!("op{op}"),
+                        })
+                        .into(),
                         postfix: false,
                         coalesce: false,
                         args: vec![ast::Argument {

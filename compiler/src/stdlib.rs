@@ -11,7 +11,7 @@ fn tv_ty(id: &str) -> Type {
 }
 
 fn id(id: &str) -> Identifier {
-    Identifier(id.into())
+    Identifier { name: id.into() }
 }
 
 pub struct StdlibFn {
