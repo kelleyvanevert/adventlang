@@ -1718,10 +1718,6 @@
         },
         {
           "type": "SYMBOL",
-          "name": "postfix_call_expr"
-        },
-        {
-          "type": "SYMBOL",
           "name": "_literal"
         },
         {
@@ -1936,103 +1932,6 @@
           }
         ]
       }
-    },
-    "postfix_call_expr": {
-      "type": "PREC_LEFT",
-      "value": 20,
-      "content": {
-        "type": "SEQ",
-        "members": [
-          {
-            "type": "FIELD",
-            "name": "left",
-            "content": {
-              "type": "SYMBOL",
-              "name": "_expr"
-            }
-          },
-          {
-            "type": "CHOICE",
-            "members": [
-              {
-                "type": "FIELD",
-                "name": "coalesce",
-                "content": {
-                  "type": "STRING",
-                  "value": "?"
-                }
-              },
-              {
-                "type": "BLANK"
-              }
-            ]
-          },
-          {
-            "type": "STRING",
-            "value": ":"
-          },
-          {
-            "type": "FIELD",
-            "name": "function",
-            "content": {
-              "type": "SYMBOL",
-              "name": "identifier"
-            }
-          },
-          {
-            "type": "CHOICE",
-            "members": [
-              {
-                "type": "SYMBOL",
-                "name": "postfix_right_arg"
-              },
-              {
-                "type": "BLANK"
-              }
-            ]
-          },
-          {
-            "type": "REPEAT",
-            "content": {
-              "type": "FIELD",
-              "name": "named_arg",
-              "content": {
-                "type": "SYMBOL",
-                "name": "postfix_named_arg"
-              }
-            }
-          }
-        ]
-      }
-    },
-    "postfix_right_arg": {
-      "type": "SEQ",
-      "members": [
-        {
-          "type": "CHOICE",
-          "members": [
-            {
-              "type": "SYMBOL",
-              "name": "_ws_preceding_arg"
-            },
-            {
-              "type": "BLANK"
-            }
-          ]
-        },
-        {
-          "type": "FIELD",
-          "name": "right",
-          "content": {
-            "type": "PREC_LEFT",
-            "value": 10,
-            "content": {
-              "type": "SYMBOL",
-              "name": "_expr"
-            }
-          }
-        }
-      ]
     },
     "postfix_named_arg": {
       "type": "SEQ",
@@ -3574,6 +3473,58 @@
                 "content": {
                   "type": "SYMBOL",
                   "name": "_expr"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "type": "PREC_LEFT",
+          "value": 20,
+          "content": {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "FIELD",
+                "name": "left",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "_expr"
+                }
+              },
+              {
+                "type": "FIELD",
+                "name": "operator",
+                "content": {
+                  "type": "PATTERN",
+                  "value": "\\??:[a-z_]+"
+                }
+              },
+              {
+                "type": "CHOICE",
+                "members": [
+                  {
+                    "type": "FIELD",
+                    "name": "right",
+                    "content": {
+                      "type": "SYMBOL",
+                      "name": "_expr"
+                    }
+                  },
+                  {
+                    "type": "BLANK"
+                  }
+                ]
+              },
+              {
+                "type": "REPEAT",
+                "content": {
+                  "type": "FIELD",
+                  "name": "named_arg",
+                  "content": {
+                    "type": "SYMBOL",
+                    "name": "postfix_named_arg"
+                  }
                 }
               }
             ]

@@ -78,10 +78,6 @@
         "named": true
       },
       {
-        "type": "postfix_call_expr",
-        "named": true
-      },
-      {
         "type": "postfix_index_expr",
         "named": true
       },
@@ -421,6 +417,16 @@
           }
         ]
       },
+      "named_arg": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "postfix_named_arg",
+            "named": true
+          }
+        ]
+      },
       "operator": {
         "multiple": false,
         "required": true,
@@ -509,7 +515,7 @@
       },
       "right": {
         "multiple": false,
-        "required": true,
+        "required": false,
         "types": [
           {
             "type": "_expr",
@@ -1406,62 +1412,6 @@
     }
   },
   {
-    "type": "postfix_call_expr",
-    "named": true,
-    "fields": {
-      "coalesce": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "?",
-            "named": false
-          }
-        ]
-      },
-      "function": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "identifier",
-            "named": true
-          }
-        ]
-      },
-      "left": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "_expr",
-            "named": true
-          }
-        ]
-      },
-      "named_arg": {
-        "multiple": true,
-        "required": false,
-        "types": [
-          {
-            "type": "postfix_named_arg",
-            "named": true
-          }
-        ]
-      }
-    },
-    "children": {
-      "multiple": false,
-      "required": false,
-      "types": [
-        {
-          "type": "postfix_right_arg",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
     "type": "postfix_index_expr",
     "named": true,
     "fields": {
@@ -1517,22 +1467,6 @@
         "types": [
           {
             "type": "identifier",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "postfix_right_arg",
-    "named": true,
-    "fields": {
-      "right": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "_expr",
             "named": true
           }
         ]
