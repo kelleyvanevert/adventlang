@@ -12,8 +12,8 @@ impl<'a> From<&'a str> for Identifier {
 }
 
 impl From<String> for Identifier {
-    fn from(id: String) -> Self {
-        Identifier { name: id }
+    fn from(name: String) -> Self {
+        Identifier { name }
     }
 }
 
