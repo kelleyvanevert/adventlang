@@ -137,9 +137,17 @@ impl<'a> Converter<'a> {
         match node.kind() {
             "parenthesized_expr" => node.map_child("child", |node| self.as_expr(node)),
             "integer_literal" => Expr::Int(self.as_int(node)),
-            "boolean_literal" => Expr::Bool(self.as_str(node) == "true"),
+            "boolean_literal" => Expr::Bool(self.as_str(node).trim() == "true"),
             "nil_literal" => Expr::NilLiteral,
-            "regex_literal" => todo!("interpret regex literal"),
+            "regex_literal" => Expr::RegexLiteral(
+                self.as_str(node)
+                    .trim()
+                    .strip_prefix('/')
+                    .unwrap()
+                    .strip_suffix('/')
+                    .unwrap()
+                    .to_string(),
+            ),
             "float_literal" => todo!("interpret float literal"),
             "identifier" => Expr::Variable(self.as_identifier(node)),
             "unary_expression" => Expr::UnaryExpr {
@@ -250,13 +258,18 @@ impl<'a> Converter<'a> {
                     expr: node.map_child("expr", |node| self.as_expr(node)),
                 }));
 
+                let mut f = node.map_child("operator", |node| self.as_str(node)).trim();
+                let mut coalesce = false;
+
+                if f.starts_with("?") {
+                    coalesce = true;
+                    f = &f[1..];
+                }
+
                 Expr::Invocation {
-                    expr: Expr::Variable(
-                        node.map_child("function", |node| self.as_identifier(node)),
-                    )
-                    .into(),
+                    expr: Expr::Variable(Identifier(f[1..].to_string())).into(),
                     postfix: true,
-                    coalesce: node.has_child("coalesce"),
+                    coalesce,
                     args,
                 }
             }
@@ -345,7 +358,7 @@ impl<'a> Converter<'a> {
         match node.kind() {
             "declare_var" => {
                 let id = self.as_identifier(node.child_by_field_name("name").unwrap());
-                let guard = if node.child_by_field_name("declare_guard").is_some() {
+                let guard = if node.child_by_field_name("guard").is_some() {
                     DeclareGuardExpr::Some(id)
                 } else {
                     DeclareGuardExpr::Unguarded(id)
@@ -471,7 +484,7 @@ impl<'a> Converter<'a> {
     }
 
     fn as_identifier(&self, node: Node) -> Identifier {
-        Identifier(self.as_str(node).into())
+        Identifier(self.as_str(node).trim().into())
     }
 
     fn as_label(&self, node: Node) -> Identifier {
@@ -483,7 +496,9 @@ impl<'a> Converter<'a> {
     }
 
     fn as_int(&self, node: Node) -> i64 {
-        self.as_str(node).parse().unwrap()
+        let str = self.as_str(node).trim();
+        str.parse()
+            .expect(&format!("can parse str as int: [{str}]"))
     }
 }
 

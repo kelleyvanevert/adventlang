@@ -1041,8 +1041,12 @@
           "type": "CHOICE",
           "members": [
             {
-              "type": "SYMBOL",
-              "name": "declare_guard"
+              "type": "FIELD",
+              "name": "guard",
+              "content": {
+                "type": "SYMBOL",
+                "name": "declare_guard"
+              }
             },
             {
               "type": "BLANK"
@@ -1368,7 +1372,7 @@
           "name": "pattern",
           "content": {
             "type": "SYMBOL",
-            "name": "assign_pattern"
+            "name": "_assign_pattern"
           }
         },
         {
@@ -1430,7 +1434,7 @@
         }
       ]
     },
-    "assign_pattern": {
+    "_assign_pattern": {
       "type": "PREC_LEFT",
       "value": 0,
       "content": {
@@ -1453,7 +1457,7 @@
     },
     "assign_location": {
       "type": "SYMBOL",
-      "name": "lookup"
+      "name": "_lookup"
     },
     "assign_list": {
       "type": "SEQ",
@@ -1476,7 +1480,7 @@
                       "name": "element",
                       "content": {
                         "type": "SYMBOL",
-                        "name": "assign_pattern"
+                        "name": "_assign_pattern"
                       }
                     },
                     {
@@ -1493,7 +1497,7 @@
                             "name": "element",
                             "content": {
                               "type": "SYMBOL",
-                              "name": "assign_pattern"
+                              "name": "_assign_pattern"
                             }
                           }
                         ]
@@ -1535,7 +1539,7 @@
                   "name": "splat",
                   "content": {
                     "type": "SYMBOL",
-                    "name": "assign_pattern"
+                    "name": "_assign_pattern"
                   }
                 }
               ]
@@ -1572,7 +1576,7 @@
                       "name": "element",
                       "content": {
                         "type": "SYMBOL",
-                        "name": "assign_pattern"
+                        "name": "_assign_pattern"
                       }
                     },
                     {
@@ -1589,7 +1593,7 @@
                             "name": "element",
                             "content": {
                               "type": "SYMBOL",
-                              "name": "assign_pattern"
+                              "name": "_assign_pattern"
                             }
                           }
                         ]
@@ -1622,7 +1626,7 @@
         }
       ]
     },
-    "lookup": {
+    "_lookup": {
       "type": "PREC_DYNAMIC",
       "value": -1,
       "content": {
@@ -1654,7 +1658,7 @@
             "name": "container",
             "content": {
               "type": "SYMBOL",
-              "name": "lookup"
+              "name": "_lookup"
             }
           },
           {
@@ -1683,7 +1687,7 @@
             "name": "container",
             "content": {
               "type": "SYMBOL",
-              "name": "lookup"
+              "name": "_lookup"
             }
           },
           {
@@ -1715,6 +1719,10 @@
         {
           "type": "SYMBOL",
           "name": "postfix_index_expr"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "postfix_call_expr"
         },
         {
           "type": "SYMBOL",
@@ -3477,32 +3485,53 @@
               }
             ]
           }
-        },
-        {
-          "type": "PREC_LEFT",
-          "value": 20,
-          "content": {
-            "type": "SEQ",
+        }
+      ]
+    },
+    "postfix_op": {
+      "type": "PATTERN",
+      "value": "\\??:[a-z_]+"
+    },
+    "postfix_call_expr": {
+      "type": "PREC_LEFT",
+      "value": 20,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "FIELD",
+            "name": "left",
+            "content": {
+              "type": "SYMBOL",
+              "name": "_expr"
+            }
+          },
+          {
+            "type": "FIELD",
+            "name": "operator",
+            "content": {
+              "type": "SYMBOL",
+              "name": "postfix_op"
+            }
+          },
+          {
+            "type": "CHOICE",
             "members": [
               {
-                "type": "FIELD",
-                "name": "left",
-                "content": {
-                  "type": "SYMBOL",
-                  "name": "_expr"
-                }
-              },
-              {
-                "type": "FIELD",
-                "name": "operator",
-                "content": {
-                  "type": "PATTERN",
-                  "value": "\\??:[a-z_]+"
-                }
-              },
-              {
-                "type": "CHOICE",
+                "type": "SEQ",
                 "members": [
+                  {
+                    "type": "CHOICE",
+                    "members": [
+                      {
+                        "type": "SYMBOL",
+                        "name": "_ws_preceding_arg"
+                      },
+                      {
+                        "type": "BLANK"
+                      }
+                    ]
+                  },
                   {
                     "type": "FIELD",
                     "name": "right",
@@ -3510,27 +3539,27 @@
                       "type": "SYMBOL",
                       "name": "_expr"
                     }
-                  },
-                  {
-                    "type": "BLANK"
                   }
                 ]
               },
               {
-                "type": "REPEAT",
-                "content": {
-                  "type": "FIELD",
-                  "name": "named_arg",
-                  "content": {
-                    "type": "SYMBOL",
-                    "name": "postfix_named_arg"
-                  }
-                }
+                "type": "BLANK"
               }
             ]
+          },
+          {
+            "type": "REPEAT",
+            "content": {
+              "type": "FIELD",
+              "name": "named_arg",
+              "content": {
+                "type": "SYMBOL",
+                "name": "postfix_named_arg"
+              }
+            }
           }
-        }
-      ]
+        ]
+      }
     },
     "anonymous_fn": {
       "type": "PREC_LEFT",
@@ -3931,7 +3960,7 @@
   ],
   "conflicts": [
     [
-      "lookup",
+      "_lookup",
       "_expr"
     ],
     [
@@ -3976,7 +4005,9 @@
     "_type",
     "_stmt",
     "_literal",
-    "_declare_pattern"
+    "_declare_pattern",
+    "_assign_pattern",
+    "_lookup"
   ],
   "reserved": {}
 }

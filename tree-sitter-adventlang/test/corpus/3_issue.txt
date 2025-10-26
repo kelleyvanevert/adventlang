@@ -10,10 +10,108 @@ line :starts_with t[0]
     (expr_stmt
         (postfix_call_expr
             left: (identifier)
-            function: (identifier)
+            operator: (postfix_op)
             right: (index_expr
                 container: (identifier)
                 index: (integer_literal)
             )
         )
     ))
+
+===============
+Precedence issue example 2
+===============
+
+arr :map a :map (a, b)
+
+---
+
+(source_file
+    (expr_stmt
+    (postfix_call_expr
+        (postfix_call_expr
+            (identifier)
+            (postfix_op)
+            (identifier)
+        )
+        (postfix_op)
+        (tuple_expr
+            (identifier)
+            (identifier)))))
+
+===============
+Precedence issue example 3
+===============
+
+arr :map a :map f(a, b)
+
+---
+
+(source_file
+    (expr_stmt
+    (postfix_call_expr
+        (postfix_call_expr
+            (identifier)
+            (postfix_op)
+            (identifier)
+        )
+        (postfix_op)
+        (regular_call_expr
+            (identifier)
+            (call_arg (identifier))
+            (call_arg (identifier))))))
+
+===============
+Precedence issue example 4
+===============
+
+line :slice 0 :starts_with t[0]
+
+---
+
+(source_file
+    (expr_stmt
+    (postfix_call_expr
+        (postfix_call_expr
+            (identifier)
+            (postfix_op)
+            (integer_literal))
+        (postfix_op)
+        (index_expr
+            (identifier)
+            (integer_literal)))))
+
+===============
+Precedence issue example 5
+===============
+
+line :slice 0 :starts_with [0]
+
+---
+
+(source_file
+    (expr_stmt
+    (postfix_call_expr
+        (postfix_call_expr
+            (identifier)
+            (postfix_op)
+            (integer_literal))
+        (postfix_op)
+        (list_expr
+            (integer_literal)))))
+
+===============
+Precedence issue example 6
+===============
+
+line:len < 2
+
+---
+
+(source_file
+    (expr_stmt
+    (binary_expr
+        (postfix_call_expr
+            (identifier)
+            (postfix_op))
+        (integer_literal))))

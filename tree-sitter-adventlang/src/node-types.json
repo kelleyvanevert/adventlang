@@ -1,5 +1,23 @@
 [
   {
+    "type": "_assign_pattern",
+    "named": true,
+    "subtypes": [
+      {
+        "type": "assign_list",
+        "named": true
+      },
+      {
+        "type": "assign_location",
+        "named": true
+      },
+      {
+        "type": "assign_tuple",
+        "named": true
+      }
+    ]
+  },
+  {
     "type": "_declare_pattern",
     "named": true,
     "subtypes": [
@@ -78,6 +96,10 @@
         "named": true
       },
       {
+        "type": "postfix_call_expr",
+        "named": true
+      },
+      {
         "type": "postfix_index_expr",
         "named": true
       },
@@ -125,6 +147,24 @@
       },
       {
         "type": "str_literal",
+        "named": true
+      }
+    ]
+  },
+  {
+    "type": "_lookup",
+    "named": true,
+    "subtypes": [
+      {
+        "type": "identifier",
+        "named": true
+      },
+      {
+        "type": "index_lookup",
+        "named": true
+      },
+      {
+        "type": "member_lookup",
         "named": true
       }
     ]
@@ -260,7 +300,7 @@
         "required": false,
         "types": [
           {
-            "type": "assign_pattern",
+            "type": "_assign_pattern",
             "named": true
           }
         ]
@@ -270,7 +310,7 @@
         "required": false,
         "types": [
           {
-            "type": "assign_pattern",
+            "type": "_assign_pattern",
             "named": true
           }
         ]
@@ -286,30 +326,7 @@
       "required": true,
       "types": [
         {
-          "type": "lookup",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
-    "type": "assign_pattern",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": false,
-      "required": true,
-      "types": [
-        {
-          "type": "assign_list",
-          "named": true
-        },
-        {
-          "type": "assign_location",
-          "named": true
-        },
-        {
-          "type": "assign_tuple",
+          "type": "_lookup",
           "named": true
         }
       ]
@@ -380,7 +397,7 @@
         "required": true,
         "types": [
           {
-            "type": "assign_pattern",
+            "type": "_assign_pattern",
             "named": true
           }
         ]
@@ -396,7 +413,7 @@
         "required": false,
         "types": [
           {
-            "type": "assign_pattern",
+            "type": "_assign_pattern",
             "named": true
           }
         ]
@@ -413,16 +430,6 @@
         "types": [
           {
             "type": "_expr",
-            "named": true
-          }
-        ]
-      },
-      "named_arg": {
-        "multiple": true,
-        "required": false,
-        "types": [
-          {
-            "type": "postfix_named_arg",
             "named": true
           }
         ]
@@ -515,7 +522,7 @@
       },
       "right": {
         "multiple": false,
-        "required": false,
+        "required": true,
         "types": [
           {
             "type": "_expr",
@@ -762,6 +769,16 @@
     "type": "declare_var",
     "named": true,
     "fields": {
+      "guard": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "declare_guard",
+            "named": true
+          }
+        ]
+      },
       "name": {
         "multiple": false,
         "required": true,
@@ -782,16 +799,6 @@
           }
         ]
       }
-    },
-    "children": {
-      "multiple": false,
-      "required": false,
-      "types": [
-        {
-          "type": "declare_guard",
-          "named": true
-        }
-      ]
     }
   },
   {
@@ -1106,7 +1113,7 @@
         "required": true,
         "types": [
           {
-            "type": "lookup",
+            "type": "_lookup",
             "named": true
           }
         ]
@@ -1192,29 +1199,6 @@
     }
   },
   {
-    "type": "lookup",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": false,
-      "required": true,
-      "types": [
-        {
-          "type": "identifier",
-          "named": true
-        },
-        {
-          "type": "index_lookup",
-          "named": true
-        },
-        {
-          "type": "member_lookup",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
     "type": "loop_expr",
     "named": true,
     "fields": {
@@ -1285,7 +1269,7 @@
         "required": true,
         "types": [
           {
-            "type": "lookup",
+            "type": "_lookup",
             "named": true
           }
         ]
@@ -1405,6 +1389,52 @@
         "types": [
           {
             "type": "_type",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "postfix_call_expr",
+    "named": true,
+    "fields": {
+      "left": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "_expr",
+            "named": true
+          }
+        ]
+      },
+      "named_arg": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "postfix_named_arg",
+            "named": true
+          }
+        ]
+      },
+      "operator": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "postfix_op",
+            "named": true
+          }
+        ]
+      },
+      "right": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "_expr",
             "named": true
           }
         ]
@@ -1970,6 +2000,10 @@
   },
   {
     "type": "num_type",
+    "named": true
+  },
+  {
+    "type": "postfix_op",
     "named": true
   },
   {

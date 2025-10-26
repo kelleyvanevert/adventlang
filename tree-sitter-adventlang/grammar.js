@@ -63,13 +63,15 @@ module.exports = grammar({
     $._stmt,
     $._literal,
     $._declare_pattern,
+    $._assign_pattern,
+    $._lookup,
   ],
 
   conflicts: $ => [
     // the parser needs to disambiguate dynamically between assignment statements and expression statements
     // (as soon as it runs into an "=" it's an assignment, or else it runs into a stmt separator
     //   like a newline or something else, and in that case it's an expression statement)
-    [$.lookup, $._expr],
+    [$._lookup, $._expr],
 
     // I don't actually understand how these conflict could occur
     [$.while_expr, $.parenthesized_expr],
@@ -212,47 +214,47 @@ module.exports = grammar({
       $.declare_tuple,
     ),
 
-    declare_var:   $ => seq(optional($.declare_guard), field("name", $.identifier), optional(seq(":", field("type", $._type)))),
+    declare_var:   $ => seq(optional(field("guard", $.declare_guard)), field("name", $.identifier), optional(seq(":", field("type", $._type)))),
     declare_list:  $ => seq("[", listElements("element", $.declarable), optional(seq("..", field("splat", $.identifier), optional(seq(":", field("splat_type", $._type))))), "]"),
     declare_tuple: $ => seq("(", listElements("element", $.declarable), optional(seq("..", field("splat", $.identifier), optional(seq(":", field("splat_type", $._type))))), ")"),
 
     declarable: $ => seq($._declare_pattern, optional(seq("=", field("fallback", $._expr)))),
 
     assign_stmt: $ => seq(
-      field("pattern", $.assign_pattern),
+      field("pattern", $._assign_pattern),
       field("op", choice("=", "+=", "*=", "^=", "-=", "/=", "%=", "<<=", "??=", "[]=")),
       field("expr", $._expr),
     ),
 
-    assign_pattern: $ => prec.left(PREC.assign, choice(
+    _assign_pattern: $ => prec.left(PREC.assign, choice(
       $.assign_location,
       $.assign_list,
       $.assign_tuple,
     )),
 
-    assign_location: $ => $.lookup,
-    assign_list:     $ => seq("[", listElements("element", $.assign_pattern), optional(seq("..", field("splat", $.assign_pattern))), "]"),
-    assign_tuple:    $ => seq("(", listElements("element", $.assign_pattern), ")"),
+    assign_location: $ => $._lookup,
+    assign_list:     $ => seq("[", listElements("element", $._assign_pattern), optional(seq("..", field("splat", $._assign_pattern))), "]"),
+    assign_tuple:    $ => seq("(", listElements("element", $._assign_pattern), ")"),
 
-    lookup: $ => prec.dynamic(-1, choice(
+    _lookup: $ => prec.dynamic(-1, choice(
       $.identifier,
       $.member_lookup,
       $.index_lookup,
     )),
 
     member_lookup: $ => prec.left(PREC.member, seq(
-      field("container", $.lookup), ".", field("member", $._field_identifier)
+      field("container", $._lookup), ".", field("member", $._field_identifier)
     )),
 
     index_lookup: $ => prec.left(PREC.member, seq(
-      field("container", $.lookup), "[", field("index", $._expr), "]"
+      field("container", $._lookup), "[", field("index", $._expr), "]"
     )),
 
     _expr: $ => choice(
       $.regular_call_expr,
 
       $.postfix_index_expr,
-      // $.postfix_call_expr,
+      $.postfix_call_expr,
 
       $._literal,
       $.list_expr,
@@ -438,15 +440,36 @@ module.exports = grammar({
           field("operator", operator),
           field("right", $._expr),
         ))),
-        prec.left(20, seq(
-          field("left", $._expr),
-          // @ts-ignore
-          field("operator", /\??:[a-z_]+/),
-          optional(field("right", $._expr)),
-          repeat(field("named_arg", $.postfix_named_arg)),
-        )),
+        // prec.left(20, seq(
+        //   field("left", $._expr),
+        //   // @ts-ignore
+        //   field("operator", /\??:[a-z_]+/),
+        //   optional(field("right", $._expr)),
+        //   repeat(field("named_arg", $.postfix_named_arg)),
+        // )),
       );
     },
+
+    postfix_op: $ => /\??:[a-z_]+/,
+
+    postfix_call_expr: $ => prec.left(20, seq(
+      field("left", $._expr),
+
+      // I can't split this up in multiple pieces like (opt(?), :, identifier), because for some reason, then this rule gets matched less likely by Tree-sitter, and the expression `a :map (2)` will parse as a regular_call_expr instead of a postfix_call_expr. Keeping it as a single regex somehow ensures Tree-sitter parses it as a postfix_call_expr
+      field("operator", $.postfix_op),
+      // optional(field("coalesce", "?")),
+      // ":",
+      // field("function", $.identifier),
+
+      optional(seq(
+        // This `_ws_preceding_arg` is a hack, to force Tree-sitter to parse the optional more greedily, because otherwise it rather prefers skipping it and parsing an expression around, e.g. `a :map [2]` becomes an index_expr instead of a postfix_call_expr with a list literal as a right argument
+        optional($._ws_preceding_arg),
+        field("right", $._expr),
+      )),
+      // optional(field("right", $._expr)),
+
+      repeat(field("named_arg", $.postfix_named_arg)),
+    )),
 
     anonymous_fn: $ => prec.left(PREC.call, seq(
       choice(
