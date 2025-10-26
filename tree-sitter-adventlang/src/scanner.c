@@ -8,6 +8,7 @@ enum TokenType {
   WS_PRECEDING_COLON,
   WS_PRECEDING_QUESTION_MARK,
   WS_PRECEDING_BINOP,
+  WS_PRECEDING_ARG,
 };
 
 static const char SINGLE_CHAR_OPS[] = {'^', '/', '+', '*', '-', '>',
@@ -56,6 +57,28 @@ static bool is_double_char_op(int32_t a, int32_t b) {
 static inline void advance(TSLexer *lexer) { lexer->advance(lexer, false); }
 
 static inline void skip(TSLexer *lexer) { lexer->advance(lexer, true); }
+
+static inline bool process_ws_preceding_arg(TSLexer *lexer) {
+  lexer->mark_end(lexer);
+
+  for (;;) {
+    if (lexer->lookahead == '(' || lexer->lookahead == '[') {
+      lexer->mark_end(lexer);
+      lexer->result_symbol = WS_PRECEDING_ARG;
+      return true;
+    }
+
+    if (lexer->eof(lexer)) {
+      return false;
+    }
+
+    if (!iswspace(lexer->lookahead)) {
+      return false;
+    }
+
+    advance(lexer);
+  }
+}
 
 static inline bool process_ws_preceding_colon(TSLexer *lexer) {
   lexer->result_symbol = WS_PRECEDING_COLON;
@@ -143,6 +166,13 @@ bool tree_sitter_adventlang_external_scanner_scan(void *payload, TSLexer *lexer,
                                                   const bool *valid_symbols) {
 
   bool done = false;
+
+  if (valid_symbols[WS_PRECEDING_ARG]) {
+    done = process_ws_preceding_arg(lexer);
+    if (done) {
+      return true;
+    }
+  }
 
   if (valid_symbols[WS_PRECEDING_BINOP]) {
     done = process_ws_preceding_binop(lexer);

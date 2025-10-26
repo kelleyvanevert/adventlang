@@ -8,8 +8,8 @@
 // @ts-check
 
 const PREC = {
-  call: 30,
-  member: 20,
+  call: 40,
+  member: 30,
   try: 14,
   unary: 13,
   cast: 12,
@@ -54,6 +54,7 @@ module.exports = grammar({
     $._ws_preceding_colon,
     $._ws_preceding_question_mark,
     $._ws_preceding_binop,
+    $._ws_preceding_arg,
   ],
 
   supertypes: $ => [
@@ -77,8 +78,8 @@ module.exports = grammar({
 
     [$.assign_list, $.list_expr],
 
-    [$._postfix_call],
-    [$._expr, $._postfix_call],
+    // [$.postfix_call],
+    // [$._expr, $.non_binary_expr],
   ],
 
   rules: {
@@ -275,56 +276,53 @@ module.exports = grammar({
       $.identifier,
     ),
 
-    _non_binary_expr: $ => prec.right(90, choice(
-      $._literal,
-      $.list_expr,
-      $.tuple_expr,
-      $.dict_expr,
-      $.anonymous_fn,
-      // $.unary_expression,
-      // $.binary_expr,
-      $.parenthesized_expr,
-      // $.do_while_expr,
-      // $.while_expr,
-      // $.if_expr,
-      // $.loop_expr,
-      // $.for_expr,
+    // non_binary_expr: $ => prec.left(10, choice(
+    //   $._literal,
+    //   $.list_expr,
+    //   $.tuple_expr,
+    //   $.dict_expr,
+    //   $.anonymous_fn,
+    //   $.parenthesized_expr,
 
-      $.member_expr,
-      $.index_expr,
+    //   $.member_expr,
+    //   $.index_expr,
 
-      // $.block_expr,
+    //   $.identifier,
+    // )),
 
-      $.identifier,
-    )),
-
-    member_expr: $ => prec.left(20, seq(
+    member_expr: $ => prec.left(PREC.member, seq(
       field("container", $._expr), optional(field("coalesce", "?")), ".", field("member", $._field_identifier),
     )),
 
-    index_expr: $ => prec.left(20, seq(
+    index_expr: $ => prec.left(PREC.member, seq(
       field("container", $._expr), optional(field("coalesce", "?")), "[", field("index", $._expr), "]",
     )),
 
-    postfix_index_expr: $ => prec.left(30, seq(
+    postfix_index_expr: $ => prec.left(40, seq(
       field("container", $._expr), optional(field("coalesce", "?")), ":", "[", field("index", $._expr), "]",
     )),
 
-    postfix_call_expr: $ => prec.left(30, seq(
+    postfix_call_expr: $ => prec.left(20, seq(
       field("left", $._expr),
 
       optional(field("coalesce", "?")),
       ":",
-
-      $._postfix_call,
-    )),
-
-    _postfix_call: $ => prec.dynamic(70, seq(
       field("function", $.identifier),
+      // field("op", /\??:[a-z_]+/),
 
-      optional(field("right", $._non_binary_expr)),
+      // optional(seq(
+      //   optional($._ws_preceding_arg), // hack! -- to force `optional` to be greedy
+      //   field("right", $.non_binary_expr),
+      // )),
+      optional($.postfix_right_arg),
+
       repeat(field("named_arg", $.postfix_named_arg))
     )),
+
+    postfix_right_arg: $ => seq(
+      optional($._ws_preceding_arg), // hack! -- to force `optional` to be greedy
+      field("right", prec.left(10, $._expr)),
+    ),
 
     postfix_named_arg: $ => seq("'", field("name", $.identifier), field("expr", $._expr)),
 
@@ -432,13 +430,15 @@ module.exports = grammar({
         [PREC.exponential, "^"],
       ];
 
-      // @ts-ignore
-      return choice(...table.map(([precedence, operator]) => prec.left(precedence, seq(
-        field("left", $._expr),
+      return choice(
         // @ts-ignore
-        field("operator", operator),
-        field("right", $._expr),
-      ))));
+        ...table.map(([precedence, operator]) => prec.left(precedence, seq(
+          field("left", $._expr),
+          // @ts-ignore
+          field("operator", operator),
+          field("right", $._expr),
+        ))),
+      );
     },
 
     anonymous_fn: $ => prec.left(PREC.call, seq(
