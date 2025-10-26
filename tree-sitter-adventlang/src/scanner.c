@@ -5,10 +5,12 @@
 #include <wctype.h>
 
 enum TokenType {
+  // STRING_CONTENT,
   WS_PRECEDING_COLON,
   WS_PRECEDING_QUESTION_MARK,
   WS_PRECEDING_BINOP,
   WS_PRECEDING_ARG,
+  // ERROR_SENTINEL
 };
 
 static const char SINGLE_CHAR_OPS[] = {'^', '/', '+', '*', '-', '>',
@@ -57,6 +59,24 @@ static bool is_double_char_op(int32_t a, int32_t b) {
 static inline void advance(TSLexer *lexer) { lexer->advance(lexer, false); }
 
 static inline void skip(TSLexer *lexer) { lexer->advance(lexer, true); }
+
+// static inline bool process_string_content(TSLexer *lexer) {
+//   bool has_content = false;
+//   for (;;) {
+//     if (lexer->lookahead == '\"' || lexer->lookahead == '\\' ||
+//         lexer->lookahead == '{') {
+//       break;
+//     }
+//     if (lexer->eof(lexer)) {
+//       return false;
+//     }
+//     has_content = true;
+//     advance(lexer);
+//   }
+//   lexer->result_symbol = STRING_CONTENT;
+//   lexer->mark_end(lexer);
+//   return has_content;
+// }
 
 static inline bool process_ws_preceding_arg(TSLexer *lexer) {
   lexer->mark_end(lexer);
@@ -165,7 +185,15 @@ static inline bool process_ws_preceding_binop(TSLexer *lexer) {
 bool tree_sitter_adventlang_external_scanner_scan(void *payload, TSLexer *lexer,
                                                   const bool *valid_symbols) {
 
+  // if (valid_symbols[ERROR_SENTINEL]) {
+  //   return false;
+  // }
+
   bool done = false;
+
+  // if (valid_symbols[STRING_CONTENT]) {
+  //   return process_string_content(lexer);
+  // }
 
   if (valid_symbols[WS_PRECEDING_ARG]) {
     done = process_ws_preceding_arg(lexer);

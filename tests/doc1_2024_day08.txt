@@ -1,0 +1,568 @@
+Some(
+    Document {
+        body: Block {
+            items: [
+                NamedFn {
+                    name: Identifier(
+                        "solve",
+                    ),
+                    decl: FnDecl {
+                        generics: [],
+                        ret: None,
+                        params: [
+                            Declarable {
+                                pattern: Declare {
+                                    guard: Unguarded(
+                                        Identifier(
+                                            "input",
+                                        ),
+                                    ),
+                                    ty: Some(
+                                        Str,
+                                    ),
+                                },
+                                fallback: None,
+                            },
+                        ],
+                        body: Block {
+                            items: [],
+                            stmts: [
+                                Declare {
+                                    pattern: Declare {
+                                        guard: Unguarded(
+                                            Identifier(
+                                                "grid",
+                                            ),
+                                        ),
+                                        ty: None,
+                                    },
+                                    expr: Invocation {
+                                        expr: Variable(
+                                            Identifier(
+                                                "map",
+                                            ),
+                                        ),
+                                        postfix: true,
+                                        coalesce: false,
+                                        args: [
+                                            Argument {
+                                                name: None,
+                                                expr: Invocation {
+                                                    expr: Variable(
+                                                        Identifier(
+                                                            "lines",
+                                                        ),
+                                                    ),
+                                                    postfix: true,
+                                                    coalesce: false,
+                                                    args: [
+                                                        Argument {
+                                                            name: None,
+                                                            expr: Invocation {
+                                                                expr: Variable(
+                                                                    Identifier(
+                                                                        "trim",
+                                                                    ),
+                                                                ),
+                                                                postfix: true,
+                                                                coalesce: false,
+                                                                args: [
+                                                                    Argument {
+                                                                        name: None,
+                                                                        expr: Variable(
+                                                                            Identifier(
+                                                                                "input",
+                                                                            ),
+                                                                        ),
+                                                                    },
+                                                                ],
+                                                            },
+                                                        },
+                                                    ],
+                                                },
+                                            },
+                                            Argument {
+                                                name: None,
+                                                expr: Variable(
+                                                    Identifier(
+                                                        "chars",
+                                                    ),
+                                                ),
+                                            },
+                                        ],
+                                    },
+                                },
+                                Declare {
+                                    pattern: Declare {
+                                        guard: Unguarded(
+                                            Identifier(
+                                                "h",
+                                            ),
+                                        ),
+                                        ty: None,
+                                    },
+                                    expr: Invocation {
+                                        expr: Variable(
+                                            Identifier(
+                                                "len",
+                                            ),
+                                        ),
+                                        postfix: true,
+                                        coalesce: false,
+                                        args: [
+                                            Argument {
+                                                name: None,
+                                                expr: Variable(
+                                                    Identifier(
+                                                        "grid",
+                                                    ),
+                                                ),
+                                            },
+                                        ],
+                                    },
+                                },
+                                Declare {
+                                    pattern: Declare {
+                                        guard: Unguarded(
+                                            Identifier(
+                                                "w",
+                                            ),
+                                        ),
+                                        ty: None,
+                                    },
+                                    expr: Invocation {
+                                        expr: Variable(
+                                            Identifier(
+                                                "len",
+                                            ),
+                                        ),
+                                        postfix: true,
+                                        coalesce: false,
+                                        args: [
+                                            Argument {
+                                                name: None,
+                                                expr: Index {
+                                                    expr: Variable(
+                                                        Identifier(
+                                                            "grid",
+                                                        ),
+                                                    ),
+                                                    coalesce: false,
+                                                    index: Int(
+                                                        0,
+                                                    ),
+                                                },
+                                            },
+                                        ],
+                                    },
+                                },
+                                Declare {
+                                    pattern: Declare {
+                                        guard: Unguarded(
+                                            Identifier(
+                                                "antennas",
+                                            ),
+                                        ),
+                                        ty: None,
+                                    },
+                                    expr: DictLiteral {
+                                        elements: [],
+                                    },
+                                },
+                                Expr {
+                                    expr: For {
+                                        label: None,
+                                        pattern: Declare {
+                                            guard: Unguarded(
+                                                Identifier(
+                                                    "y",
+                                                ),
+                                            ),
+                                            ty: None,
+                                        },
+                                        range: Invocation {
+                                            expr: Variable(
+                                                Identifier(
+                                                    "range",
+                                                ),
+                                            ),
+                                            postfix: false,
+                                            coalesce: false,
+                                            args: [
+                                                Argument {
+                                                    name: None,
+                                                    expr: Int(
+                                                        0,
+                                                    ),
+                                                },
+                                                Argument {
+                                                    name: None,
+                                                    expr: Variable(
+                                                        Identifier(
+                                                            "h",
+                                                        ),
+                                                    ),
+                                                },
+                                            ],
+                                        },
+                                        body: Block {
+                                            items: [],
+                                            stmts: [
+                                                Expr {
+                                                    expr: For {
+                                                        label: None,
+                                                        pattern: Declare {
+                                                            guard: Unguarded(
+                                                                Identifier(
+                                                                    "x",
+                                                                ),
+                                                            ),
+                                                            ty: None,
+                                                        },
+                                                        range: Invocation {
+                                                            expr: Variable(
+                                                                Identifier(
+                                                                    "range",
+                                                                ),
+                                                            ),
+                                                            postfix: false,
+                                                            coalesce: false,
+                                                            args: [
+                                                                Argument {
+                                                                    name: None,
+                                                                    expr: Int(
+                                                                        0,
+                                                                    ),
+                                                                },
+                                                                Argument {
+                                                                    name: None,
+                                                                    expr: Variable(
+                                                                        Identifier(
+                                                                            "w",
+                                                                        ),
+                                                                    ),
+                                                                },
+                                                            ],
+                                                        },
+                                                        body: Block {
+                                                            items: [],
+                                                            stmts: [
+                                                                Declare {
+                                                                    pattern: Declare {
+                                                                        guard: Unguarded(
+                                                                            Identifier(
+                                                                                "a",
+                                                                            ),
+                                                                        ),
+                                                                        ty: None,
+                                                                    },
+                                                                    expr: Index {
+                                                                        expr: Index {
+                                                                            expr: Variable(
+                                                                                Identifier(
+                                                                                    "grid",
+                                                                                ),
+                                                                            ),
+                                                                            coalesce: false,
+                                                                            index: Variable(
+                                                                                Identifier(
+                                                                                    "y",
+                                                                                ),
+                                                                            ),
+                                                                        },
+                                                                        coalesce: false,
+                                                                        index: Variable(
+                                                                            Identifier(
+                                                                                "x",
+                                                                            ),
+                                                                        ),
+                                                                    },
+                                                                },
+                                                                Expr {
+                                                                    expr: If {
+                                                                        pattern: None,
+                                                                        cond: BinaryExpr {
+                                                                            left: Variable(
+                                                                                Identifier(
+                                                                                    "a",
+                                                                                ),
+                                                                            ),
+                                                                            op: "!=",
+                                                                            right: StrLiteral {
+                                                                                pieces: [
+                                                                                    Fragment(
+                                                                                        ".",
+                                                                                    ),
+                                                                                ],
+                                                                            },
+                                                                        },
+                                                                        then: Block {
+                                                                            items: [],
+                                                                            stmts: [
+                                                                                Expr {
+                                                                                    expr: Invocation {
+                                                                                        expr: Variable(
+                                                                                            Identifier(
+                                                                                                "print",
+                                                                                            ),
+                                                                                        ),
+                                                                                        postfix: false,
+                                                                                        coalesce: false,
+                                                                                        args: [
+                                                                                            Argument {
+                                                                                                name: None,
+                                                                                                expr: TupleLiteral {
+                                                                                                    elements: [
+                                                                                                        Variable(
+                                                                                                            Identifier(
+                                                                                                                "x",
+                                                                                                            ),
+                                                                                                        ),
+                                                                                                        Variable(
+                                                                                                            Identifier(
+                                                                                                                "y",
+                                                                                                            ),
+                                                                                                        ),
+                                                                                                        Variable(
+                                                                                                            Identifier(
+                                                                                                                "a",
+                                                                                                            ),
+                                                                                                        ),
+                                                                                                    ],
+                                                                                                },
+                                                                                            },
+                                                                                        ],
+                                                                                    },
+                                                                                },
+                                                                                Expr {
+                                                                                    expr: If {
+                                                                                        pattern: None,
+                                                                                        cond: UnaryExpr {
+                                                                                            expr: Index {
+                                                                                                expr: Variable(
+                                                                                                    Identifier(
+                                                                                                        "antennas",
+                                                                                                    ),
+                                                                                                ),
+                                                                                                coalesce: false,
+                                                                                                index: Variable(
+                                                                                                    Identifier(
+                                                                                                        "a",
+                                                                                                    ),
+                                                                                                ),
+                                                                                            },
+                                                                                            op: "!",
+                                                                                        },
+                                                                                        then: Block {
+                                                                                            items: [],
+                                                                                            stmts: [
+                                                                                                Assign {
+                                                                                                    pattern: Location(
+                                                                                                        Index(
+                                                                                                            Id(
+                                                                                                                Identifier(
+                                                                                                                    "antennas",
+                                                                                                                ),
+                                                                                                            ),
+                                                                                                            Variable(
+                                                                                                                Identifier(
+                                                                                                                    "a",
+                                                                                                                ),
+                                                                                                            ),
+                                                                                                        ),
+                                                                                                    ),
+                                                                                                    expr: ListLiteral {
+                                                                                                        elements: [],
+                                                                                                        splat: None,
+                                                                                                    },
+                                                                                                },
+                                                                                            ],
+                                                                                        },
+                                                                                        els: None,
+                                                                                    },
+                                                                                },
+                                                                                Assign {
+                                                                                    pattern: Location(
+                                                                                        Index(
+                                                                                            Id(
+                                                                                                Identifier(
+                                                                                                    "antennas",
+                                                                                                ),
+                                                                                            ),
+                                                                                            Variable(
+                                                                                                Identifier(
+                                                                                                    "a",
+                                                                                                ),
+                                                                                            ),
+                                                                                        ),
+                                                                                    ),
+                                                                                    expr: BinaryExpr {
+                                                                                        left: Index {
+                                                                                            expr: Variable(
+                                                                                                Identifier(
+                                                                                                    "antennas",
+                                                                                                ),
+                                                                                            ),
+                                                                                            coalesce: false,
+                                                                                            index: Variable(
+                                                                                                Identifier(
+                                                                                                    "a",
+                                                                                                ),
+                                                                                            ),
+                                                                                        },
+                                                                                        op: "[]",
+                                                                                        right: TupleLiteral {
+                                                                                            elements: [
+                                                                                                Variable(
+                                                                                                    Identifier(
+                                                                                                        "x",
+                                                                                                    ),
+                                                                                                ),
+                                                                                                Variable(
+                                                                                                    Identifier(
+                                                                                                        "y",
+                                                                                                    ),
+                                                                                                ),
+                                                                                            ],
+                                                                                        },
+                                                                                    },
+                                                                                },
+                                                                            ],
+                                                                        },
+                                                                        els: None,
+                                                                    },
+                                                                },
+                                                            ],
+                                                        },
+                                                    },
+                                                },
+                                            ],
+                                        },
+                                    },
+                                },
+                                Expr {
+                                    expr: Invocation {
+                                        expr: Variable(
+                                            Identifier(
+                                                "print",
+                                            ),
+                                        ),
+                                        postfix: false,
+                                        coalesce: false,
+                                        args: [
+                                            Argument {
+                                                name: None,
+                                                expr: Variable(
+                                                    Identifier(
+                                                        "antennas",
+                                                    ),
+                                                ),
+                                            },
+                                        ],
+                                    },
+                                },
+                            ],
+                        },
+                    },
+                },
+                NamedFn {
+                    name: Identifier(
+                        "bonus",
+                    ),
+                    decl: FnDecl {
+                        generics: [],
+                        ret: None,
+                        params: [
+                            Declarable {
+                                pattern: Declare {
+                                    guard: Unguarded(
+                                        Identifier(
+                                            "input",
+                                        ),
+                                    ),
+                                    ty: Some(
+                                        Str,
+                                    ),
+                                },
+                                fallback: None,
+                            },
+                        ],
+                        body: Block {
+                            items: [],
+                            stmts: [
+                                Expr {
+                                    expr: Int(
+                                        0,
+                                    ),
+                                },
+                            ],
+                        },
+                    },
+                },
+            ],
+            stmts: [
+                Declare {
+                    pattern: Declare {
+                        guard: Unguarded(
+                            Identifier(
+                                "example",
+                            ),
+                        ),
+                        ty: None,
+                    },
+                    expr: StrLiteral {
+                        pieces: [
+                            Fragment(
+                                "\n............\n........0...\n.....0......\n.......0....\n....0.......\n......A.....\n............\n............\n........A...\n.........A..\n............\n............\n",
+                            ),
+                        ],
+                    },
+                },
+                Expr {
+                    expr: Invocation {
+                        expr: Variable(
+                            Identifier(
+                                "print",
+                            ),
+                        ),
+                        postfix: false,
+                        coalesce: false,
+                        args: [
+                            Argument {
+                                name: None,
+                                expr: StrLiteral {
+                                    pieces: [
+                                        Fragment(
+                                            "Example solution: ",
+                                        ),
+                                        Interpolation(
+                                            Invocation {
+                                                expr: Variable(
+                                                    Identifier(
+                                                        "solve",
+                                                    ),
+                                                ),
+                                                postfix: false,
+                                                coalesce: false,
+                                                args: [
+                                                    Argument {
+                                                        name: None,
+                                                        expr: Variable(
+                                                            Identifier(
+                                                                "example",
+                                                            ),
+                                                        ),
+                                                    },
+                                                ],
+                                            },
+                                        ),
+                                    ],
+                                },
+                            },
+                        ],
+                    },
+                },
+            ],
+        },
+    },
+)

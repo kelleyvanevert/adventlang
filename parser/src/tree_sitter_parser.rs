@@ -27,7 +27,7 @@ pub fn parse_document_ts(source: &str) -> Option<Document> {
 
 #[cfg(test)]
 mod tests {
-    use crate::tree_sitter_parser::parse_document_ts;
+    use crate::{parse_document, tree_sitter_parser::parse_document_ts};
 
     #[test]
     fn test() {
@@ -43,11 +43,16 @@ mod tests {
         // }
         // "#;
 
-        let source = "int(digits[0] + digits[-1])";
+        // let source = "arr []= 7";
+        let source = "arr[2] []= 7";
 
         let doc = parse_document_ts(source).expect("can parse");
 
-        println!("{doc:?}");
+        // let doc2 = parse_document(source).expect("can parse original");
+
+        println!("using tree sitter: {doc:#?}");
+
+        // println!("using parser combinators: {doc2:#?}");
     }
 }
 
@@ -148,7 +153,7 @@ impl<'a> Converter<'a> {
                     .unwrap()
                     .to_string(),
             ),
-            "float_literal" => todo!("interpret float literal"),
+            "float_literal" => Expr::Float(self.as_str(node).trim().to_string()),
             "identifier" => Expr::Variable(self.as_identifier(node)),
             "unary_expression" => Expr::UnaryExpr {
                 op: node.map_child("op", |node| self.as_string(node).into()),
@@ -187,16 +192,53 @@ impl<'a> Converter<'a> {
                 }),
             },
             "str_literal" => {
+                let mut opened = false;
                 let mut pieces = vec![];
                 let mut str = "".to_string();
 
+                let debug = false;
+
+                if debug {
+                    println!("STR LITERAL");
+                }
+
+                let mut at_byte = node.start_byte();
+
                 for child in node.children(&mut node.walk()) {
+                    if debug {
+                        println!(
+                            "  child {:?}, {}-{} [{}]",
+                            child,
+                            child.start_byte(),
+                            child.end_byte(),
+                            self.as_str(child)
+                        );
+                    }
+
+                    let start = child.start_byte();
+
+                    if opened && start > at_byte {
+                        // Because of the way that Tree-sitter skips whitespace as extras, we don't 100% know whether the children are complete. So, we recover the skipped whitespace if we detect it happened
+                        let skipped =
+                            str::from_utf8(&self.source.as_bytes()[at_byte..start]).unwrap();
+
+                        if debug {
+                            println!(
+                                "    Recovering skipped whitespace {}-{}: [{}]",
+                                at_byte, start, skipped
+                            );
+                        }
+                        str.push_str(skipped);
+                    }
+
                     match child.kind() {
                         "escape_sequence" => {
                             str.push(parse_escape_sequence(self.as_str(child)));
+                            at_byte = child.end_byte();
                         }
                         "string_character" => {
                             str.push_str(self.as_str(child));
+                            at_byte = child.end_byte();
                         }
                         "string_interpolation" => {
                             if str.len() > 0 {
@@ -207,8 +249,15 @@ impl<'a> Converter<'a> {
                             pieces.push(StrLiteralPiece::Interpolation(
                                 child.map_child("interpolation", |node| self.as_expr(node)),
                             ));
+                            at_byte = child.end_byte();
                         }
-                        "\"" => {}
+                        "\"" if !opened => {
+                            opened = true;
+                            at_byte = child.end_byte();
+                        }
+                        "\"" if opened => {
+                            // DONE
+                        }
                         _ => panic!("can't interpret as piece of a str literal: {:?}", node),
                     }
                 }
@@ -434,7 +483,7 @@ impl<'a> Converter<'a> {
             "assign_stmt" => {
                 let pattern = node.map_child("pattern", |node| self.as_assign_pattern(node));
                 let expr = node.map_child("expr", |node| self.as_expr(node));
-                let op = node.map_child("op", |node| self.as_str(node));
+                let op = node.map_child("op", |node| self.as_str(node).trim());
 
                 if op == "=" {
                     return Stmt::Assign { pattern, expr };
@@ -445,22 +494,22 @@ impl<'a> Converter<'a> {
                     _ => panic!("can't op-assign or push-assign to list or tuple pattern"),
                 };
 
-                if op == "[]=" {
-                    return Stmt::Expr {
-                        expr: Expr::Invocation {
-                            expr: Expr::Variable(Identifier("push".into())).into(),
-                            postfix: false,
-                            coalesce: false,
-                            args: vec![
-                                Argument {
-                                    name: None,
-                                    expr: lefthand_expr,
-                                },
-                                Argument { name: None, expr },
-                            ],
-                        },
-                    };
-                }
+                // if op == "[]=" {
+                //     return Stmt::Expr {
+                //         expr: Expr::Invocation {
+                //             expr: Expr::Variable(Identifier("push".into())).into(),
+                //             postfix: false,
+                //             coalesce: false,
+                //             args: vec![
+                //                 Argument {
+                //                     name: None,
+                //                     expr: lefthand_expr,
+                //                 },
+                //                 Argument { name: None, expr },
+                //             ],
+                //         },
+                //     };
+                // }
 
                 Stmt::Assign {
                     pattern,

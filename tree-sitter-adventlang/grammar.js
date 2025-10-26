@@ -55,6 +55,7 @@ module.exports = grammar({
     $._ws_preceding_question_mark,
     $._ws_preceding_binop,
     $._ws_preceding_arg,
+    // $.string_content,
   ],
 
   supertypes: $ => [
