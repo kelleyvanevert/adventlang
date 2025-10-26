@@ -28,7 +28,7 @@
   function: (identifier) @function)
 
 (postfix_call_expr
-  operator: (identifier) @function)
+  function: (identifier) @function)
 
 ; Function definitions
 
