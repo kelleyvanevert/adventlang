@@ -1,6 +1,9 @@
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{
+        fs,
+        time::{Duration, Instant},
+    };
 
     use pretty_assertions::assert_eq;
     use test_case::test_case;
@@ -45,5 +48,62 @@ mod tests {
         }
 
         assert_eq!(doc1, doc2);
+    }
+
+    #[test]
+    #[ignore]
+    fn bench() {
+        let tests = [
+            "2023_day01",
+            "2023_day02",
+            "2023_day03",
+            "2023_day04",
+            "2023_day05",
+            "2023_day06",
+            "2023_day07",
+            "2023_day08",
+            "2023_day09",
+            "2023_day10",
+            "2023_day11",
+            "2023_day12",
+            "2023_day13",
+            "2023_day14",
+            "2024_day01",
+            "2024_day02",
+            "2024_day03",
+            "2024_day04",
+            "2024_day05",
+            "2024_day06",
+            "2024_day07",
+            "2024_day08",
+        ];
+
+        let contents = tests.map(|name| {
+            std::fs::read_to_string(format!("./aoc/{name}.al")).expect("can read aoc file")
+        });
+
+        let using_parser_combinators = {
+            let t0 = Instant::now();
+            for source in &contents {
+                parse_document(source).expect("can parse");
+            }
+            t0.elapsed()
+        };
+
+        let using_tree_sitter = {
+            let t0 = Instant::now();
+            for source in &contents {
+                parse_document_ts(source).expect("can parse");
+            }
+            t0.elapsed()
+        };
+
+        panic!(
+            "Total parsing time:\n- using parser combinators: {:?}\n- using tree-sitter: {:?}",
+            using_parser_combinators, using_tree_sitter
+        );
+        // Total parsing time:
+        // - using parser combinators: 1.315s
+        // - using tree-sitter: 8.55ms
     }
 }
