@@ -172,11 +172,7 @@ assign-location ::=
 
 ### `postfix_call_expr` precedence issue
 
-When creating the `postfix_call_expr`, I had a lot of trouble getting the precedence right. I don't know exactly why or how, but the solution that I now have works, and uses these two hacks:
-
-1. Parse the applied function with a regex `/\??:[a-z_]+/` instead of separate tokens for `?`, `:`, and the identifier. Sucks a bit for the syntax highlighting, but whatever.
-
-2. A strategically placed `optional($._ws_preceding_arg)`, to force the `optional(right_side)` to be greedy, when it's not.
+When creating the `postfix_call_expr`, I had a lot of trouble getting the precedence right. I don't know exactly why or how, but the solution that I now have works, and uses a strategically placed `$._ws_preceding_arg`, to force the `optional(right_side)` to be greedy.
 
 ### `scanner.c` very confusing handling of `ERROR_SENTINEL` and `STRING_CONTENT`
 

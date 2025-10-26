@@ -91,5 +91,5 @@ fn is_digit(s) {
           (expr_stmt
             (postfix_call_expr
               left: (identifier)
-              operator: (postfix_op)
+              function: (identifier)
               right: (identifier))))))

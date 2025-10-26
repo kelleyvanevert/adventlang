@@ -10,7 +10,7 @@ line :starts_with t[0]
     (expr_stmt
         (postfix_call_expr
             left: (identifier)
-            operator: (postfix_op)
+            function: (identifier)
             right: (index_expr
                 container: (identifier)
                 index: (integer_literal)
@@ -31,10 +31,10 @@ arr :map a :map (a, b)
     (postfix_call_expr
         (postfix_call_expr
             (identifier)
-            (postfix_op)
+            (identifier)
             (identifier)
         )
-        (postfix_op)
+        (identifier)
         (tuple_expr
             (identifier)
             (identifier)))))
@@ -52,10 +52,10 @@ arr :map a :map f(a, b)
     (postfix_call_expr
         (postfix_call_expr
             (identifier)
-            (postfix_op)
+            (identifier)
             (identifier)
         )
-        (postfix_op)
+        (identifier)
         (regular_call_expr
             (identifier)
             (call_arg (identifier))
@@ -74,9 +74,9 @@ line :slice 0 :starts_with t[0]
     (postfix_call_expr
         (postfix_call_expr
             (identifier)
-            (postfix_op)
+            (identifier)
             (integer_literal))
-        (postfix_op)
+        (identifier)
         (index_expr
             (identifier)
             (integer_literal)))))
@@ -94,9 +94,9 @@ line :slice 0 :starts_with [0]
     (postfix_call_expr
         (postfix_call_expr
             (identifier)
-            (postfix_op)
+            (identifier)
             (integer_literal))
-        (postfix_op)
+        (identifier)
         (list_expr
             (integer_literal)))))
 
@@ -113,7 +113,7 @@ line:len < 2
     (binary_expr
         (postfix_call_expr
             (identifier)
-            (postfix_op))
+            (identifier))
         (integer_literal))))
 
 ===============
@@ -129,7 +129,7 @@ line :split ":" :[1]
         (postfix_index_expr
             (postfix_call_expr
                 (identifier)
-                (postfix_op)
+                (identifier)
                 (str_literal
                     (string_character)))
                 (integer_literal))))
@@ -150,17 +150,17 @@ line :split ":" :[1] :trim :replace (/[ ]+/, "") :int
                 (postfix_index_expr
                     (postfix_call_expr
                         (identifier)
-                        (postfix_op)
+                        (identifier)
                         (str_literal (string_character))
                     )
                     (integer_literal)
                 )
-                (postfix_op)
+                (identifier)
             )
-            (postfix_op)
+            (identifier)
             (tuple_expr
                 (regex_literal)
                 (str_literal)
             )
         )
-        (postfix_op))))
+        (identifier))))

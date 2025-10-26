@@ -307,18 +307,12 @@ impl<'a> Converter<'a> {
                     expr: node.map_child("expr", |node| self.as_expr(node)),
                 }));
 
-                let mut f = node.map_child("operator", |node| self.as_str(node)).trim();
-                let mut coalesce = false;
-
-                if f.starts_with("?") {
-                    coalesce = true;
-                    f = &f[1..];
-                }
+                let id = node.map_child("function", |node| self.as_identifier(node));
 
                 Expr::Invocation {
-                    expr: Expr::Variable(Identifier(f[1..].to_string())).into(),
+                    expr: Expr::Variable(id).into(),
                     postfix: true,
-                    coalesce,
+                    coalesce: node.has_child("coalesce"),
                     args,
                 }
             }

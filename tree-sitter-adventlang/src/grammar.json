@@ -3435,10 +3435,6 @@
         }
       ]
     },
-    "postfix_op": {
-      "type": "PATTERN",
-      "value": "\\??:[a-z_]+"
-    },
     "postfix_call_expr": {
       "type": "PREC_LEFT",
       "value": 20,
@@ -3454,11 +3450,31 @@
             }
           },
           {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "FIELD",
+                "name": "coalesce",
+                "content": {
+                  "type": "STRING",
+                  "value": "?"
+                }
+              },
+              {
+                "type": "BLANK"
+              }
+            ]
+          },
+          {
+            "type": "STRING",
+            "value": ":"
+          },
+          {
             "type": "FIELD",
-            "name": "operator",
+            "name": "function",
             "content": {
               "type": "SYMBOL",
-              "name": "postfix_op"
+              "name": "identifier"
             }
           },
           {

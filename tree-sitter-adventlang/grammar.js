@@ -422,16 +422,14 @@ module.exports = grammar({
       );
     },
 
-    postfix_op: $ => /\??:[a-z_]+/,
-
     postfix_call_expr: $ => prec.left(20, seq(
       field("left", $._expr),
 
       // I can't split this up in multiple pieces like (opt(?), :, identifier), because for some reason, then this rule gets matched less likely by Tree-sitter, and the expression `a :map (2)` will parse as a regular_call_expr instead of a postfix_call_expr. Keeping it as a single regex somehow ensures Tree-sitter parses it as a postfix_call_expr
-      field("operator", $.postfix_op),
-      // optional(field("coalesce", "?")),
-      // ":",
-      // field("function", $.identifier),
+      // field("operator", $.postfix_op),
+      optional(field("coalesce", "?")),
+      ":",
+      field("function", $.identifier),
 
       optional(seq(
         // This `_ws_preceding_arg` is a hack, to force Tree-sitter to parse the optional more greedily, because otherwise it rather prefers skipping it and parsing an expression around, e.g. `a :map [2]` becomes an index_expr instead of a postfix_call_expr with a list literal as a right argument

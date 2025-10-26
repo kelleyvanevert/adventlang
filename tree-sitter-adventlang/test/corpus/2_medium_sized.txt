@@ -26,8 +26,8 @@ fn solve(input) {
             (postfix_call_expr
               (postfix_call_expr
                 (identifier)
-                (postfix_op))
-              (postfix_op)
+                (identifier))
+              (identifier)
               (anonymous_fn
                 (declarable
                   (declare_var
@@ -40,8 +40,8 @@ fn solve(input) {
                     (postfix_call_expr
                       (postfix_call_expr
                         (identifier)
-                        (postfix_op))
-                      (postfix_op)
+                        (identifier))
+                      (identifier)
                       (identifier)))
                   (expr_stmt
                     (regular_call_expr
@@ -57,4 +57,4 @@ fn solve(input) {
           (expr_stmt
             (postfix_call_expr
               (identifier)
-              (postfix_op))))))
+              (identifier))))))
