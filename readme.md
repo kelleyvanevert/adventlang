@@ -167,3 +167,28 @@ assign-location ::=
   | expr "[" expr "]"
   | expr "." identifier
 ```
+
+## Issues encountered while creating the Tree-sitter parser
+
+### `postfix_call_expr` precedence issue
+
+When creating the `postfix_call_expr`, I had a lot of trouble getting the precedence right. I don't know exactly why or how, but the solution that I now have works, and uses these two hacks:
+
+1. Parse the applied function with a regex `/\??:[a-z_]+/` instead of separate tokens for `?`, `:`, and the identifier. Sucks a bit for the syntax highlighting, but whatever.
+
+2. A strategically placed `optional($._ws_preceding_arg)`, to force the `optional(right_side)` to be greedy, when it's not.
+
+### `scanner.c` very confusing handling of `ERROR_SENTINEL` and `STRING_CONTENT`
+
+I don't really know what's going on here, but, adding `STRING_CONTENT` to the external lexer, to avoid the issue of Tree-sitter skipping whitespaces as extras withing a string literal, causes problems. In the Rust tree sitter grammar, I see that they also added `ERROR_SENTINEL`, in order to specifically avoid it during recovery (of which I don't really understand how it works). Adding either of these two, or both, creates problems for the `postfix_call_expr` precedence issue. So .. I just recover skipped whitespaces in the string manually, while converting the CST to the AST in Rust.
+
+### Newlines as stmt separators
+
+This was a whole hassle. It now works kinda OK, but not amazing. There's some edge-cases, like parsing multiple lines of regexes, like so:
+
+```al
+/abc/
+/def/
+```
+
+..because I can't differentiate it from a binary expression `a / b`.
