@@ -12,9 +12,9 @@ mod tests {
     #[test_case("2023_day03")]
     #[test_case("2023_day04")]
     #[test_case("2023_day05")]
-    // #[test_case("2023_day06")] // TODO: postfix_index_expr
+    #[test_case("2023_day06")]
     #[test_case("2023_day07")]
-    // #[test_case("2023_day08")] // TODO: postfix_index_expr; fixed whitespaces being skipped inside str literals
+    #[test_case("2023_day08")]
     #[test_case("2023_day09")]
     #[test_case("2023_day10")]
     #[test_case("2023_day11")]

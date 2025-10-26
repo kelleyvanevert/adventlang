@@ -80,9 +80,6 @@ module.exports = grammar({
     [$.do_while_expr, $.parenthesized_expr],
 
     [$.assign_list, $.list_expr],
-
-    // [$.postfix_call],
-    // [$._expr, $.non_binary_expr],
   ],
 
   rules: {
@@ -301,32 +298,6 @@ module.exports = grammar({
       field("container", $._expr), optional(field("coalesce", "?")), "[", field("index", $._expr), "]",
     )),
 
-    postfix_index_expr: $ => prec.left(40, seq(
-      field("container", $._expr), optional(field("coalesce", "?")), ":", "[", field("index", $._expr), "]",
-    )),
-
-    // postfix_call_expr: $ => prec.left(20, seq(
-    //   field("left", $._expr),
-
-    //   optional(field("coalesce", "?")),
-    //   ":",
-    //   field("function", $.identifier),
-    //   // field("op", /\??:[a-z_]+/),
-
-    //   // optional(seq(
-    //   //   optional($._ws_preceding_arg), // hack! -- to force `optional` to be greedy
-    //   //   field("right", $.non_binary_expr),
-    //   // )),
-    //   optional($.postfix_right_arg),
-
-    //   repeat(field("named_arg", $.postfix_named_arg))
-    // )),
-
-    // postfix_right_arg: $ => seq(
-    //   optional($._ws_preceding_arg), // hack! -- to force `optional` to be greedy
-    //   field("right", prec.left(10, $._expr)),
-    // ),
-
     postfix_named_arg: $ => seq("'", field("name", $.identifier), field("expr", $._expr)),
 
     regular_call_expr: $ => prec.left(25, seq(
@@ -470,6 +441,10 @@ module.exports = grammar({
       // optional(field("right", $._expr)),
 
       repeat(field("named_arg", $.postfix_named_arg)),
+    )),
+
+    postfix_index_expr: $ => prec.left(20, seq(
+      field("container", $._expr), optional(field("coalesce", "?")), ":", "[", field("index", $._expr), "]",
     )),
 
     anonymous_fn: $ => prec.left(PREC.call, seq(

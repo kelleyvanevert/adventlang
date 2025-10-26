@@ -115,3 +115,52 @@ line:len < 2
             (identifier)
             (postfix_op))
         (integer_literal))))
+
+===============
+Precedence issue example 6
+===============
+
+line :split ":" :[1]
+
+---
+
+(source_file
+    (expr_stmt
+        (postfix_index_expr
+            (postfix_call_expr
+                (identifier)
+                (postfix_op)
+                (str_literal
+                    (string_character)))
+                (integer_literal))))
+
+===============
+Precedence issue example 7
+===============
+
+line :split ":" :[1] :trim :replace (/[ ]+/, "") :int
+
+---
+
+(source_file
+    (expr_stmt
+    (postfix_call_expr
+        (postfix_call_expr
+            (postfix_call_expr
+                (postfix_index_expr
+                    (postfix_call_expr
+                        (identifier)
+                        (postfix_op)
+                        (str_literal (string_character))
+                    )
+                    (integer_literal)
+                )
+                (postfix_op)
+            )
+            (postfix_op)
+            (tuple_expr
+                (regex_literal)
+                (str_literal)
+            )
+        )
+        (postfix_op))))
