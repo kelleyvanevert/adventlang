@@ -2,18 +2,22 @@ use std::fmt::Display;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Identifier {
+    pub id: usize,
     pub name: String,
 }
 
 impl<'a> From<&'a str> for Identifier {
     fn from(id: &'a str) -> Self {
-        Identifier { name: id.into() }
+        Identifier {
+            id: 0,
+            name: id.into(),
+        }
     }
 }
 
 impl From<String> for Identifier {
     fn from(name: String) -> Self {
-        Identifier { name }
+        Identifier { id: 0, name }
     }
 }
 
@@ -23,8 +27,15 @@ impl Display for Identifier {
     }
 }
 
+impl Identifier {
+    pub fn strip_ids(&mut self) {
+        self.id = 0;
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Declarable {
+    pub id: usize,
     pub pattern: DeclarePattern,
     pub fallback: Option<Expr>,
 }
@@ -39,8 +50,24 @@ impl Display for Declarable {
     }
 }
 
+impl Declarable {
+    pub fn strip_ids(&mut self) {
+        self.id = 0;
+        self.pattern.strip_ids();
+        if let Some(ref mut fallback) = self.fallback {
+            fallback.strip_ids();
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DeclarePattern {
+pub struct DeclarePattern {
+    pub id: usize,
+    pub kind: DeclarePatternKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeclarePatternKind {
     Declare {
         guard: DeclareGuardExpr,
         ty: Option<Type>,
@@ -57,24 +84,58 @@ pub enum DeclarePattern {
 
 impl DeclarePattern {
     pub fn is_named(&self, id: Identifier) -> bool {
-        match self {
-            DeclarePattern::Declare { guard, .. } => guard.is_named(id),
+        match &self.kind {
+            DeclarePatternKind::Declare { guard, .. } => guard.is_named(id),
             _ => false,
+        }
+    }
+
+    pub fn strip_ids(&mut self) {
+        self.id = 0;
+        match &mut self.kind {
+            DeclarePatternKind::Declare { guard, ty } => {
+                guard.strip_ids();
+                if let Some(ty) = ty {
+                    ty.strip_ids();
+                }
+            }
+            DeclarePatternKind::List { elements, rest } => {
+                for el in elements {
+                    el.strip_ids();
+                }
+                if let Some((id, ty)) = rest {
+                    id.strip_ids();
+                    if let Some(ty) = ty {
+                        ty.strip_ids();
+                    }
+                }
+            }
+            DeclarePatternKind::Tuple { elements, rest } => {
+                for el in elements {
+                    el.strip_ids();
+                }
+                if let Some((id, ty)) = rest {
+                    id.strip_ids();
+                    if let Some(ty) = ty {
+                        ty.strip_ids();
+                    }
+                }
+            }
         }
     }
 }
 
 impl Display for DeclarePattern {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DeclarePattern::Declare { guard, ty } => {
+        match &self.kind {
+            DeclarePatternKind::Declare { guard, ty } => {
                 write!(f, "{}", guard)?;
                 if let Some(ty) = ty {
                     write!(f, ": {}", ty)?;
                 }
                 Ok(())
             }
-            DeclarePattern::List { elements, rest } => {
+            DeclarePatternKind::List { elements, rest } => {
                 write!(f, "[")?;
                 let mut i = 0;
                 for el in elements {
@@ -95,7 +156,7 @@ impl Display for DeclarePattern {
                 }
                 write!(f, "]")
             }
-            DeclarePattern::Tuple { elements, rest } => {
+            DeclarePatternKind::Tuple { elements, rest } => {
                 write!(f, "(")?;
                 let mut i = 0;
                 for el in elements {
@@ -121,14 +182,45 @@ impl Display for DeclarePattern {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AssignLocationExpr {
+pub struct AssignLocationExpr {
+    pub id: usize,
+    pub kind: AssignLocationExprKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AssignLocationExprKind {
     Id(Identifier),                              // assign fn/closure locals
     Index(Box<AssignLocationExpr>, Expr),        // assign list/tuple elements
     Member(Box<AssignLocationExpr>, Identifier), // assign struct/object members
 }
 
+impl AssignLocationExpr {
+    pub fn strip_ids(&mut self) {
+        self.id = 0;
+        match &mut self.kind {
+            AssignLocationExprKind::Id(id) => {
+                id.strip_ids();
+            }
+            AssignLocationExprKind::Index(container, index) => {
+                container.strip_ids();
+                index.strip_ids();
+            }
+            AssignLocationExprKind::Member(container, member) => {
+                container.strip_ids();
+                member.strip_ids();
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AssignPattern {
+pub struct AssignPattern {
+    pub id: usize,
+    pub kind: AssignPatternKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AssignPatternKind {
     Location(AssignLocationExpr), // single assignment
     List {
         // syntactic sugar for "destructure, then assign"
@@ -141,28 +233,61 @@ pub enum AssignPattern {
     },
 }
 
+impl AssignPattern {
+    pub fn strip_ids(&mut self) {
+        self.id = 0;
+        match &mut self.kind {
+            AssignPatternKind::Location(loc) => {
+                loc.strip_ids();
+            }
+            AssignPatternKind::List { elements, splat } => {
+                for el in elements {
+                    el.strip_ids();
+                }
+                if let Some(splat) = splat {
+                    splat.strip_ids();
+                }
+            }
+            AssignPatternKind::Tuple { elements } => {
+                for el in elements {
+                    el.strip_ids();
+                }
+            }
+        }
+    }
+}
+
 impl TryFrom<Expr> for AssignLocationExpr {
     type Error = ();
 
     fn try_from(expr: Expr) -> Result<Self, Self::Error> {
-        match expr {
-            Expr::Variable(id) => Ok(AssignLocationExpr::Id(id.clone())),
-            Expr::Index {
+        match expr.kind {
+            ExprKind::Variable(id) => Ok(AssignLocationExpr {
+                id: 0,
+                kind: AssignLocationExprKind::Id(id.clone()),
+            }),
+            ExprKind::Index {
                 expr,
                 coalesce: false,
                 index,
-            } => Ok(AssignLocationExpr::Index(
-                Box::new(expr.as_ref().clone().try_into().unwrap()),
-                index.as_ref().clone(),
-            )),
-            Expr::Member {
+            } => Ok(AssignLocationExpr {
+                id: 0,
+                kind: AssignLocationExprKind::Index(
+                    Box::new(expr.as_ref().clone().try_into().unwrap()),
+                    index.as_ref().clone(),
+                ),
+            }),
+            ExprKind::Member {
                 expr,
                 coalesce: false,
                 member,
-            } => Ok(AssignLocationExpr::Member(
-                Box::new(expr.as_ref().clone().try_into().unwrap()),
-                member.clone(),
-            )),
+            } => Ok(AssignLocationExpr {
+                id: 0,
+                kind: AssignLocationExprKind::Member(
+                    Box::new(expr.as_ref().clone().try_into().unwrap()),
+                    member.clone(),
+                ),
+            }),
             _ => Err(()),
         }
     }
@@ -172,8 +297,8 @@ impl TryFrom<Expr> for AssignPattern {
     type Error = ();
 
     fn try_from(expr: Expr) -> Result<Self, Self::Error> {
-        match expr {
-            Expr::ListLiteral { elements, splat } => {
+        match expr.kind {
+            ExprKind::ListLiteral { elements, splat } => {
                 let elements = elements
                     .into_iter()
                     .map(|el| AssignPattern::try_from(el))
@@ -184,35 +309,79 @@ impl TryFrom<Expr> for AssignPattern {
                     .transpose()
                     .map(|a| a.map(Box::new))?;
 
-                Ok(AssignPattern::List { elements, splat })
+                Ok(AssignPattern {
+                    id: 0,
+                    kind: AssignPatternKind::List { elements, splat },
+                })
             }
-            Expr::TupleLiteral { elements } => {
+            ExprKind::TupleLiteral { elements } => {
                 let elements = elements
                     .into_iter()
                     .map(|el| AssignPattern::try_from(el))
                     .try_collect()?;
 
-                Ok(AssignPattern::Tuple { elements })
+                Ok(AssignPattern {
+                    id: 0,
+                    kind: AssignPatternKind::Tuple { elements },
+                })
             }
-            _ => AssignLocationExpr::try_from(expr).map(AssignPattern::Location),
+            _ => AssignLocationExpr::try_from(expr).map(|loc| AssignPattern {
+                id: 0,
+                kind: AssignPatternKind::Location(loc),
+            }),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum StrLiteralPiece {
+pub struct StrLiteralPiece {
+    pub id: usize,
+    pub kind: StrLiteralPieceKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StrLiteralPieceKind {
     Fragment(String),
     Interpolation(Expr),
 }
 
+impl StrLiteralPiece {
+    pub fn strip_ids(&mut self) {
+        self.id = 0;
+        match &mut self.kind {
+            StrLiteralPieceKind::Fragment(_) => {}
+            StrLiteralPieceKind::Interpolation(expr) => {
+                expr.strip_ids();
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Argument {
+    pub id: usize,
     pub name: Option<Identifier>,
     pub expr: Expr,
 }
 
+impl Argument {
+    pub fn strip_ids(&mut self) {
+        self.id = 0;
+        if let Some(name) = &mut self.name {
+            name.strip_ids();
+        }
+        self.expr.strip_ids();
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum DeclareGuardExpr {
+pub struct DeclareGuardExpr {
+    pub id: usize,
+    pub kind: DeclareGuardExprKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum DeclareGuardExprKind {
     Unguarded(Identifier),
     Some(Identifier),
     // TODO more things, like simple comparisons etc.
@@ -220,38 +389,93 @@ pub enum DeclareGuardExpr {
 
 impl DeclareGuardExpr {
     pub fn is_named(&self, id: Identifier) -> bool {
-        match self {
-            DeclareGuardExpr::Unguarded(name) => &id == name,
-            DeclareGuardExpr::Some(name) => &id == name,
+        match &self.kind {
+            DeclareGuardExprKind::Unguarded(name) => &id == name,
+            DeclareGuardExprKind::Some(name) => &id == name,
+        }
+    }
+
+    pub fn strip_ids(&mut self) {
+        self.id = 0;
+        match &mut self.kind {
+            DeclareGuardExprKind::Unguarded(id) => {
+                id.strip_ids();
+            }
+            DeclareGuardExprKind::Some(id) => {
+                id.strip_ids();
+            }
         }
     }
 }
 
 impl Display for DeclareGuardExpr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DeclareGuardExpr::Unguarded(id) => write!(f, "{}", id),
-            DeclareGuardExpr::Some(expr) => write!(f, "some {}", expr),
+        match &self.kind {
+            DeclareGuardExprKind::Unguarded(id) => write!(f, "{}", id),
+            DeclareGuardExprKind::Some(expr) => write!(f, "some {}", expr),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DictKey {
+pub struct DictKey {
+    pub id: usize,
+    pub kind: DictKeyKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DictKeyKind {
     Identifier(Identifier),
     Expr(Expr),
 }
 
+impl DictKey {
+    pub fn strip_ids(&mut self) {
+        self.id = 0;
+        match &mut self.kind {
+            DictKeyKind::Identifier(id) => {
+                id.strip_ids();
+            }
+            DictKeyKind::Expr(expr) => {
+                expr.strip_ids();
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FnDecl {
+    pub id: usize,
     pub generics: Vec<TypeVar>,
     pub ret: Option<Type>,
     pub params: Vec<Declarable>,
     pub body: Block,
 }
 
+impl FnDecl {
+    pub fn strip_ids(&mut self) {
+        self.id = 0;
+        for g in &mut self.generics {
+            g.strip_ids();
+        }
+        if let Some(ret) = &mut self.ret {
+            ret.strip_ids();
+        }
+        for p in &mut self.params {
+            p.strip_ids();
+        }
+        self.body.strip_ids();
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Expr {
+pub struct Expr {
+    pub id: usize,
+    pub kind: ExprKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExprKind {
     Failure(String),
     StrLiteral {
         pieces: Vec<StrLiteralPiece>,
@@ -329,31 +553,187 @@ pub enum Expr {
     },
 }
 
+impl Expr {
+    pub fn strip_ids(&mut self) {
+        self.id = 0;
+        match &mut self.kind {
+            ExprKind::Failure(_) => {}
+            ExprKind::StrLiteral { pieces } => {
+                for p in pieces {
+                    p.strip_ids();
+                }
+            }
+            ExprKind::NilLiteral => {}
+            ExprKind::RegexLiteral(_) => {}
+            ExprKind::Bool(_) => {}
+            ExprKind::Int(_) => {}
+            ExprKind::Float(_) => {}
+            ExprKind::Variable(id) => {
+                id.strip_ids();
+            }
+            ExprKind::UnaryExpr { expr, .. } => {
+                expr.strip_ids();
+            }
+            ExprKind::BinaryExpr { left, right, .. } => {
+                left.strip_ids();
+                right.strip_ids();
+            }
+            ExprKind::ListLiteral { elements, splat } => {
+                for el in elements {
+                    el.strip_ids();
+                }
+                if let Some(splat) = splat {
+                    splat.strip_ids();
+                }
+            }
+            ExprKind::TupleLiteral { elements } => {
+                for el in elements {
+                    el.strip_ids();
+                }
+            }
+            ExprKind::DictLiteral { elements } => {
+                for (k, v) in elements {
+                    k.strip_ids();
+                    v.strip_ids();
+                }
+            }
+            ExprKind::Index { expr, index, .. } => {
+                expr.strip_ids();
+                index.strip_ids();
+            }
+            ExprKind::Member { expr, member, .. } => {
+                expr.strip_ids();
+                member.strip_ids();
+            }
+            ExprKind::Invocation { expr, args, .. } => {
+                expr.strip_ids();
+                for arg in args {
+                    arg.strip_ids();
+                }
+            }
+            ExprKind::AnonymousFn { decl } => {
+                decl.strip_ids();
+            }
+            ExprKind::If {
+                pattern,
+                cond,
+                then,
+                els,
+            } => {
+                if let Some(pattern) = pattern {
+                    pattern.strip_ids();
+                }
+                cond.strip_ids();
+                then.strip_ids();
+                if let Some(els) = els {
+                    els.strip_ids();
+                }
+            }
+            ExprKind::While {
+                label,
+                pattern,
+                cond,
+                body,
+            } => {
+                if let Some(label) = label {
+                    label.strip_ids();
+                }
+                if let Some(pattern) = pattern {
+                    pattern.strip_ids();
+                }
+                cond.strip_ids();
+                body.strip_ids();
+            }
+            ExprKind::DoWhile { label, body, cond } => {
+                if let Some(label) = label {
+                    label.strip_ids();
+                }
+                body.strip_ids();
+                if let Some(cond) = cond {
+                    cond.strip_ids();
+                }
+            }
+            ExprKind::Loop { label, body } => {
+                if let Some(label) = label {
+                    label.strip_ids();
+                }
+                body.strip_ids();
+            }
+            ExprKind::For {
+                label,
+                pattern,
+                range,
+                body,
+            } => {
+                if let Some(label) = label {
+                    label.strip_ids();
+                }
+                pattern.strip_ids();
+                range.strip_ids();
+                body.strip_ids();
+            }
+        }
+    }
+}
+
 impl From<AssignLocationExpr> for Expr {
     fn from(location: AssignLocationExpr) -> Self {
-        match location {
-            AssignLocationExpr::Id(id) => Expr::Variable(id),
-            AssignLocationExpr::Index(container, index) => Expr::Index {
-                expr: Expr::from(container.as_ref().to_owned()).into(),
-                coalesce: false,
-                index: index.into(),
+        match location.kind {
+            AssignLocationExprKind::Id(id) => Expr {
+                id: 0,
+                kind: ExprKind::Variable(id),
             },
-            AssignLocationExpr::Member(container, member) => Expr::Member {
-                expr: Expr::from(container.as_ref().to_owned()).into(),
-                coalesce: false,
-                member,
+            AssignLocationExprKind::Index(container, index) => Expr {
+                id: 0,
+                kind: ExprKind::Index {
+                    expr: Expr::from(container.as_ref().to_owned()).into(),
+                    coalesce: false,
+                    index: index.into(),
+                },
+            },
+            AssignLocationExprKind::Member(container, member) => Expr {
+                id: 0,
+                kind: ExprKind::Member {
+                    expr: Expr::from(container.as_ref().to_owned()).into(),
+                    coalesce: false,
+                    member,
+                },
             },
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Item {
-    NamedFn { name: Identifier, decl: FnDecl },
+pub struct Item {
+    pub id: usize,
+    pub kind: ItemKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Stmt {
+pub enum ItemKind {
+    NamedFn { name: Identifier, decl: FnDecl },
+}
+
+impl Item {
+    pub fn strip_ids(&mut self) {
+        self.id = 0;
+        match &mut self.kind {
+            ItemKind::NamedFn { name, decl } => {
+                name.strip_ids();
+                decl.strip_ids();
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Stmt {
+    pub id: usize,
+    pub kind: StmtKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StmtKind {
     Break {
         label: Option<Identifier>,
         expr: Option<Expr>,
@@ -377,28 +757,105 @@ pub enum Stmt {
     }, // ...
 }
 
+impl Stmt {
+    pub fn strip_ids(&mut self) {
+        self.id = 0;
+        match &mut self.kind {
+            StmtKind::Break { label, expr } => {
+                if let Some(label) = label {
+                    label.strip_ids();
+                }
+                if let Some(expr) = expr {
+                    expr.strip_ids();
+                }
+            }
+            StmtKind::Continue { label } => {
+                if let Some(label) = label {
+                    label.strip_ids();
+                }
+            }
+            StmtKind::Return { expr } => {
+                if let Some(expr) = expr {
+                    expr.strip_ids();
+                }
+            }
+            StmtKind::Declare { pattern, expr } => {
+                pattern.strip_ids();
+                expr.strip_ids();
+            }
+            StmtKind::Assign { pattern, expr } => {
+                pattern.strip_ids();
+                expr.strip_ids();
+            }
+            StmtKind::Expr { expr } => {
+                expr.strip_ids();
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Block {
+    pub id: usize,
     pub items: Vec<Item>,
     pub stmts: Vec<Stmt>,
 }
 
+impl Block {
+    pub fn strip_ids(&mut self) {
+        self.id = 0;
+        for item in &mut self.items {
+            item.strip_ids();
+        }
+        for stmt in &mut self.stmts {
+            stmt.strip_ids();
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct Document {
+    pub id: usize,
     pub body: Block,
 }
 
+impl Document {
+    pub fn strip_ids(&mut self) {
+        self.id = 0;
+        self.body.strip_ids();
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct TypeVar(pub String);
+pub struct TypeVar {
+    pub id: usize,
+    pub name: String,
+}
+
+impl TypeVar {
+    pub fn new(name: String) -> Self {
+        TypeVar { id: 0, name }
+    }
+
+    pub fn strip_ids(&mut self) {
+        self.id = 0;
+    }
+}
 
 impl Display for TypeVar {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        write!(f, "{}", self.name)
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Type {
+pub struct Type {
+    pub id: usize,
+    pub kind: TypeKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum TypeKind {
     Nil,
     Bool,
     Str,
@@ -414,34 +871,92 @@ pub enum Type {
     TypeVar(TypeVar),                     // x, y, z
 }
 
+impl Type {
+    pub fn strip_ids(&mut self) {
+        self.id = 0;
+        match &mut self.kind {
+            TypeKind::Nil => {}
+            TypeKind::Bool => {}
+            TypeKind::Str => {}
+            TypeKind::Int => {}
+            TypeKind::Float => {}
+            TypeKind::Num => {}
+            TypeKind::Regex => {}
+            TypeKind::Fun(sig) => {
+                if let Some(sig) = sig {
+                    sig.strip_ids();
+                }
+            }
+            TypeKind::List(inner) => {
+                if let Some(inner) = inner {
+                    inner.strip_ids();
+                }
+            }
+            TypeKind::Tuple(types) => {
+                if let Some(types) = types {
+                    for t in types {
+                        t.strip_ids();
+                    }
+                }
+            }
+            TypeKind::Dict(pair) => {
+                if let Some((k, v)) = pair {
+                    k.strip_ids();
+                    v.strip_ids();
+                }
+            }
+            TypeKind::Nullable(inner) => {
+                inner.strip_ids();
+            }
+            TypeKind::TypeVar(tv) => {
+                tv.strip_ids();
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FnType {
+    pub id: usize,
     pub generics: Vec<TypeVar>,
     pub params: Vec<Type>,
     pub ret: Box<Type>,
 }
 
+impl FnType {
+    pub fn strip_ids(&mut self) {
+        self.id = 0;
+        for g in &mut self.generics {
+            g.strip_ids();
+        }
+        for p in &mut self.params {
+            p.strip_ids();
+        }
+        self.ret.strip_ids();
+    }
+}
+
 impl Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Type::Nil => write!(f, "nil"),
-            Type::Bool => write!(f, "bool"),
-            Type::Str => write!(f, "str"),
-            Type::Int => write!(f, "int"),
-            Type::Float => write!(f, "float"),
-            Type::Num => write!(f, "num"),
-            Type::Regex => write!(f, "regex"),
-            Type::TypeVar(v) => write!(f, "{v}"),
-            Type::Fun(signature) => {
+        match &self.kind {
+            TypeKind::Nil => write!(f, "nil"),
+            TypeKind::Bool => write!(f, "bool"),
+            TypeKind::Str => write!(f, "str"),
+            TypeKind::Int => write!(f, "int"),
+            TypeKind::Float => write!(f, "float"),
+            TypeKind::Num => write!(f, "num"),
+            TypeKind::Regex => write!(f, "regex"),
+            TypeKind::TypeVar(v) => write!(f, "{v}"),
+            TypeKind::Fun(signature) => {
                 write!(f, "fn")?;
 
                 if let Some(FnType {
                     generics,
                     params,
                     ret,
+                    ..
                 }) = signature
                 {
-                    write!(f, "fn")?;
                     if generics.len() > 0 {
                         write!(f, "<")?;
                         let mut i = 0;
@@ -466,17 +981,21 @@ impl Display for Type {
                         }
                         write!(f, ")")?;
                     }
-                    if ret.as_ref() != &Type::Nil {
+                    let nil_type = Type {
+                        id: 0,
+                        kind: TypeKind::Nil,
+                    };
+                    if ret.as_ref() != &nil_type {
                         write!(f, " -> {ret}")?;
                     }
                 }
 
                 write!(f, "")
             }
-            Type::List(None) => write!(f, "list"),
-            Type::List(Some(t)) => write!(f, "[{t}]"),
-            Type::Tuple(None) => write!(f, "tuple"),
-            Type::Tuple(Some(ts)) => {
+            TypeKind::List(None) => write!(f, "list"),
+            TypeKind::List(Some(t)) => write!(f, "[{t}]"),
+            TypeKind::Tuple(None) => write!(f, "tuple"),
+            TypeKind::Tuple(Some(ts)) => {
                 write!(f, "(")?;
                 let mut i = 0;
                 for t in ts {
@@ -492,7 +1011,7 @@ impl Display for Type {
                 }
                 write!(f, ")")
             }
-            Type::Dict(p) => {
+            TypeKind::Dict(p) => {
                 write!(f, "dict")?;
                 if let Some((k, v)) = p {
                     write!(f, "[{}, {}]", k, v)?;
@@ -500,7 +1019,7 @@ impl Display for Type {
 
                 Ok(())
             }
-            Type::Nullable(t) => {
+            TypeKind::Nullable(t) => {
                 write!(f, "?({t})")
             }
         }

@@ -1,9 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use std::{
-        fs,
-        time::{Duration, Instant},
-    };
+    use std::time::Instant;
 
     use pretty_assertions::assert_eq;
     use test_case::test_case;
@@ -36,11 +33,10 @@ mod tests {
         let content =
             std::fs::read_to_string(format!("./aoc/{name}.al")).expect("can read aoc file");
 
-        let doc1 = parse_document(&content);
-        assert!(doc1.is_some());
+        let doc1 = parse_document(&content).expect("Can parse with parser combinators");
 
-        let doc2 = parse_document_ts(&content);
-        assert!(doc2.is_some());
+        let mut doc2 = parse_document_ts(&content).expect("Can parse with Tree-sitter");
+        doc2.strip_ids();
 
         // if doc1 != doc2 {
         //     fs::write(&format!("doc1_{name}.txt"), format!("{:#?}", doc1)).unwrap();
@@ -51,7 +47,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
+    // #[ignore]
     fn bench() {
         let tests = [
             "2023_day01",
