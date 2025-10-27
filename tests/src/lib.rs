@@ -47,7 +47,7 @@ mod tests {
     }
 
     #[test]
-    // #[ignore]
+    #[ignore]
     fn bench() {
         let tests = [
             "2023_day01",
