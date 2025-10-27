@@ -1,6 +1,6 @@
 use std::fmt::{Display, Write};
 
-pub use parser::ast::{FnType, Identifier, Type, TypeVar};
+pub use parser::ast::{FnTypeNode, Identifier, TypeNode, TypeVarNode};
 
 use indenter::indented;
 
@@ -13,10 +13,10 @@ pub enum StrLiteralPiece {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FnDecl {
     pub name: Option<String>,
-    pub generics: Vec<TypeVar>,
-    pub ret: Option<Type>,
+    pub generics: Vec<TypeVarNode>,
+    pub ret: Option<TypeNode>,
     pub params: Vec<Identifier>,
-    pub locals: Vec<Option<Type>>,
+    pub locals: Vec<Option<TypeNode>>,
     pub body: Option<Block>,
 }
 
@@ -290,7 +290,7 @@ pub enum Stmt {
     },
     Declare {
         local: LocalAccess,
-        ty: Option<Type>,
+        ty: Option<TypeNode>,
     },
     AssignLocal {
         local: LocalAccess,

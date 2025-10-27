@@ -3,8 +3,8 @@ use tree_sitter::Node;
 use crate::ast::{
     Argument, AssignLocationExpr, AssignLocationExprKind, AssignPattern, AssignPatternKind, Block,
     Declarable, DeclareGuardExpr, DeclareGuardExprKind, DeclarePattern, DeclarePatternKind,
-    DictKey, DictKeyKind, Document, Expr, ExprKind, FnDecl, FnType, Identifier, Item, ItemKind,
-    Stmt, StmtKind, StrLiteralPiece, StrLiteralPieceKind, Type, TypeKind, TypeVar,
+    DictKey, DictKeyKind, Document, Expr, ExprKind, FnDecl, FnTypeNode, Identifier, Item, ItemKind,
+    Stmt, StmtKind, StrLiteralPiece, StrLiteralPieceKind, TypeNode, TypeNodeKind, TypeVarNode,
 };
 
 pub fn parse_document_ts(source: &str) -> Option<Document> {
@@ -88,72 +88,76 @@ impl<'a> Converter<'a> {
         block
     }
 
-    fn as_type(&self, node: Node) -> Type {
+    fn as_type(&self, node: Node) -> TypeNode {
         match node.kind() {
             "parenthesized_type" => node.map_child("child", |node| self.as_type(node)),
-            "type_identifier" => Type {
+            "type_identifier" => TypeNode {
                 id: node.id(),
-                kind: TypeKind::TypeVar(self.as_typevar(node)),
+                kind: TypeNodeKind::TypeVar(self.as_typevar(node)),
             },
-            "nil_type" => Type {
+            "nil_type" => TypeNode {
                 id: node.id(),
-                kind: TypeKind::Nil,
+                kind: TypeNodeKind::Nil,
             },
-            "bool_type" => Type {
+            "bool_type" => TypeNode {
                 id: node.id(),
-                kind: TypeKind::Bool,
+                kind: TypeNodeKind::Bool,
             },
-            "str_type" => Type {
+            "str_type" => TypeNode {
                 id: node.id(),
-                kind: TypeKind::Str,
+                kind: TypeNodeKind::Str,
             },
-            "int_type" => Type {
+            "int_type" => TypeNode {
                 id: node.id(),
-                kind: TypeKind::Int,
+                kind: TypeNodeKind::Int,
             },
-            "float_type" => Type {
+            "float_type" => TypeNode {
                 id: node.id(),
-                kind: TypeKind::Float,
+                kind: TypeNodeKind::Float,
             },
-            "num_type" => Type {
+            "num_type" => TypeNode {
                 id: node.id(),
-                kind: TypeKind::Num,
+                kind: TypeNodeKind::Num,
             },
-            "regex_type" => Type {
+            "regex_type" => TypeNode {
                 id: node.id(),
-                kind: TypeKind::Regex,
+                kind: TypeNodeKind::Regex,
             },
             "tuple_type" => {
                 let elements = node.map_children("element", |node| self.as_type(node));
-                Type {
+                TypeNode {
                     id: node.id(),
                     kind: if elements.len() == 0 {
-                        TypeKind::Tuple(None)
+                        TypeNodeKind::Tuple(None)
                     } else {
-                        TypeKind::Tuple(Some(elements))
+                        TypeNodeKind::Tuple(Some(elements))
                     },
                 }
             }
-            "list_type" => Type {
+            "list_type" => TypeNode {
                 id: node.id(),
-                kind: TypeKind::List(
+                kind: TypeNodeKind::List(
                     node.map_opt_child("elements", |node| self.as_type(node).into()),
                 ),
             },
             "dict_type" => {
                 let key = node.map_opt_child("key", |node| self.as_type(node));
                 let val = node.map_opt_child("val", |node| self.as_type(node));
-                Type {
+                TypeNode {
                     id: node.id(),
                     kind: match (key, val) {
-                        (Some(key), Some(val)) => TypeKind::Dict(Some((key.into(), val.into()))),
-                        _ => TypeKind::Dict(None),
+                        (Some(key), Some(val)) => {
+                            TypeNodeKind::Dict(Some((key.into(), val.into())))
+                        }
+                        _ => TypeNodeKind::Dict(None),
                     },
                 }
             }
-            "nullable_type" => Type {
+            "nullable_type" => TypeNode {
                 id: node.id(),
-                kind: TypeKind::Nullable(node.map_child("child", |node| self.as_type(node).into())),
+                kind: TypeNodeKind::Nullable(
+                    node.map_child("child", |node| self.as_type(node).into()),
+                ),
             },
             "fn_type" => {
                 let generics = node.map_children("generic", |node| self.as_typevar(node));
@@ -161,17 +165,17 @@ impl<'a> Converter<'a> {
                 let ret = node.map_opt_child("return", |node| self.as_type(node));
 
                 // todo improve, this is not correct
-                Type {
+                TypeNode {
                     id: node.id(),
                     kind: if ret.is_some() || (generics.len() + params.len() > 0) {
-                        TypeKind::Fun(Some(FnType {
+                        TypeNodeKind::Fun(Some(FnTypeNode {
                             id: node.id(),
                             generics,
                             params,
                             ret: ret.unwrap().into(),
                         }))
                     } else {
-                        TypeKind::Fun(None)
+                        TypeNodeKind::Fun(None)
                     },
                 }
             }
@@ -755,8 +759,8 @@ impl<'a> Converter<'a> {
         self.as_identifier(node.child(1).unwrap())
     }
 
-    fn as_typevar(&self, node: Node) -> TypeVar {
-        TypeVar {
+    fn as_typevar(&self, node: Node) -> TypeVarNode {
+        TypeVarNode {
             id: node.id(),
             name: self.as_str(node).into(),
         }

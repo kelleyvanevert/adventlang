@@ -1,13 +1,13 @@
 use inkwell::values::{BasicValue, BasicValueEnum};
 
-use crate::hir::{FnDecl, FnType, Identifier, Type, TypeVar};
+use crate::hir::{FnDecl, FnTypeNode, Identifier, TypeNode, TypeVarNode};
 
-fn tv(id: &str) -> TypeVar {
-    TypeVar(id.into())
+fn tv(id: &str) -> TypeVarNode {
+    TypeVarNode(id.into())
 }
 
-fn tv_ty(id: &str) -> Type {
-    Type::TypeVar(tv(id))
+fn tv_ty(id: &str) -> TypeNode {
+    TypeNode::TypeVar(tv(id))
 }
 
 fn id(id: &str) -> Identifier {
@@ -16,8 +16,8 @@ fn id(id: &str) -> Identifier {
 
 pub struct StdlibFn {
     pub name: &'static str,
-    pub generics: Vec<TypeVar>,
-    pub ret: Option<Type>,
+    pub generics: Vec<TypeVarNode>,
+    pub ret: Option<TypeNode>,
     pub params: Vec<Identifier>,
 }
 

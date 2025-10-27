@@ -44,7 +44,7 @@ impl Scope {
         &mut self,
         pass: &mut DesugarPass,
         id: hir::Identifier,
-        ty: Option<hir::Type>,
+        ty: Option<hir::TypeNode>,
     ) -> hir::LocalAccess {
         let local_index = pass.fns[self.fn_id].locals.len();
 
@@ -142,10 +142,10 @@ impl DesugarPass {
         id
     }
 
-    fn fresh_typevar(&mut self) -> ast::TypeVar {
+    fn fresh_typevar(&mut self) -> ast::TypeVarNode {
         let n = self.next_var_id;
         self.next_var_id += 1;
-        let id = ast::TypeVar(format!("'{}", n).into());
+        let id = ast::TypeVarNode(format!("'{}", n).into());
 
         id
     }

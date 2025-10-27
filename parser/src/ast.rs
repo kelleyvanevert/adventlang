@@ -70,15 +70,15 @@ pub struct DeclarePattern {
 pub enum DeclarePatternKind {
     Declare {
         guard: DeclareGuardExpr,
-        ty: Option<Type>,
+        ty: Option<TypeNode>,
     },
     List {
         elements: Vec<Declarable>,
-        rest: Option<(Identifier, Option<Type>)>,
+        rest: Option<(Identifier, Option<TypeNode>)>,
     },
     Tuple {
         elements: Vec<Declarable>,
-        rest: Option<(Identifier, Option<Type>)>,
+        rest: Option<(Identifier, Option<TypeNode>)>,
     },
 }
 
@@ -446,8 +446,8 @@ impl DictKey {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FnDecl {
     pub id: usize,
-    pub generics: Vec<TypeVar>,
-    pub ret: Option<Type>,
+    pub generics: Vec<TypeVarNode>,
+    pub ret: Option<TypeNode>,
     pub params: Vec<Declarable>,
     pub body: Block,
 }
@@ -472,6 +472,32 @@ impl FnDecl {
 pub struct Expr {
     pub id: usize,
     pub kind: ExprKind,
+}
+
+impl Expr {
+    pub fn is_nil(&self) -> bool {
+        matches!(self.kind, ExprKind::NilLiteral)
+    }
+
+    pub fn is_str(&self) -> bool {
+        matches!(self.kind, ExprKind::StrLiteral { .. })
+    }
+
+    pub fn is_regex(&self) -> bool {
+        matches!(self.kind, ExprKind::RegexLiteral(_))
+    }
+
+    pub fn is_bool(&self) -> bool {
+        matches!(self.kind, ExprKind::Bool(_))
+    }
+
+    pub fn is_int(&self) -> bool {
+        matches!(self.kind, ExprKind::Int(_))
+    }
+
+    pub fn is_float(&self) -> bool {
+        matches!(self.kind, ExprKind::Float(_))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -827,14 +853,14 @@ impl Document {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct TypeVar {
+pub struct TypeVarNode {
     pub id: usize,
     pub name: String,
 }
 
-impl TypeVar {
+impl TypeVarNode {
     pub fn new(name: String) -> Self {
-        TypeVar { id: 0, name }
+        TypeVarNode { id: 0, name }
     }
 
     pub fn strip_ids(&mut self) {
@@ -842,20 +868,20 @@ impl TypeVar {
     }
 }
 
-impl Display for TypeVar {
+impl Display for TypeVarNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.name)
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Type {
+pub struct TypeNode {
     pub id: usize,
-    pub kind: TypeKind,
+    pub kind: TypeNodeKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum TypeKind {
+pub enum TypeNodeKind {
     Nil,
     Bool,
     Str,
@@ -863,52 +889,52 @@ pub enum TypeKind {
     Float,
     Num,
     Regex,
-    Fun(Option<FnType>), // underspecified ("fn"), or specified (e.g. "fn<T>([T]) -> T")
-    List(Option<Box<Type>>), // underspecified ("list"), or specified (e.g. "[int]"")
-    Tuple(Option<Vec<Type>>), // underspecified ("tuple"), or specified (e.g. "(int, bool)")
-    Dict(Option<(Box<Type>, Box<Type>)>), // underspecified ("dict"), or specified (e.g. "{ [int]: str }")
-    Nullable(Box<Type>),                  // ?int
-    TypeVar(TypeVar),                     // x, y, z
+    Fun(Option<FnTypeNode>), // underspecified ("fn"), or specified (e.g. "fn<T>([T]) -> T")
+    List(Option<Box<TypeNode>>), // underspecified ("list"), or specified (e.g. "[int]"")
+    Tuple(Option<Vec<TypeNode>>), // underspecified ("tuple"), or specified (e.g. "(int, bool)")
+    Dict(Option<(Box<TypeNode>, Box<TypeNode>)>), // underspecified ("dict"), or specified (e.g. "{ [int]: str }")
+    Nullable(Box<TypeNode>),                      // ?int
+    TypeVar(TypeVarNode),                         // x, y, z
 }
 
-impl Type {
+impl TypeNode {
     pub fn strip_ids(&mut self) {
         self.id = 0;
         match &mut self.kind {
-            TypeKind::Nil => {}
-            TypeKind::Bool => {}
-            TypeKind::Str => {}
-            TypeKind::Int => {}
-            TypeKind::Float => {}
-            TypeKind::Num => {}
-            TypeKind::Regex => {}
-            TypeKind::Fun(sig) => {
+            TypeNodeKind::Nil => {}
+            TypeNodeKind::Bool => {}
+            TypeNodeKind::Str => {}
+            TypeNodeKind::Int => {}
+            TypeNodeKind::Float => {}
+            TypeNodeKind::Num => {}
+            TypeNodeKind::Regex => {}
+            TypeNodeKind::Fun(sig) => {
                 if let Some(sig) = sig {
                     sig.strip_ids();
                 }
             }
-            TypeKind::List(inner) => {
+            TypeNodeKind::List(inner) => {
                 if let Some(inner) = inner {
                     inner.strip_ids();
                 }
             }
-            TypeKind::Tuple(types) => {
+            TypeNodeKind::Tuple(types) => {
                 if let Some(types) = types {
                     for t in types {
                         t.strip_ids();
                     }
                 }
             }
-            TypeKind::Dict(pair) => {
+            TypeNodeKind::Dict(pair) => {
                 if let Some((k, v)) = pair {
                     k.strip_ids();
                     v.strip_ids();
                 }
             }
-            TypeKind::Nullable(inner) => {
+            TypeNodeKind::Nullable(inner) => {
                 inner.strip_ids();
             }
-            TypeKind::TypeVar(tv) => {
+            TypeNodeKind::TypeVar(tv) => {
                 tv.strip_ids();
             }
         }
@@ -916,14 +942,14 @@ impl Type {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct FnType {
+pub struct FnTypeNode {
     pub id: usize,
-    pub generics: Vec<TypeVar>,
-    pub params: Vec<Type>,
-    pub ret: Box<Type>,
+    pub generics: Vec<TypeVarNode>,
+    pub params: Vec<TypeNode>,
+    pub ret: Box<TypeNode>,
 }
 
-impl FnType {
+impl FnTypeNode {
     pub fn strip_ids(&mut self) {
         self.id = 0;
         for g in &mut self.generics {
@@ -936,21 +962,21 @@ impl FnType {
     }
 }
 
-impl Display for Type {
+impl Display for TypeNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.kind {
-            TypeKind::Nil => write!(f, "nil"),
-            TypeKind::Bool => write!(f, "bool"),
-            TypeKind::Str => write!(f, "str"),
-            TypeKind::Int => write!(f, "int"),
-            TypeKind::Float => write!(f, "float"),
-            TypeKind::Num => write!(f, "num"),
-            TypeKind::Regex => write!(f, "regex"),
-            TypeKind::TypeVar(v) => write!(f, "{v}"),
-            TypeKind::Fun(signature) => {
+            TypeNodeKind::Nil => write!(f, "nil"),
+            TypeNodeKind::Bool => write!(f, "bool"),
+            TypeNodeKind::Str => write!(f, "str"),
+            TypeNodeKind::Int => write!(f, "int"),
+            TypeNodeKind::Float => write!(f, "float"),
+            TypeNodeKind::Num => write!(f, "num"),
+            TypeNodeKind::Regex => write!(f, "regex"),
+            TypeNodeKind::TypeVar(v) => write!(f, "{v}"),
+            TypeNodeKind::Fun(signature) => {
                 write!(f, "fn")?;
 
-                if let Some(FnType {
+                if let Some(FnTypeNode {
                     generics,
                     params,
                     ret,
@@ -981,9 +1007,9 @@ impl Display for Type {
                         }
                         write!(f, ")")?;
                     }
-                    let nil_type = Type {
+                    let nil_type = TypeNode {
                         id: 0,
-                        kind: TypeKind::Nil,
+                        kind: TypeNodeKind::Nil,
                     };
                     if ret.as_ref() != &nil_type {
                         write!(f, " -> {ret}")?;
@@ -992,10 +1018,10 @@ impl Display for Type {
 
                 write!(f, "")
             }
-            TypeKind::List(None) => write!(f, "list"),
-            TypeKind::List(Some(t)) => write!(f, "[{t}]"),
-            TypeKind::Tuple(None) => write!(f, "tuple"),
-            TypeKind::Tuple(Some(ts)) => {
+            TypeNodeKind::List(None) => write!(f, "list"),
+            TypeNodeKind::List(Some(t)) => write!(f, "[{t}]"),
+            TypeNodeKind::Tuple(None) => write!(f, "tuple"),
+            TypeNodeKind::Tuple(Some(ts)) => {
                 write!(f, "(")?;
                 let mut i = 0;
                 for t in ts {
@@ -1011,7 +1037,7 @@ impl Display for Type {
                 }
                 write!(f, ")")
             }
-            TypeKind::Dict(p) => {
+            TypeNodeKind::Dict(p) => {
                 write!(f, "dict")?;
                 if let Some((k, v)) = p {
                     write!(f, "[{}, {}]", k, v)?;
@@ -1019,7 +1045,7 @@ impl Display for Type {
 
                 Ok(())
             }
-            TypeKind::Nullable(t) => {
+            TypeNodeKind::Nullable(t) => {
                 write!(f, "?({t})")
             }
         }

@@ -1,12 +1,14 @@
 use either::Either;
 use regex::Regex;
 
+use crate::ast::TypeNode;
+
 use {
     crate::ast::{
         Argument, AssignPattern, Block, Declarable, DeclareGuardExpr, DeclareGuardExprKind,
         DeclarePattern, DeclarePatternKind, DictKey, DictKeyKind, Document, Expr, ExprKind, FnDecl,
-        FnType, Identifier, Item, ItemKind, Stmt, StmtKind, StrLiteralPiece, StrLiteralPieceKind,
-        Type, TypeKind, TypeVar,
+        FnTypeNode, Identifier, Item, ItemKind, Stmt, StmtKind, StrLiteralPiece,
+        StrLiteralPieceKind, TypeNodeKind, TypeVarNode,
     },
     parser_combinators::{
         ParseResult, Parser, alt, check, delimited, many0, many1, map, map_opt, optional,
@@ -106,14 +108,14 @@ fn identifier(s: State) -> ParseResult<State, Identifier> {
     .parse(s)
 }
 
-fn raw_type_var(s: State) -> ParseResult<State, TypeVar> {
+fn raw_type_var(s: State) -> ParseResult<State, TypeVarNode> {
     map(regex(r"^[_a-zA-Z][_a-zA-Z0-9]*"), |id| {
-        TypeVar::new(id.into())
+        TypeVarNode::new(id.into())
     })
     .parse(s)
 }
 
-fn type_var(s: State) -> ParseResult<State, TypeVar> {
+fn type_var(s: State) -> ParseResult<State, TypeVarNode> {
     check(raw_type_var, |id| {
         ![
             "any", "nil", "bool", "str", "int", "float", "num", "regex", "tuple", "list",
@@ -1224,36 +1226,36 @@ fn return_stmt(s: State) -> ParseResult<State, Stmt> {
     .parse(s)
 }
 
-fn type_leaf(s: State) -> ParseResult<State, Type> {
+fn type_leaf(s: State) -> ParseResult<State, TypeNode> {
     alt((
         // map(tag("any"), |_| Type::Any),
-        map(tag("nil"), |_| Type {
+        map(tag("nil"), |_| TypeNode {
             id: 0,
-            kind: TypeKind::Nil,
+            kind: TypeNodeKind::Nil,
         }),
-        map(tag("bool"), |_| Type {
+        map(tag("bool"), |_| TypeNode {
             id: 0,
-            kind: TypeKind::Bool,
+            kind: TypeNodeKind::Bool,
         }),
-        map(tag("str"), |_| Type {
+        map(tag("str"), |_| TypeNode {
             id: 0,
-            kind: TypeKind::Str,
+            kind: TypeNodeKind::Str,
         }),
-        map(tag("int"), |_| Type {
+        map(tag("int"), |_| TypeNode {
             id: 0,
-            kind: TypeKind::Int,
+            kind: TypeNodeKind::Int,
         }),
-        map(tag("float"), |_| Type {
+        map(tag("float"), |_| TypeNode {
             id: 0,
-            kind: TypeKind::Float,
+            kind: TypeNodeKind::Float,
         }),
-        map(tag("num"), |_| Type {
+        map(tag("num"), |_| TypeNode {
             id: 0,
-            kind: TypeKind::Num,
+            kind: TypeNodeKind::Num,
         }),
-        map(tag("regex"), |_| Type {
+        map(tag("regex"), |_| TypeNode {
             id: 0,
-            kind: TypeKind::Regex,
+            kind: TypeNodeKind::Regex,
         }),
         type_fn,
         // "dict" or "dict[K, V]"
@@ -1266,15 +1268,15 @@ fn type_leaf(s: State) -> ParseResult<State, Type> {
                     seq((ws0, tag("]"))),
                 )),
             ),
-            |opt| Type {
+            |opt| TypeNode {
                 id: 0,
-                kind: TypeKind::Dict(opt.map(|(k, _, _, _, v)| (k.into(), v.into()))),
+                kind: TypeNodeKind::Dict(opt.map(|(k, _, _, _, v)| (k.into(), v.into()))),
             },
         ),
         // implicitly typed tuple
-        map(tag("tuple"), |_| Type {
+        map(tag("tuple"), |_| TypeNode {
             id: 0,
-            kind: TypeKind::Tuple(None),
+            kind: TypeNodeKind::Tuple(None),
         }),
         // (a, b, c, ..)
         map(
@@ -1285,29 +1287,29 @@ fn type_leaf(s: State) -> ParseResult<State, Type> {
                     // (and "()" is still just the empty tuple)
                     ts.pop().unwrap()
                 } else {
-                    Type {
+                    TypeNode {
                         id: 0,
-                        kind: TypeKind::Tuple(Some(ts)),
+                        kind: TypeNodeKind::Tuple(Some(ts)),
                     }
                 }
             },
         ),
         // implicitly typed list
-        map(tag("list"), |_| Type {
+        map(tag("list"), |_| TypeNode {
             id: 0,
-            kind: TypeKind::List(None),
+            kind: TypeNodeKind::List(None),
         }),
         // explicitly typed list: [T]
         map(
             delimited(seq((tag("["), ws0)), typespec, seq((ws0, tag("]")))),
-            |t| Type {
+            |t| TypeNode {
                 id: 0,
-                kind: TypeKind::List(Some(t.into())),
+                kind: TypeNodeKind::List(Some(t.into())),
             },
         ),
-        map(type_var, |tv| Type {
+        map(type_var, |tv| TypeNode {
             id: 0,
-            kind: TypeKind::TypeVar(tv),
+            kind: TypeNodeKind::TypeVar(tv),
         }),
         // recurse with parentheses
         parenthesized_type,
@@ -1315,7 +1317,7 @@ fn type_leaf(s: State) -> ParseResult<State, Type> {
     .parse(s)
 }
 
-fn type_fn(s: State) -> ParseResult<State, Type> {
+fn type_fn(s: State) -> ParseResult<State, TypeNode> {
     map(
         seq((
             tag("fn"),
@@ -1327,24 +1329,24 @@ fn type_fn(s: State) -> ParseResult<State, Type> {
         )),
         |(_, generics_and_args, ret)| {
             if generics_and_args.is_none() && ret.is_none() {
-                return Type {
+                return TypeNode {
                     id: 0,
-                    kind: TypeKind::Fun(None),
+                    kind: TypeNodeKind::Fun(None),
                 };
             }
 
             let (generics, (params, _)) = generics_and_args.unwrap_or_default();
             let generics = generics.map(|t| t.0).unwrap_or(vec![]);
-            let ret = ret.unwrap_or(Type {
+            let ret = ret.unwrap_or(TypeNode {
                 id: 0,
-                kind: TypeKind::Nil,
+                kind: TypeNodeKind::Nil,
             });
 
             // TODO: maybe validate?
 
-            Type {
+            TypeNode {
                 id: 0,
-                kind: TypeKind::Fun(Some(FnType {
+                kind: TypeNodeKind::Fun(Some(FnTypeNode {
                     id: 0,
                     generics,
                     params,
@@ -1356,18 +1358,18 @@ fn type_fn(s: State) -> ParseResult<State, Type> {
     .parse(s)
 }
 
-fn parenthesized_type(s: State) -> ParseResult<State, Type> {
+fn parenthesized_type(s: State) -> ParseResult<State, TypeNode> {
     delimited(seq((char('('), ws0)), typespec, seq((ws0, char(')')))).parse(s)
 }
 
-fn type_nullable_stack(s: State) -> ParseResult<State, Type> {
+fn type_nullable_stack(s: State) -> ParseResult<State, TypeNode> {
     map(
         seq((many0(terminated(tag("?"), ws0)), type_leaf)),
         |(nullable, ty)| {
             if !nullable.is_empty() {
-                Type {
+                TypeNode {
                     id: 0,
-                    kind: TypeKind::Nullable(ty.into()),
+                    kind: TypeNodeKind::Nullable(ty.into()),
                 }
             } else {
                 ty
@@ -1377,7 +1379,7 @@ fn type_nullable_stack(s: State) -> ParseResult<State, Type> {
     .parse(s)
 }
 
-fn type_union_stack(s: State) -> ParseResult<State, Type> {
+fn type_union_stack(s: State) -> ParseResult<State, TypeNode> {
     type_nullable_stack
         // map(
         //     seq((
@@ -1396,7 +1398,7 @@ fn type_union_stack(s: State) -> ParseResult<State, Type> {
         .parse(s)
 }
 
-fn typespec(s: State) -> ParseResult<State, Type> {
+fn typespec(s: State) -> ParseResult<State, TypeNode> {
     type_union_stack.parse(s)
 }
 
@@ -1807,13 +1809,13 @@ pub fn parse_declarable(input: &str) -> Declarable {
         .expect("parse declarable")
 }
 
-pub fn try_parse_type(input: &str) -> Option<Type> {
+pub fn try_parse_type(input: &str) -> Option<TypeNode> {
     terminated(typespec, eof)
         .parse(input.trim().into())
         .map(|(_, t)| t)
 }
 
-pub fn parse_type(input: &str) -> Type {
+pub fn parse_type(input: &str) -> TypeNode {
     try_parse_type(input).expect("can parse type")
 }
 
