@@ -42,10 +42,10 @@ mod tests {
         let doc2 = parse_document_ts(&content);
         assert!(doc2.is_some());
 
-        if doc1 != doc2 {
-            fs::write(&format!("doc1_{name}.txt"), format!("{:#?}", doc1)).unwrap();
-            fs::write(&format!("doc2_{name}.txt"), format!("{:#?}", doc2)).unwrap();
-        }
+        // if doc1 != doc2 {
+        //     fs::write(&format!("doc1_{name}.txt"), format!("{:#?}", doc1)).unwrap();
+        //     fs::write(&format!("doc2_{name}.txt"), format!("{:#?}", doc2)).unwrap();
+        // }
 
         assert_eq!(doc1, doc2);
     }

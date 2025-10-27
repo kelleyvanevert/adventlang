@@ -1,4 +1,4 @@
 [workspace]
 resolver = "2"
-members = ["compiler", "parser", "tests", "tree-sitter-adventlang"]
+members = ["compiler", "parser", "tests", "type_checker", "tree-sitter-adventlang"]
 # members = ["compiler", "parser", "parser_combinators", "tests"]

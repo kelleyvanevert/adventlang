@@ -302,7 +302,7 @@ pub enum Value {
     - GC is flexible
     - :map,:find -style infix function notation is flexible
     - easy use of closures is flexible
-    
+
     ..and selecting overloads at runtime due to unknown dynamic types is less important to me.
 
 
@@ -565,7 +565,7 @@ But, because assignment is a runtime thing, this cannot work.
 One solution: only allow invocations of names.
   But then we lose:
     - higher-order fn passing, as arguments to e.g. `map` or `filter` -- can't go here
-    - 
+    -
 
 So then .. maybe we just always resolve the fn to a specific overload,
   when we pass/assign/call it?
@@ -678,7 +678,7 @@ FFI things
 
      - passed and returned as    sret({ ptr, i64, i64 })     ->  extra dereferencing and heap allocations
      - trimmed down to         { ptr, { i32, i32 } as i64 }  ->  calling conventions trickiness (not sure how much)
-     - domain GC id                i32/i64                   ->  
+     - domain GC id                i32/i64                   ->
 
 
 Monomorphization things
@@ -886,3 +886,10 @@ fn main() {
 https://thunderseethe.dev/posts/type-inference/
 
 also: https://cheats.rs/
+
+
+===
+
+struct TyCtx {
+    vars: HashMap<Var, Ty>,
+}

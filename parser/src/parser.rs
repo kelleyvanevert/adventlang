@@ -88,8 +88,8 @@ fn regex<'a>(re: &'static str) -> impl Parser<State<'a>, Output = &'a str> {
 }
 
 fn raw_identifier(s: State) -> ParseResult<State, Identifier> {
-    map(regex(r"^[_a-zA-Z][_a-zA-Z0-9]*"), |id| Identifier {
-        name: id.to_string(),
+    map(regex(r"^[_a-zA-Z][_a-zA-Z0-9]*"), |id| {
+        id.to_string().into()
     })
     .parse(s)
 }
@@ -1588,7 +1588,7 @@ mod tests {
     use crate::ast::*;
 
     fn id(id: &str) -> Identifier {
-        Identifier { name: id.into() }
+        id.into()
     }
 
     fn tv(id: &str) -> TypeVar {
@@ -1596,7 +1596,7 @@ mod tests {
     }
 
     fn var(name: &str) -> Expr {
-        Expr::Variable(Identifier { name: name.into() })
+        Expr::Variable(name.into())
     }
 
     fn empty_block() -> Expr {
