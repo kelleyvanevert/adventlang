@@ -1,9 +1,9 @@
 use parser::ast::{
-    Block, Document, Expr, ExprKind, Identifier, Item, Stmt, StmtKind, TypeNode, TypeNodeKind,
-    TypeVarNode,
+    Argument, Block, Document, Expr, ExprKind, Identifier, Item, Stmt, StmtKind, TypeNode,
+    TypeNodeKind, TypeVarNode,
 };
 
-use crate::types::{Type, TypeVar};
+use crate::types::{FnType, Type, TypeVar};
 
 mod types;
 
@@ -16,6 +16,36 @@ enum AstNode {
     Item(Item),
     Stmt(Stmt),
     Expr(Expr),
+}
+
+impl AstNode {
+    fn as_item(self) -> Item {
+        match self {
+            Self::Item(x) => x,
+            _ => panic!("not an x"),
+        }
+    }
+
+    fn as_expr(self) -> Expr {
+        match self {
+            Self::Expr(x) => x,
+            _ => panic!("not an x"),
+        }
+    }
+
+    fn as_stmt(self) -> Stmt {
+        match self {
+            Self::Stmt(x) => x,
+            _ => panic!("not an x"),
+        }
+    }
+
+    fn as_block(self) -> Block {
+        match self {
+            Self::Block(x) => x,
+            _ => panic!("not an x"),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -49,8 +79,31 @@ impl TypeCheckerCtx {
         node: AstNode,
         constraints: &mut Vec<Constraint>,
     ) -> (Env, AstNode, Type) {
+        /*
+
         match node {
-            AstNode::Document(doc) => self.infer(env, AstNode::Block(doc.body), constraints),
+            Node::Document { body } => self.infer(env, body, constraints),
+        }
+
+        expr            // : BinaryExpr
+        expr.left       // : AstNode
+        *expr.left.kind // : AstKind
+
+        */
+
+        match node {
+            AstNode::Document(doc) => {
+                let (env, typed_body, ty) = self.infer(env, AstNode::Block(doc.body), constraints);
+
+                (
+                    env,
+                    AstNode::Document(Document {
+                        id: doc.id,
+                        body: typed_body.as_block(),
+                    }),
+                    ty,
+                )
+            }
 
             AstNode::Block(Block { id, items, stmts }) => {
                 let mut result_block = Block {
@@ -66,10 +119,7 @@ impl TypeCheckerCtx {
                         self.infer(env.clone(), AstNode::Item(item), constraints);
 
                     env = updated_env;
-                    match item {
-                        AstNode::Item(item) => result_block.items.push(item),
-                        _ => unreachable!(),
-                    }
+                    result_block.items.push(item.as_item());
                 }
 
                 for stmt in stmts {
@@ -77,10 +127,7 @@ impl TypeCheckerCtx {
                         self.infer(env.clone(), AstNode::Stmt(stmt), constraints);
 
                     env = updated_env;
-                    match stmt {
-                        AstNode::Stmt(stmt) => result_block.stmts.push(stmt),
-                        _ => unreachable!(),
-                    }
+                    result_block.stmts.push(stmt.as_stmt());
 
                     last_stmt_ty = ty;
                 }
@@ -90,9 +137,11 @@ impl TypeCheckerCtx {
 
             AstNode::Expr(ref expr) if expr.is_int() => (env, node, Type::Int),
             AstNode::Expr(ref expr) if expr.is_float() => (env, node, Type::Float),
-            AstNode::Expr(ref expr) if expr.is_str() => (env, node, Type::Str),
             AstNode::Expr(ref expr) if expr.is_regex() => (env, node, Type::Regex),
             AstNode::Expr(ref expr) if expr.is_nil() => (env, node, Type::Nil),
+
+            // todo deal with interpolations
+            AstNode::Expr(ref expr) if expr.is_str() => (env, node, Type::Str),
 
             AstNode::Expr(Expr {
                 kind: ExprKind::Variable(ref id),
@@ -116,6 +165,55 @@ impl TypeCheckerCtx {
 
                     todo!()
                 }
+                ExprKind::Invocation {
+                    expr: f,
+                    postfix,
+                    coalesce,
+                    args,
+                } => {
+                    let mut typed_args = vec![];
+                    let mut arg_types = vec![];
+
+                    for arg in args {
+                        let (updated_env, typed_arg, arg_ty) =
+                            self.infer(env, AstNode::Expr(arg.expr), constraints);
+
+                        env = updated_env;
+                        typed_args.push(typed_arg);
+                        arg_types.push(arg_ty);
+                    }
+
+                    let ret_ty = Type::TypeVar(self.fresh_ty_var());
+                    let fun_ty = Type::Fn(Box::new(FnType {
+                        generics: vec![],
+                        params: arg_types,
+                        ret: ret_ty.clone(),
+                    }));
+
+                    let (updated_env, typed_f, _fn_ty) =
+                        self.check(env, AstNode::Expr(*f), fun_ty, constraints);
+
+                    (
+                        updated_env,
+                        AstNode::Expr(Expr {
+                            id: expr.id,
+                            kind: ExprKind::Invocation {
+                                expr: typed_f.as_expr().into(),
+                                postfix,
+                                coalesce,
+                                args: typed_args
+                                    .into_iter()
+                                    .map(|arg| Argument {
+                                        id: 0,
+                                        name: None,
+                                        expr: arg.as_expr(),
+                                    })
+                                    .collect(),
+                            },
+                        }),
+                        ret_ty,
+                    )
+                }
                 _ => todo!("todo infer on expr: {expr:?}"),
             },
 
@@ -123,9 +221,15 @@ impl TypeCheckerCtx {
         }
     }
 
-    // fn check(&mut self, env: Env, ast: AstNode, ty: Type) -> GenOut {
-    //     todo!()
-    // }
+    fn check(
+        &mut self,
+        env: Env,
+        ast: AstNode,
+        ty: Type,
+        constraints: &mut Vec<Constraint>,
+    ) -> (Env, AstNode, Type) {
+        todo!()
+    }
 }
 
 #[cfg(test)]

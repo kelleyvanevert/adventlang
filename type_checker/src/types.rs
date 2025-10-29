@@ -24,7 +24,7 @@ pub enum Type {
 pub struct FnType {
     pub generics: Vec<TypeVar>,
     pub params: Vec<Type>,
-    pub ret: Box<Type>,
+    pub ret: Type,
 }
 
 impl From<&TypeNode> for Type {
