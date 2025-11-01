@@ -114,12 +114,16 @@ macro_rules! ast_nodes {
 
 ast_nodes! {
     struct Identifier {
-        '_ name: String,
+        '_ str: String,
+    }
+
+    struct Var {
+        name: Identifier,
     }
 
     struct DeclareSingle {
         '_ guard: bool,
-        var: Identifier,
+        var: Var,
         ty: Option<TypeHint>,
     }
 
@@ -133,7 +137,7 @@ ast_nodes! {
     }
 
     struct DeclareRest {
-        var: Identifier,
+        var: Var,
         ty: Option<TypeHint>,
     }
 
@@ -149,7 +153,7 @@ ast_nodes! {
     }
 
     struct AssignLocVar {
-        var: Identifier,
+        var: Var,
     }
 
     struct AssignLocIndex {
@@ -237,7 +241,7 @@ ast_nodes! {
     }
 
     struct VarExpr {
-        var: Identifier,
+        var: Var,
     }
 
     struct UnaryExpr {
@@ -350,7 +354,7 @@ ast_nodes! {
     }
 
     struct NamedFnItem {
-        name: Identifier,
+        name: Identifier, // or `Var`?
         generics: Vec<VarTypeHint>,
         ret: Option<TypeHint>,
         params: Vec<Declarable>,
@@ -475,7 +479,16 @@ ast_nodes! {
 
 impl Into<Identifier> for String {
     fn into(self) -> Identifier {
-        Identifier { id: 0, name: self }
+        Identifier { id: 0, str: self }
+    }
+}
+
+impl Into<Var> for String {
+    fn into(self) -> Var {
+        Var {
+            id: 0,
+            name: self.into(),
+        }
     }
 }
 
@@ -483,14 +496,29 @@ impl Into<Identifier> for &str {
     fn into(self) -> Identifier {
         Identifier {
             id: 0,
-            name: self.to_string(),
+            str: self.to_string(),
+        }
+    }
+}
+
+impl Into<Var> for &str {
+    fn into(self) -> Var {
+        Var {
+            id: 0,
+            name: self.into(),
         }
     }
 }
 
 impl Identifier {
     pub fn as_str(&self) -> &str {
-        &self.name
+        &self.str
+    }
+}
+
+impl Var {
+    pub fn as_str(&self) -> &str {
+        &self.name.as_str()
     }
 }
 

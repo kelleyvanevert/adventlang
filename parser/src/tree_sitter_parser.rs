@@ -180,7 +180,7 @@ impl<'a> Converter<'a> {
             }),
             "identifier" => Expr::Var(VarExpr {
                 id: node.id(),
-                var: self.as_identifier(node),
+                var: self.as_var(node),
             }),
             "unary_expression" => Expr::Unary(UnaryExpr {
                 id: node.id(),
@@ -217,7 +217,10 @@ impl<'a> Converter<'a> {
                                 .map_opt_child("val", |node| self.as_expr(node))
                                 .unwrap_or(Expr::Var(VarExpr {
                                     id: node.id(),
-                                    var: id,
+                                    var: Var {
+                                        id: node.id(),
+                                        name: id,
+                                    },
                                 })),
                         }
                     } else {
@@ -385,7 +388,7 @@ impl<'a> Converter<'a> {
                     id: node.id(),
                     f: Expr::Var(VarExpr {
                         id: node.id(),
-                        var: node.map_child("function", |node| self.as_identifier(node)),
+                        var: node.map_child("function", |node| self.as_var(node)),
                     })
                     .into(),
                     postfix: true,
@@ -455,7 +458,7 @@ impl<'a> Converter<'a> {
         match node.kind() {
             "identifier" => AssignLoc::Var(AssignLocVar {
                 id: node.id(),
-                var: self.as_identifier(node),
+                var: self.as_var(node),
             }),
             "index_lookup" => AssignLoc::Index(AssignLocIndex {
                 id: node.id(),
@@ -495,7 +498,7 @@ impl<'a> Converter<'a> {
             "declare_var" => DeclarePattern::Single(DeclareSingle {
                 id: node.id(),
                 guard: node.child_by_field_name("guard").is_some(),
-                var: self.as_identifier(node.child_by_field_name("name").unwrap()),
+                var: self.as_var(node.child_by_field_name("name").unwrap()),
                 ty: node.map_opt_child("type", |node| self.as_type(node)),
             }),
             "declare_list" => DeclarePattern::List(DeclareList {
@@ -503,7 +506,7 @@ impl<'a> Converter<'a> {
                 elements: node.map_children("element", |child| self.as_declarable(child)),
                 rest: node.map_opt_child("splat", |child| DeclareRest {
                     id: child.id(),
-                    var: self.as_identifier(child),
+                    var: self.as_var(child),
                     ty: node.map_opt_child("splat_type", |child| self.as_type(child)),
                 }),
             }),
@@ -632,7 +635,14 @@ impl<'a> Converter<'a> {
     fn as_identifier(&self, node: Node) -> Identifier {
         Identifier {
             id: node.id(),
-            name: self.as_str(node).trim().into(),
+            str: self.as_str(node).trim().into(),
+        }
+    }
+
+    fn as_var(&self, node: Node) -> Var {
+        Var {
+            id: node.id(),
+            name: self.as_identifier(node),
         }
     }
 
