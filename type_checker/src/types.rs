@@ -39,3 +39,22 @@ impl From<&ast::TypeHint> for Type {
         }
     }
 }
+
+impl Type {
+    pub fn apply_unary_op(&self, op: &str) -> Type {
+        match (self, op) {
+            (Type::Int, "-") => Type::Int,
+            (Type::Float, "-") => Type::Float,
+            (Type::Bool, "!") => Type::Bool,
+            _ => panic!("Cannot apply unary operator {op} to type {self:?}"),
+        }
+    }
+
+    pub fn apply_binary_op(&self, op: &str, right: &Type) -> Type {
+        match (self, op, right) {
+            (Type::Bool, "||" | "&&", Type::Bool) => Type::Bool,
+            // etc.
+            _ => panic!("Cannot apply binary operator {op} to types {self:?} and {right:?}"),
+        }
+    }
+}

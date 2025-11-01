@@ -1,5 +1,8 @@
-pub trait HasId {
+use crate::types::{Type, TypeVar};
+
+pub trait HirNode {
     fn id(&self) -> usize;
+    fn ty(&self) -> Type;
 }
 
 pub trait StripIds {
@@ -47,21 +50,17 @@ macro_rules! hir_nodes {
         #[derive(Debug, Clone, PartialEq, Eq, Hash)]
         pub struct $name {
             pub id: usize,
+            pub ty: Type,
             $(pub $field: $field_ty,)*
         }
 
-        impl $name {
-            pub fn new_simple($($field: $field_ty,)*) -> Self {
-                Self {
-                    id: 0,
-                    $($field: $field,)*
-                }
-            }
-        }
-
-        impl HasId for $name {
+        impl HirNode for $name {
             fn id(&self) -> usize {
                 self.id
+            }
+
+            fn ty(&self) -> Type {
+                self.ty.clone()
             }
         }
 
@@ -88,11 +87,19 @@ macro_rules! hir_nodes {
             $($variant($field_ty),)*
         }
 
-        impl HasId for $name {
+        impl HirNode for $name {
             fn id(&self) -> usize {
                 match self {
                     $(
                         $name::$variant(inner) => inner.id(),
+                    )*
+                }
+            }
+
+            fn ty(&self) -> Type {
+                match self {
+                    $(
+                        $name::$variant(inner) => inner.ty(),
                     )*
                 }
             }
@@ -118,13 +125,13 @@ hir_nodes! {
     }
 
     struct Var {
-        name: Identifier,
+        '_ name: String,
     }
 
     struct DeclareSingle {
         '_ guard: bool,
         var: Var,
-        ty: Option<TypeHint>,
+        // ty: Option<TypeHint>,
     }
 
     struct DeclareList {
@@ -138,7 +145,7 @@ hir_nodes! {
 
     struct DeclareRest {
         var: Var,
-        ty: Option<TypeHint>,
+        // ty: Option<TypeHint>,
     }
 
     enum DeclarePattern {
@@ -355,8 +362,8 @@ hir_nodes! {
 
     struct NamedFnItem {
         name: Identifier, // or `Var`?
-        generics: Vec<VarTypeHint>,
-        ret: Option<TypeHint>,
+        '_ generics: Vec<TypeVar>,
+        '_ ret: Type,
         params: Vec<Declarable>,
         body: Block,
     }
@@ -408,71 +415,5 @@ hir_nodes! {
 
     struct Document {
         body: Block,
-    }
-
-    struct VarTypeHint {
-        var: Identifier,
-    }
-
-    struct NilTypeHint {}
-
-    struct BoolTypeHint {}
-
-    struct StrTypeHint {}
-
-    struct RegexTypeHint {}
-
-    struct IntTypeHint {}
-
-    struct FloatTypeHint {}
-
-    struct SomeFnTypeHint {}
-
-    struct FnTypeHint {
-        generics: Vec<VarTypeHint>,
-        params: Vec<TypeHint>,
-        ret: Box<TypeHint>,
-    }
-
-    struct SomeListTypeHint {}
-
-    struct ListTypeHint {
-        elements_ty: Box<TypeHint>,
-    }
-
-    struct SomeTupleTypeHint {}
-
-    struct TupleTypeHint {
-        element_types: Vec<TypeHint>,
-    }
-
-    struct SomeDictTypeHint {}
-
-    struct DictTypeHint {
-        key_ty: Box<TypeHint>,
-        value_ty: Box<TypeHint>,
-    }
-
-    struct NullableTypeHint {
-        child: Box<TypeHint>,
-    }
-
-    enum TypeHint {
-        Var(VarTypeHint),
-        Nil(NilTypeHint),
-        Bool(BoolTypeHint),
-        Str(StrTypeHint),
-        Regex(RegexTypeHint),
-        Int(IntTypeHint),
-        Float(FloatTypeHint),
-        SomeFn(SomeFnTypeHint),
-        Fn(FnTypeHint),
-        SomeList(SomeListTypeHint),
-        List(ListTypeHint),
-        SomeTuple(SomeTupleTypeHint),
-        Tuple(TupleTypeHint),
-        SomeDict(SomeDictTypeHint),
-        Dict(DictTypeHint),
-        Nullable(NullableTypeHint),
     }
 }

@@ -1,42 +1,18 @@
 #![allow(unused)]
 #![allow(dead_code)]
 
-use parser::ast;
+use fxhash::FxHashMap;
+use parser::ast::{self, AstNode};
 
-use crate::types::{FnType, Type, TypeVar};
+use crate::{
+    hir::HirNode,
+    types::{FnType, Type, TypeVar},
+};
 
 pub mod hir;
 pub mod types;
 
-// type Env = im::HashMap<Identifier, TypeVar>;
-
-macro_rules! ast_node_union {
-    (
-        $($name:ident: $ty:ident,)*
-    ) => {
-        #[derive(Debug)]
-        enum AstNode {
-            $($ty(ast::$ty),)*
-        }
-
-        impl AstNode {
-            $(fn $name(self) -> ast::$ty {
-                match self {
-                    Self::$ty(x) => x,
-                    _ => panic!(""),
-                }
-            })*
-        }
-    };
-}
-
-ast_node_union! {
-    as_document: Document,
-    as_block: Block,
-    as_item: Item,
-    as_stmt: Stmt,
-    as_expr: Expr,
-}
+type Env = FxHashMap<String, Type>;
 
 #[derive(Debug)]
 struct TypeCheckerCtx {
@@ -49,9 +25,6 @@ enum Constraint {
     TypeEqual(usize, Type, Type),
 }
 
-// // (env, node) -> (env, (node, constraint[]), type)
-// // (env, node) -> (env, (node, constraint[]), type)
-
 impl TypeCheckerCtx {
     pub fn new() -> Self {
         Self { next_ty_var: 0 }
@@ -63,82 +36,229 @@ impl TypeCheckerCtx {
         var
     }
 
-    //     fn infer(
-    //         &mut self,
-    //         mut env: Env,
-    //         node: AstNode,
-    //         constraints: &mut Vec<Constraint>,
-    //     ) -> (Env, AstNode, Type) {
-    //         /*
+    pub fn typecheck(&mut self, doc: ast::Document) -> hir::Document {
+        let mut env = FxHashMap::default();
+        let mut constraints = vec![];
+        let typed_doc = self.infer_doc(&mut env, doc, &mut constraints);
+        typed_doc
+    }
 
-    //         match node {
-    //             Node::Document { body } => self.infer(env, body, constraints),
-    //         }
+    fn infer_doc(
+        &mut self,
+        env: &mut Env,
+        doc: ast::Document,
+        constraints: &mut Vec<Constraint>,
+    ) -> hir::Document {
+        hir::Document {
+            id: doc.id,
+            body: self.infer_block(env, doc.body, constraints),
+            ty: Type::Nil,
+        }
+    }
 
-    //         expr            // : BinaryExpr
-    //         expr.left       // : AstNode
-    //         *expr.left.kind // : AstKind
+    fn infer_block(
+        &mut self,
+        env: &mut Env,
+        block: ast::Block,
+        constraints: &mut Vec<Constraint>,
+    ) -> hir::Block {
+        let mut typed_block = hir::Block {
+            id: block.id(),
+            items: vec![],
+            stmts: vec![],
+            ty: Type::Nil,
+        };
 
-    //         */
-    //         match node {
-    //             AstNode::Document(doc) => {
-    //                 let (env, typed_body, ty) = self.infer(env, AstNode::Block(doc.body), constraints);
+        for item in block.items {
+            let typed_item = self.infer_item(env, item, constraints);
+            typed_block.items.push(typed_item);
+        }
 
-    //                 (
-    //                     env,
-    //                     AstNode::Document(Document {
-    //                         id: doc.id,
-    //                         body: typed_body.as_block(),
-    //                     }),
-    //                     ty,
-    //                 )
-    //             }
+        for stmt in block.stmts {
+            let typed_stmt = self.infer_stmt(env, stmt, constraints);
+            typed_block.ty = typed_stmt.ty();
+            typed_block.stmts.push(typed_stmt);
+        }
 
-    //             AstNode::Block(Block { id, items, stmts }) => {
-    //                 let mut result_block = Block {
-    //                     id,
-    //                     items: vec![],
-    //                     stmts: vec![],
-    //                 };
+        typed_block
+    }
 
-    //                 let mut last_stmt_ty = Type::Nil;
+    fn infer_item(
+        &mut self,
+        env: &mut Env,
+        item: ast::Item,
+        constraints: &mut Vec<Constraint>,
+    ) -> hir::Item {
+        match item {
+            ast::Item::NamedFn(named_fn) => {
+                todo!("infer named fn")
+            }
+        }
+    }
 
-    //                 for item in items {
-    //                     let (updated_env, item, _) =
-    //                         self.infer(env.clone(), AstNode::Item(item), constraints);
+    fn infer_stmt(
+        &mut self,
+        env: &mut Env,
+        stmt: ast::Stmt,
+        constraints: &mut Vec<Constraint>,
+    ) -> hir::Stmt {
+        todo!()
+    }
 
-    //                     env = updated_env;
-    //                     result_block.items.push(item.as_item());
-    //                 }
+    fn infer_expr(
+        &mut self,
+        env: &mut Env,
+        expr: ast::Expr,
+        constraints: &mut Vec<Constraint>,
+    ) -> hir::Expr {
+        match expr {
+            ast::Expr::Str(ast::StrExpr { id, pieces }) => hir::Expr::Str(hir::StrExpr {
+                id,
+                ty: Type::Str,
+                pieces: pieces
+                    .into_iter()
+                    .map(|piece| match piece {
+                        ast::StrPiece::Fragment(ast::StrPieceFragment { id, str }) => {
+                            hir::StrPiece::Fragment(hir::StrPieceFragment {
+                                id,
+                                ty: Type::Str,
+                                str,
+                            })
+                        }
+                        ast::StrPiece::Interpolation(ast::StrPieceInterpolation { id, expr }) => {
+                            hir::StrPiece::Interpolation(hir::StrPieceInterpolation {
+                                id,
+                                ty: Type::Str,
+                                expr: self.infer_expr(env, expr, constraints),
+                            })
+                        }
+                    })
+                    .collect(),
+            }),
+            ast::Expr::Nil(ast::NilExpr { id }) => hir::Expr::Nil(hir::NilExpr {
+                id,
+                ty: Type::Nil,
+                //
+            }),
+            ast::Expr::Regex(ast::RegexExpr { id, str }) => hir::Expr::Regex(hir::RegexExpr {
+                id,
+                str,
+                ty: Type::Regex,
+            }),
+            ast::Expr::Bool(ast::BoolExpr { id, value }) => hir::Expr::Bool(hir::BoolExpr {
+                id,
+                ty: Type::Bool,
+                value,
+            }),
+            ast::Expr::Int(ast::IntExpr { id, value }) => hir::Expr::Int(hir::IntExpr {
+                id,
+                ty: Type::Int,
+                value,
+            }),
+            ast::Expr::Float(ast::FloatExpr { id, str }) => hir::Expr::Float(hir::FloatExpr {
+                id,
+                ty: Type::Float,
+                str,
+            }),
+            ast::Expr::Var(ast::VarExpr { id, var }) => {
+                let ty = env[var.as_str()].clone();
 
-    //                 for stmt in stmts {
-    //                     let (updated_env, stmt, ty) =
-    //                         self.infer(env.clone(), AstNode::Stmt(stmt), constraints);
+                hir::Expr::Var(hir::VarExpr {
+                    id,
+                    ty: ty.clone(),
+                    var: hir::Var {
+                        id: var.id,
+                        ty,
+                        name: var.name,
+                    },
+                })
+            }
+            ast::Expr::Unary(ast::UnaryExpr { id, op, expr }) => {
+                let expr = self.infer_expr(env, *expr, constraints);
 
-    //                     env = updated_env;
-    //                     result_block.stmts.push(stmt.as_stmt());
+                hir::Expr::Unary(hir::UnaryExpr {
+                    id,
+                    ty: expr.ty().apply_unary_op(&op),
+                    expr: expr.into(),
+                    op,
+                })
+            }
+            ast::Expr::Binary(ast::BinaryExpr {
+                id,
+                left,
+                op,
+                right,
+            }) => {
+                let left = self.infer_expr(env, *left, constraints);
+                let right = self.infer_expr(env, *right, constraints);
 
-    //                     last_stmt_ty = ty;
-    //                 }
+                hir::Expr::Binary(hir::BinaryExpr {
+                    id,
+                    ty: left.ty().apply_binary_op(&op, &right.ty()),
+                    left: left.into(),
+                    right: right.into(),
+                    op,
+                })
+            }
+            ast::Expr::List(ast::ListExpr {
+                id,
+                elements,
+                splat,
+            }) => {
+                let elements = elements
+                    .into_iter()
+                    .map(|expr| self.infer_expr(env, expr, constraints))
+                    .collect::<Vec<_>>();
 
-    //                 (env, AstNode::Block(result_block), last_stmt_ty)
-    //             }
+                let splat = splat.map(|expr| self.infer_expr(env, *expr, constraints).into());
 
-    //             AstNode::Expr(ref expr) if expr.is_int() => (env, node, Type::Int),
-    //             AstNode::Expr(ref expr) if expr.is_float() => (env, node, Type::Float),
-    //             AstNode::Expr(ref expr) if expr.is_regex() => (env, node, Type::Regex),
-    //             AstNode::Expr(ref expr) if expr.is_nil() => (env, node, Type::Nil),
+                let element_ty = Type::TypeVar(self.fresh_ty_var());
 
-    //             // todo deal with interpolations
-    //             AstNode::Expr(ref expr) if expr.is_str() => (env, node, Type::Str),
+                // let types = elements.iter().map(|el| el.ty()).collect::<Vec<_>>();
+                // TODO: check that all the types match
 
-    //             AstNode::Expr(Expr {
-    //                 kind: ExprKind::Variable(ref id),
-    //                 ..
-    //             }) => {
-    //                 let var = env[&id].clone();
-    //                 (env, node, Type::TypeVar(var))
-    //             }
+                hir::Expr::List(hir::ListExpr {
+                    id,
+                    elements,
+                    splat,
+                    ty: Type::List(element_ty.into()),
+                })
+            }
+            ast::Expr::Tuple(_) => {
+                todo!()
+            }
+            ast::Expr::Dict(_) => {
+                todo!()
+            }
+            ast::Expr::Index(_) => {
+                todo!()
+            }
+            ast::Expr::Member(_) => {
+                todo!()
+            }
+            ast::Expr::Call(_) => {
+                todo!()
+            }
+            ast::Expr::AnonymousFn(_) => {
+                todo!()
+            }
+            ast::Expr::If(_) => {
+                todo!()
+            }
+            ast::Expr::While(_) => {
+                todo!()
+            }
+            ast::Expr::DoWhile(_) => {
+                todo!()
+            }
+            ast::Expr::Loop(_) => {
+                todo!()
+            }
+            ast::Expr::For(_) => {
+                todo!()
+            }
+        }
+    }
 
     //             AstNode::Expr(expr) => match expr.kind {
     //                 ExprKind::BinaryExpr { left, op, right } => {
@@ -205,10 +325,6 @@ impl TypeCheckerCtx {
     //                 }
     //                 _ => todo!("todo infer on expr: {expr:?}"),
     //             },
-
-    //             _ => todo!("infer {:?}", node),
-    //         }
-    //     }
 
     //     fn check(
     //         &mut self,

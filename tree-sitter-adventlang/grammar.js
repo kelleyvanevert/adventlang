@@ -383,7 +383,7 @@ module.exports = grammar({
     block_expr: $ => seq("{", blockContents($), "}"),
 
     unary_expression: $ => prec(PREC.unary, seq(
-      field("op", choice("-", "*", "!")),
+      field("op", choice("-", "!")),
       field("expr", $._expr),
     )),
 

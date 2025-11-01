@@ -1,4 +1,4 @@
-pub trait HasId {
+pub trait AstNode {
     fn id(&self) -> usize;
 }
 
@@ -59,7 +59,7 @@ macro_rules! ast_nodes {
             }
         }
 
-        impl HasId for $name {
+        impl AstNode for $name {
             fn id(&self) -> usize {
                 self.id
             }
@@ -88,7 +88,7 @@ macro_rules! ast_nodes {
             $($variant($field_ty),)*
         }
 
-        impl HasId for $name {
+        impl AstNode for $name {
             fn id(&self) -> usize {
                 match self {
                     $(
