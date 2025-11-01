@@ -1,4 +1,4 @@
-use parser::ast::{TypeNode, TypeNodeKind};
+use parser::ast;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TypeVar(pub String);
@@ -10,9 +10,8 @@ pub enum Type {
     Str,
     Int,
     Float,
-    // Num,
     Regex,
-    Fn(Box<FnType>),
+    Fn(FnType),
     List(Box<Type>),
     Tuple(Vec<Type>),
     Dict { key: Box<Type>, val: Box<Type> },
@@ -24,18 +23,18 @@ pub enum Type {
 pub struct FnType {
     pub generics: Vec<TypeVar>,
     pub params: Vec<Type>,
-    pub ret: Type,
+    pub ret: Box<Type>,
 }
 
-impl From<&TypeNode> for Type {
-    fn from(ty: &TypeNode) -> Self {
-        match ty.kind {
-            TypeNodeKind::Bool => Type::Bool,
-            TypeNodeKind::Int => Type::Int,
-            TypeNodeKind::Float => Type::Float,
-            TypeNodeKind::Regex => Type::Regex,
-            TypeNodeKind::Str => Type::Str,
-            TypeNodeKind::Nil => Type::Nil,
+impl From<&ast::TypeHint> for Type {
+    fn from(ty: &ast::TypeHint) -> Self {
+        match ty {
+            ast::TypeHint::Bool(_) => Type::Bool,
+            ast::TypeHint::Int(_) => Type::Int,
+            ast::TypeHint::Float(_) => Type::Float,
+            ast::TypeHint::Regex(_) => Type::Regex,
+            ast::TypeHint::Str(_) => Type::Str,
+            ast::TypeHint::Nil(_) => Type::Nil,
             _ => todo!(),
         }
     }

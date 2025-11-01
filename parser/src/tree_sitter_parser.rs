@@ -205,23 +205,16 @@ impl<'a> Converter<'a> {
             "dict_expr" => Expr::Dict(DictExpr {
                 id: node.id(),
                 entries: node.map_children("pair", |node| {
-                    if let Some(id) = node.map_opt_child("id_key", |node| self.as_identifier(node))
-                    {
+                    if let Some(var) = node.map_opt_child("id_key", |node| self.as_var(node)) {
                         DictEntry {
                             id: node.id(),
                             key: DictKey {
                                 id: node.id(),
-                                key: DictKeyKind::Identifier(id.clone()),
+                                key: DictKeyKind::Identifier(var.clone().into()),
                             },
                             value: node
                                 .map_opt_child("val", |node| self.as_expr(node))
-                                .unwrap_or(Expr::Var(VarExpr {
-                                    id: node.id(),
-                                    var: Var {
-                                        id: node.id(),
-                                        name: id,
-                                    },
-                                })),
+                                .unwrap_or(Expr::Var(VarExpr { id: node.id(), var })),
                         }
                     } else {
                         let key_node_id = node.map_child("expr_key", |node| node.id());
@@ -642,7 +635,7 @@ impl<'a> Converter<'a> {
     fn as_var(&self, node: Node) -> Var {
         Var {
             id: node.id(),
-            name: self.as_identifier(node),
+            name: self.as_str(node).trim().into(),
         }
     }
 

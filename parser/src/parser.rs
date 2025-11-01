@@ -80,20 +80,24 @@ fn regex<'a>(re: &'static str) -> impl Parser<State<'a>, Output = &'a str> {
     }
 }
 
-fn raw_identifier(s: State) -> ParseResult<State, Identifier> {
-    map(regex(r"^[_a-zA-Z][_a-zA-Z0-9]*"), |id| {
-        id.to_string().into()
-    })
-    .parse(s)
+fn raw_identifier(s: State) -> ParseResult<State, String> {
+    map(regex(r"^[_a-zA-Z][_a-zA-Z0-9]*"), |id| id.to_string()).parse(s)
 }
 
 fn identifier(s: State) -> ParseResult<State, Identifier> {
-    check(raw_identifier, |id| {
-        ![
-            "fn", "if", "else", "then", "while", "do", "for", "let", "loop", "true", "false",
-        ]
-        .contains(&id.str.as_str())
-    })
+    map(raw_identifier, |id| Identifier::new_simple(id)).parse(s)
+}
+
+fn var(s: State) -> ParseResult<State, Var> {
+    map(
+        check(raw_identifier, |id| {
+            ![
+                "fn", "if", "else", "then", "while", "do", "for", "let", "loop", "true", "false",
+            ]
+            .contains(&id.as_str())
+        }),
+        |id| Var::new_simple(id),
+    )
     .parse(s)
 }
 
@@ -116,7 +120,7 @@ fn type_var(s: State) -> ParseResult<State, VarTypeHint> {
 }
 
 fn label(s: State) -> ParseResult<State, Identifier> {
-    preceded(tag("'"), raw_identifier).parse(s)
+    preceded(tag("'"), identifier).parse(s)
 }
 
 fn slws0(s: State<'_>) -> ParseResult<State<'_>, &str> {
@@ -582,7 +586,7 @@ fn dict_pair(s: State) -> ParseResult<State, DictEntry> {
                 }
                 None => DictEntry::new_simple(
                     DictKey::new_simple(DictKeyKind::Identifier(id.clone())),
-                    Expr::Var(VarExpr::new_simple(Var::new_simple(id))),
+                    Expr::Var(VarExpr::new_simple(Var::new_simple(id.str))),
                 ),
             },
         ),
@@ -624,9 +628,7 @@ fn expr_leaf(s: State) -> ParseResult<State, Expr> {
         while_expr,
         loop_expr,
         for_expr,
-        map(identifier, |id| {
-            Expr::Var(VarExpr::new_simple(Var::new_simple(id)))
-        }),
+        map(var, |v| Expr::Var(VarExpr::new_simple(v))),
         anonymous_fn,
         tuple_literal_or_parenthesized_expr,
         list_literal,
@@ -791,7 +793,7 @@ fn infix_or_postfix_fn_latter_part(input: State) -> ParseResult<State, TmpOp> {
             ws0,
             optional(seq((char('?'), ws0))),
             char(':'),
-            identifier,
+            var,
             optional(seq((
                 preceded(slws0, unary_expr_stack),
                 many0(
@@ -800,8 +802,8 @@ fn infix_or_postfix_fn_latter_part(input: State) -> ParseResult<State, TmpOp> {
                 ),
             ))),
         )),
-        |(_, coalesce, _, id, opt)| TmpOp::InfixOrPostfix {
-            id: Var::new_simple(id),
+        |(_, coalesce, _, var, opt)| TmpOp::InfixOrPostfix {
+            id: var,
             coalesce: coalesce.is_some(),
             args: match opt {
                 None => vec![],
@@ -1198,15 +1200,11 @@ fn declare_pattern(s: State) -> ParseResult<State, DeclarePattern> {
         map(
             seq((
                 optional(seq((tag("some"), ws1))),
-                identifier,
+                var,
                 optional(preceded(seq((ws0, tag(":"), ws0)), typespec)),
             )),
-            |(guard, id, ty)| {
-                DeclarePattern::Single(DeclareSingle::new_simple(
-                    guard.is_some(),
-                    Var::new_simple(id),
-                    ty,
-                ))
+            |(guard, var, ty)| {
+                DeclarePattern::Single(DeclareSingle::new_simple(guard.is_some(), var, ty))
             },
         ),
         delimited(
@@ -1220,10 +1218,7 @@ fn declare_pattern(s: State) -> ParseResult<State, DeclarePattern> {
                         tag(","),
                         optional(delimited(
                             seq((ws0, tag(".."), ws0)),
-                            seq((
-                                identifier,
-                                optional(preceded(seq((ws0, tag(":"), ws0)), typespec)),
-                            )),
+                            seq((var, optional(preceded(seq((ws0, tag(":"), ws0)), typespec)))),
                             optional(seq((ws0, tag(",")))),
                         )),
                     )),
@@ -1236,7 +1231,7 @@ fn declare_pattern(s: State) -> ParseResult<State, DeclarePattern> {
                         DeclarePattern::List(DeclareList::new_simple(
                             elements,
                             rest.flatten()
-                                .map(|(id, ty)| DeclareRest::new_simple(Var::new_simple(id), ty)),
+                                .map(|(var, ty)| DeclareRest::new_simple(var, ty)),
                         ))
                     }
                 },

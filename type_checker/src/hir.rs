@@ -35,7 +35,7 @@ macro_rules! strip_ids_of_fields {
     };
 }
 
-macro_rules! ast_nodes {
+macro_rules! hir_nodes {
     () => {};
 
     (
@@ -74,7 +74,7 @@ macro_rules! ast_nodes {
             }
         }
 
-        ast_nodes! { $($rest)* }
+        hir_nodes! { $($rest)* }
     };
 
     (
@@ -108,17 +108,17 @@ macro_rules! ast_nodes {
             }
         }
 
-        ast_nodes! { $($rest)* }
+        hir_nodes! { $($rest)* }
     };
 }
 
-ast_nodes! {
+hir_nodes! {
     struct Identifier {
         '_ str: String,
     }
 
     struct Var {
-        '_ name: String,
+        name: Identifier,
     }
 
     struct DeclareSingle {
@@ -474,178 +474,5 @@ ast_nodes! {
         SomeDict(SomeDictTypeHint),
         Dict(DictTypeHint),
         Nullable(NullableTypeHint),
-    }
-}
-
-impl Into<Identifier> for String {
-    fn into(self) -> Identifier {
-        Identifier { id: 0, str: self }
-    }
-}
-
-impl Into<Var> for String {
-    fn into(self) -> Var {
-        Var {
-            id: 0,
-            name: self.into(),
-        }
-    }
-}
-
-impl Into<Identifier> for &str {
-    fn into(self) -> Identifier {
-        Identifier {
-            id: 0,
-            str: self.to_string(),
-        }
-    }
-}
-
-impl Into<Var> for &str {
-    fn into(self) -> Var {
-        Var {
-            id: 0,
-            name: self.to_string(),
-        }
-    }
-}
-
-impl Identifier {
-    pub fn as_str(&self) -> &str {
-        &self.str
-    }
-}
-
-impl Var {
-    pub fn as_str(&self) -> &str {
-        &self.name
-    }
-}
-
-impl Into<Identifier> for Var {
-    fn into(self) -> Identifier {
-        Identifier {
-            id: self.id,
-            str: self.name,
-        }
-    }
-}
-
-impl Into<Var> for Identifier {
-    fn into(self) -> Var {
-        Var {
-            id: self.id,
-            name: self.str,
-        }
-    }
-}
-
-// This is used in the parser for assign-in-place stmts like `a.b += 4`,
-//  which desugar immediately to `a.b = a.b + 4`, so we have to turn the
-//  location into an expression.
-impl From<AssignLoc> for Expr {
-    fn from(loc: AssignLoc) -> Self {
-        match loc {
-            AssignLoc::Var(AssignLocVar { id, var }) => Expr::Var(VarExpr { id, var }),
-            AssignLoc::Index(AssignLocIndex {
-                id,
-                container,
-                index,
-            }) => Expr::Index(IndexExpr {
-                id,
-                expr: Expr::from(*container).into(),
-                coalesce: false,
-                index: index.into(),
-            }),
-            AssignLoc::Member(AssignLocMember {
-                id,
-                container,
-                member,
-            }) => Expr::Member(MemberExpr {
-                id,
-                expr: Expr::from(*container).into(),
-                coalesce: false,
-                member,
-            }),
-        }
-    }
-}
-
-// This is used in the parser combinator parser, as a shortcut to parse expression statements
-//  and assign statements simultaneously, deciding which one it is when it either ends,
-//  or an `=` is encountered, at which point the expression needs to be converted to a location.
-impl TryFrom<Expr> for AssignLoc {
-    type Error = ();
-
-    fn try_from(expr: Expr) -> Result<Self, Self::Error> {
-        match expr {
-            Expr::Var(VarExpr { id, var }) => Ok(AssignLoc::Var(AssignLocVar { id, var })),
-            Expr::Index(IndexExpr {
-                id,
-                expr,
-                coalesce: false,
-                index,
-            }) => Ok(AssignLoc::Index(AssignLocIndex {
-                id,
-                container: Box::new(expr.as_ref().clone().try_into().unwrap()),
-                index: index.as_ref().clone(),
-            })),
-            Expr::Member(MemberExpr {
-                id,
-                expr,
-                coalesce: false,
-                member,
-            }) => Ok(AssignLoc::Member(AssignLocMember {
-                id,
-                container: Box::new(expr.as_ref().clone().try_into().unwrap()),
-                member,
-            })),
-            _ => todo!(),
-        }
-    }
-}
-
-// This is used in the parser combinator parser, as a shortcut to parse expression statements
-//  and assign statements simultaneously, deciding which one it is when it either ends,
-//  or an `=` is encountered, at which point the expression needs to be converted to a location.
-impl TryFrom<Expr> for AssignPattern {
-    type Error = ();
-
-    fn try_from(expr: Expr) -> Result<Self, Self::Error> {
-        let id = expr.id().clone();
-
-        match expr {
-            Expr::List(ListExpr {
-                id,
-                elements,
-                splat,
-            }) => {
-                let elements = elements
-                    .into_iter()
-                    .map(|el| AssignPattern::try_from(el))
-                    .try_collect()?;
-
-                let splat = splat
-                    .map(|box expr| AssignPattern::try_from(expr))
-                    .transpose()
-                    .map(|a| a.map(Box::new))?;
-
-                Ok(AssignPattern::List(AssignPatternList {
-                    id,
-                    elements,
-                    splat,
-                }))
-            }
-            Expr::Tuple(TupleExpr { id, elements }) => {
-                let elements = elements
-                    .into_iter()
-                    .map(|el| AssignPattern::try_from(el))
-                    .try_collect()?;
-
-                Ok(AssignPattern::Tuple(AssignPatternTuple { id, elements }))
-            }
-            _ => AssignLoc::try_from(expr)
-                .map(|loc| AssignPattern::Single(AssignPatternSingle { id, loc })),
-        }
     }
 }
