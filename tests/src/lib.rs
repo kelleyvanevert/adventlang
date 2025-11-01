@@ -5,7 +5,7 @@ mod tests {
     use pretty_assertions::assert_eq;
     use test_case::test_case;
 
-    use parser::{parse_document, parse_document_ts};
+    use parser::{ast::StripIds, parse_document, parse_document_ts};
 
     #[test_case("2023_day01")]
     #[test_case("2023_day02")]

@@ -1,20 +1,9 @@
 use either::Either;
 use regex::Regex;
 
-use crate::ast::TypeNode;
+use crate::ast::*;
 
-use {
-    crate::ast::{
-        Argument, AssignPattern, Block, Declarable, DeclareGuardExpr, DeclareGuardExprKind,
-        DeclarePattern, DeclarePatternKind, DictKey, DictKeyKind, Document, Expr, ExprKind, FnDecl,
-        FnTypeNode, Identifier, Item, ItemKind, Stmt, StmtKind, StrLiteralPiece,
-        StrLiteralPieceKind, TypeNodeKind, TypeVarNode,
-    },
-    parser_combinators::{
-        ParseResult, Parser, alt, check, delimited, many0, many1, map, map_opt, optional,
-        optional_if, preceded, seq, terminated, value,
-    },
-};
+use parser_combinators::*;
 
 #[derive(Debug, Clone, PartialEq)]
 struct State<'a> {
@@ -108,19 +97,20 @@ fn identifier(s: State) -> ParseResult<State, Identifier> {
     .parse(s)
 }
 
-fn raw_type_var(s: State) -> ParseResult<State, TypeVarNode> {
-    map(regex(r"^[_a-zA-Z][_a-zA-Z0-9]*"), |id| {
-        TypeVarNode::new(id.into())
+fn raw_type_var(s: State) -> ParseResult<State, VarTypeHint> {
+    map(regex(r"^[_a-zA-Z][_a-zA-Z0-9]*"), |var| VarTypeHint {
+        id: 0,
+        var: var.into(),
     })
     .parse(s)
 }
 
-fn type_var(s: State) -> ParseResult<State, TypeVarNode> {
+fn type_var(s: State) -> ParseResult<State, VarTypeHint> {
     check(raw_type_var, |id| {
         ![
             "any", "nil", "bool", "str", "int", "float", "num", "regex", "tuple", "list",
         ]
-        .contains(&id.name.as_str())
+        .contains(&id.var.as_str())
     })
     .parse(s)
 }
@@ -275,14 +265,10 @@ fn str_lit_frag(s: State) -> ParseResult<State, String> {
 fn raw_str_literal(s: State) -> ParseResult<State, Expr> {
     map(
         delimited(tag(r#"r""#), regex(r#"^[^"]*"#), char('"')),
-        |s| Expr {
-            id: 0,
-            kind: ExprKind::StrLiteral {
-                pieces: vec![StrLiteralPiece {
-                    id: 0,
-                    kind: StrLiteralPieceKind::Fragment(s.into()),
-                }],
-            },
+        |s| {
+            Expr::Str(StrExpr::new_simple(vec![StrPiece::Fragment(
+                StrPieceFragment::new_simple(s.into()),
+            )]))
         },
     )
     .parse(s)
@@ -293,24 +279,19 @@ fn str_literal(s: State) -> ParseResult<State, Expr> {
         delimited(
             char('"'),
             many0(alt((
-                map(str_lit_frag, |s| StrLiteralPiece {
-                    id: 0,
-                    kind: StrLiteralPieceKind::Fragment(s),
+                map(str_lit_frag, |s| {
+                    StrPiece::Fragment(StrPieceFragment::new_simple(s.into()))
                 }),
                 map(
                     seq((char('{'), ws0, constrained(false, expr), ws0, char('}'))),
-                    |(_, _, expr, _, _)| StrLiteralPiece {
-                        id: 0,
-                        kind: StrLiteralPieceKind::Interpolation(expr),
+                    |(_, _, expr, _, _)| {
+                        StrPiece::Interpolation(StrPieceInterpolation::new_simple(expr))
                     },
                 ),
             ))),
             char('"'),
         ),
-        |pieces| Expr {
-            id: 0,
-            kind: ExprKind::StrLiteral { pieces },
-        },
+        |pieces| Expr::Str(StrExpr::new_simple(pieces)),
     )
     .parse(s)
 }
@@ -353,30 +334,19 @@ fn regex_contents(s: State) -> ParseResult<State, String> {
 fn regex_literal(s: State) -> ParseResult<State, Expr> {
     let (s, re) = delimited(char('/'), regex_contents, char('/')).parse(s)?;
 
-    Some((
-        s,
-        // Expr::RegexLiteral {
-        //     regex: AlRegex(Regex::from_str(&re).ok()?),
-        // },
-        Expr {
-            id: 0,
-            kind: ExprKind::RegexLiteral(re),
-        },
-    ))
+    Some((s, Expr::Regex(RegexExpr::new_simple(re))))
 }
 
 fn integer(s: State) -> ParseResult<State, Expr> {
-    map(regex(r"^-?[0-9]+"), |num| Expr {
-        id: 0,
-        kind: ExprKind::Int(num.parse::<i64>().unwrap()),
+    map(regex(r"^-?[0-9]+"), |num| {
+        Expr::Int(IntExpr::new_simple(num.parse::<i64>().unwrap()))
     })
     .parse(s)
 }
 
 fn float(s: State) -> ParseResult<State, Expr> {
-    map(regex(r"^-?[0-9]+\.[0-9]+"), |num| Expr {
-        id: 0,
-        kind: ExprKind::Float(num.to_string()),
+    map(regex(r"^-?[0-9]+\.[0-9]+"), |num| {
+        Expr::Float(FloatExpr::new_simple(num.to_string()))
     })
     .parse(s)
 }
@@ -394,17 +364,11 @@ fn anonymous_fn(s: State) -> ParseResult<State, Expr> {
             ),
             delimited(seq((char('{'), ws0)), block_contents, seq((ws0, char('}')))),
         )),
-        |(params, body)| Expr {
-            id: 0,
-            kind: ExprKind::AnonymousFn {
-                decl: FnDecl {
-                    id: 0,
-                    generics: vec![],
-                    ret: None,
-                    params: params.unwrap_or_else(|| vec![]),
-                    body,
-                },
-            },
+        |(params, body)| {
+            Expr::AnonymousFn(AnonymousFnExpr::new_simple(
+                params.unwrap_or_else(|| vec![]),
+                body,
+            ))
         },
     )
     .parse(s)
@@ -458,25 +422,21 @@ fn if_expr(s: State) -> ParseResult<State, Expr> {
                 )),
             )),
         )),
-        |(_, _, (pattern, cond), _, then, further)| Expr {
-            id: 0,
-            kind: ExprKind::If {
+        |(_, _, (pattern, cond), _, then, further)| {
+            Expr::If(IfExpr::new_simple(
                 pattern,
-                cond: cond.into(),
+                cond.into(),
                 then,
-                els: match further {
+                match further {
                     Some(Either::Left(if_expr)) => Some(Block {
                         id: 0,
                         items: vec![],
-                        stmts: vec![Stmt {
-                            id: 0,
-                            kind: StmtKind::Expr { expr: if_expr },
-                        }],
+                        stmts: vec![Stmt::Expr(ExprStmt::new_simple(if_expr))],
                     }),
                     Some(Either::Right(else_block)) => Some(else_block),
                     _ => None,
                 },
-            },
+            ))
         },
     )
     .parse(s)
@@ -494,13 +454,8 @@ fn do_while_expr(s: State) -> ParseResult<State, Expr> {
                 maybe_parenthesized(constrained(true, expr)),
             )),
         )),
-        |(label, _, _, body, cond)| Expr {
-            id: 0,
-            kind: ExprKind::DoWhile {
-                label,
-                cond: cond.map(Box::new),
-                body,
-            },
+        |(label, _, _, body, cond)| {
+            Expr::DoWhile(DoWhileExpr::new_simple(label, body, cond.map(Box::new)))
         },
     )
     .parse(s)
@@ -514,10 +469,7 @@ fn loop_expr(s: State) -> ParseResult<State, Expr> {
             ws0,
             delimited(seq((char('{'), ws0)), block_contents, seq((ws0, char('}')))),
         )),
-        |(label, _, _, body)| Expr {
-            id: 0,
-            kind: ExprKind::Loop { label, body },
-        },
+        |(label, _, _, body)| Expr::Loop(LoopExpr::new_simple(label, body)),
     )
     .parse(s)
 }
@@ -539,14 +491,8 @@ fn while_expr(s: State) -> ParseResult<State, Expr> {
             ws0,
             delimited(seq((char('{'), ws0)), block_contents, seq((ws0, char('}')))),
         )),
-        |(label, _, _, (pattern, cond), _, body)| Expr {
-            id: 0,
-            kind: ExprKind::While {
-                label,
-                pattern,
-                cond: cond.into(),
-                body,
-            },
+        |(label, _, _, (pattern, cond), _, body)| {
+            Expr::While(WhileExpr::new_simple(label, pattern, cond.into(), body))
         },
     )
     .parse(s)
@@ -570,14 +516,8 @@ fn for_expr(s: State) -> ParseResult<State, Expr> {
             ws0,
             delimited(seq((char('{'), ws0)), block_contents, seq((ws0, char('}')))),
         )),
-        |(label, _, _, (_, _, pattern, _, _, _, range), _, body)| Expr {
-            id: 0,
-            kind: ExprKind::For {
-                label,
-                pattern,
-                range: range.into(),
-                body,
-            },
+        |(label, _, _, (_, _, pattern, _, _, _, range), _, body)| {
+            Expr::For(ForExpr::new_simple(label, pattern, range.into(), body))
         },
     )
     .parse(s)
@@ -592,13 +532,7 @@ fn list_literal(s: State) -> ParseResult<State, Expr> {
             preceded(tag(".."), constrained(false, expr)),
             "]",
         ),
-        |(elements, splat)| Expr {
-            id: 0,
-            kind: ExprKind::ListLiteral {
-                elements,
-                splat: splat.map(Box::new),
-            },
-        },
+        |(elements, splat)| Expr::List(ListExpr::new_simple(elements, splat.map(Box::new))),
     )
     .parse(s)
 }
@@ -621,15 +555,10 @@ fn tuple_literal_or_parenthesized_expr(s: State) -> ParseResult<State, Expr> {
                     return first_el;
                 }
 
-                Expr {
-                    id: 0,
-                    kind: ExprKind::TupleLiteral {
-                        elements: {
-                            els.insert(0, first_el);
-                            els
-                        },
-                    },
-                }
+                Expr::Tuple(TupleExpr::new_simple({
+                    els.insert(0, first_el);
+                    els
+                }))
             },
         ),
         seq((ws0, char(')'))),
@@ -637,7 +566,7 @@ fn tuple_literal_or_parenthesized_expr(s: State) -> ParseResult<State, Expr> {
     .parse(s)
 }
 
-fn dict_pair(s: State) -> ParseResult<State, (DictKey, Expr)> {
+fn dict_pair(s: State) -> ParseResult<State, DictEntry> {
     alt((
         map(
             seq((
@@ -648,32 +577,24 @@ fn dict_pair(s: State) -> ParseResult<State, (DictKey, Expr)> {
                 )),
             )),
             |(id, value)| match value {
-                Some(value) => (
-                    DictKey {
-                        id: 0,
-                        kind: DictKeyKind::Identifier(id),
-                    },
-                    value,
-                ),
-                None => (
-                    DictKey {
-                        id: 0,
-                        kind: DictKeyKind::Identifier(id.clone()),
-                    },
-                    Expr {
-                        id: 0,
-                        kind: ExprKind::Variable(id),
-                    },
+                Some(value) => {
+                    DictEntry::new_simple(DictKey::new_simple(DictKeyKind::Identifier(id)), value)
+                }
+                None => DictEntry::new_simple(
+                    DictKey::new_simple(DictKeyKind::Identifier(id.clone())),
+                    Expr::Var(VarExpr::new_simple(id)),
                 ),
             },
         ),
-        seq((
-            map(constrained(true, expr), |e| DictKey {
-                id: 0,
-                kind: DictKeyKind::Expr(e),
-            }),
-            preceded(seq((ws0, tag(":"), ws0)), constrained(false, expr)),
-        )),
+        map(
+            seq((
+                map(constrained(true, expr), |expr| {
+                    DictKey::new_simple(DictKeyKind::Expr(expr))
+                }),
+                preceded(seq((ws0, tag(":"), ws0)), constrained(false, expr)),
+            )),
+            |(key, value)| DictEntry::new_simple(key, value),
+        ),
     ))
     .parse(s)
 }
@@ -681,10 +602,7 @@ fn dict_pair(s: State) -> ParseResult<State, (DictKey, Expr)> {
 fn dict_literal(s: State) -> ParseResult<State, Expr> {
     map(
         preceded(char('@'), listy("{", dict_pair, dict_pair, "}")),
-        |(elements, _)| Expr {
-            id: 0,
-            kind: ExprKind::DictLiteral { elements },
-        },
+        |(entries, _)| Expr::Dict(DictExpr::new_simple(entries)),
     )
     .parse(s)
 }
@@ -693,18 +611,9 @@ fn expr_leaf(s: State) -> ParseResult<State, Expr> {
     alt((
         // literals
         dict_literal,
-        map(tag("true"), |_| Expr {
-            id: 0,
-            kind: ExprKind::Bool(true),
-        }),
-        map(tag("false"), |_| Expr {
-            id: 0,
-            kind: ExprKind::Bool(false),
-        }),
-        map(tag("nil"), |_| Expr {
-            id: 0,
-            kind: ExprKind::NilLiteral,
-        }),
+        map(tag("true"), |_| Expr::Bool(BoolExpr::new_simple(true))),
+        map(tag("false"), |_| Expr::Bool(BoolExpr::new_simple(false))),
+        map(tag("nil"), |_| Expr::Nil(NilExpr::new_simple())),
         raw_str_literal,
         str_literal,
         float,
@@ -715,10 +624,7 @@ fn expr_leaf(s: State) -> ParseResult<State, Expr> {
         while_expr,
         loop_expr,
         for_expr,
-        map(identifier, |id| Expr {
-            id: 0,
-            kind: ExprKind::Variable(id),
-        }),
+        map(identifier, |id| Expr::Var(VarExpr::new_simple(id))),
         anonymous_fn,
         tuple_literal_or_parenthesized_expr,
         list_literal,
@@ -802,35 +708,18 @@ fn expr_index_or_method_stack(s: State) -> ParseResult<State, Expr> {
             for index in indices {
                 match index {
                     Either::Left((coalesce, index)) => {
-                        expr = Expr {
-                            id: 0,
-                            kind: ExprKind::Index {
-                                expr: expr.into(),
-                                coalesce: coalesce.is_some(),
-                                index: index.into(),
-                            },
-                        };
+                        expr = Expr::Index(IndexExpr::new_simple(
+                            expr.into(),
+                            coalesce.is_some(),
+                            index.into(),
+                        ));
                     }
                     Either::Right((coalesce, id)) => {
-                        expr = Expr {
-                            id: 0,
-                            kind: ExprKind::Index {
-                                expr: expr.into(),
-                                coalesce: coalesce.is_some(),
-                                index: Expr {
-                                    id: 0,
-                                    kind: ExprKind::StrLiteral {
-                                        pieces: vec![StrLiteralPiece {
-                                            id: 0,
-                                            kind: StrLiteralPieceKind::Fragment(
-                                                id.name.to_string(),
-                                            ),
-                                        }],
-                                    },
-                                }
-                                .into(),
-                            },
-                        };
+                        expr = Expr::Member(MemberExpr::new_simple(
+                            expr.into(),
+                            coalesce.is_some(),
+                            id,
+                        ));
                     }
                 }
             }
@@ -848,15 +737,7 @@ fn expr_call_stack(s: State) -> ParseResult<State, Expr> {
         )),
         |(mut expr, invocations)| {
             for args in invocations {
-                expr = Expr {
-                    id: 0,
-                    kind: ExprKind::Invocation {
-                        expr: expr.into(),
-                        postfix: false,
-                        coalesce: false, //TODO
-                        args,
-                    },
-                }
+                expr = Expr::Call(CallExpr::new_simple(expr.into(), false, false, args));
             }
             expr
         },
@@ -869,13 +750,7 @@ fn unary_expr_stack(s: State) -> ParseResult<State, Expr> {
         seq((many0(terminated(tag("!"), ws0)), expr_call_stack)),
         |(ops, mut expr)| {
             for op in ops.into_iter().rev() {
-                expr = Expr {
-                    id: 0,
-                    kind: ExprKind::UnaryExpr {
-                        expr: expr.into(),
-                        op: op.into(),
-                    },
-                }
+                expr = Expr::Unary(UnaryExpr::new_simple(expr.into(), op.into()));
             }
             expr
         },
@@ -960,35 +835,27 @@ fn infix_or_postfix_fn_call_stack(s: State) -> ParseResult<State, Expr> {
         |(mut expr, ops)| {
             for op in ops {
                 expr = match op {
-                    TmpOp::IndexSugar(coalesce, index) => Expr {
-                        id: 0,
-                        kind: ExprKind::Index {
-                            expr: expr.into(),
-                            coalesce,
-                            index: index.into(),
-                        },
-                    },
-                    TmpOp::InfixOrPostfix { id, coalesce, args } => Expr {
-                        id: 0,
-                        kind: ExprKind::Invocation {
-                            expr: Expr {
+                    TmpOp::IndexSugar(coalesce, index) => {
+                        Expr::Index(IndexExpr::new_simple(expr.into(), coalesce, index.into()))
+                    }
+                    TmpOp::InfixOrPostfix { id, coalesce, args } => {
+                        let args = [
+                            vec![Argument {
                                 id: 0,
-                                kind: ExprKind::Variable(id),
-                            }
-                            .into(),
-                            postfix: true,
+                                name: None,
+                                expr,
+                            }],
+                            args,
+                        ]
+                        .concat();
+
+                        Expr::Call(CallExpr::new_simple(
+                            Expr::Var(VarExpr::new_simple(id)).into(),
+                            true,
                             coalesce,
-                            args: [
-                                vec![Argument {
-                                    id: 0,
-                                    name: None,
-                                    expr,
-                                }],
-                                args,
-                            ]
-                            .concat(),
-                        },
-                    },
+                            args,
+                        ))
+                    }
                 };
             }
             expr
@@ -1010,14 +877,7 @@ fn mul_expr_stack(s: State) -> ParseResult<State, Expr> {
         )),
         |(mut expr, ops)| {
             for (_, op, _, right) in ops {
-                expr = Expr {
-                    id: 0,
-                    kind: ExprKind::BinaryExpr {
-                        left: expr.into(),
-                        op: op.into(),
-                        right: right.into(),
-                    },
-                }
+                expr = Expr::Binary(BinaryExpr::new_simple(expr.into(), op.into(), right.into()));
             }
             expr
         },
@@ -1038,14 +898,7 @@ fn add_expr_stack(s: State) -> ParseResult<State, Expr> {
         )),
         |(mut expr, ops)| {
             for (_, op, _, right) in ops {
-                expr = Expr {
-                    id: 0,
-                    kind: ExprKind::BinaryExpr {
-                        left: expr.into(),
-                        op: op.into(),
-                        right: right.into(),
-                    },
-                }
+                expr = Expr::Binary(BinaryExpr::new_simple(expr.into(), op.into(), right.into()));
             }
             expr
         },
@@ -1074,14 +927,7 @@ fn equ_expr_stack(s: State) -> ParseResult<State, Expr> {
         )),
         |(mut expr, ops)| {
             for (_, op, _, right) in ops {
-                expr = Expr {
-                    id: 0,
-                    kind: ExprKind::BinaryExpr {
-                        left: expr.into(),
-                        op: op.into(),
-                        right: right.into(),
-                    },
-                }
+                expr = Expr::Binary(BinaryExpr::new_simple(expr.into(), op.into(), right.into()));
             }
             expr
         },
@@ -1105,14 +951,7 @@ fn and_expr_stack(s: State) -> ParseResult<State, Expr> {
         )),
         |(mut expr, ops)| {
             for (_, op, _, right) in ops {
-                expr = Expr {
-                    id: 0,
-                    kind: ExprKind::BinaryExpr {
-                        left: expr.into(),
-                        op: op.into(),
-                        right: right.into(),
-                    },
-                }
+                expr = Expr::Binary(BinaryExpr::new_simple(expr.into(), op.into(), right.into()));
             }
             expr
         },
@@ -1137,14 +976,7 @@ fn or_expr_stack(s: State) -> ParseResult<State, Expr> {
         )),
         |(mut expr, ops)| {
             for (_, op, _, right) in ops {
-                expr = Expr {
-                    id: 0,
-                    kind: ExprKind::BinaryExpr {
-                        left: expr.into(),
-                        op: op.into(),
-                        right: right.into(),
-                    },
-                }
+                expr = Expr::Binary(BinaryExpr::new_simple(expr.into(), op.into(), right.into()));
             }
             expr
         },
@@ -1191,13 +1023,7 @@ fn break_stmt(s: State) -> ParseResult<State, Stmt> {
                 constrained(false, expr),
             )),
         )),
-        |(_, label, expr)| Stmt {
-            id: 0,
-            kind: StmtKind::Break {
-                label: label.into(),
-                expr,
-            },
-        },
+        |(_, label, expr)| Stmt::Break(BreakStmt::new_simple(label, expr)),
     )
     .parse(s)
 }
@@ -1205,12 +1031,7 @@ fn break_stmt(s: State) -> ParseResult<State, Stmt> {
 fn continue_stmt(s: State) -> ParseResult<State, Stmt> {
     map(
         seq((tag("continue"), optional(preceded(ws1, label)))),
-        |(_, label)| Stmt {
-            id: 0,
-            kind: StmtKind::Continue {
-                label: label.into(),
-            },
-        },
+        |(_, label)| Stmt::Continue(ContinueStmt::new_simple(label)),
     )
     .parse(s)
 }
@@ -1218,44 +1039,23 @@ fn continue_stmt(s: State) -> ParseResult<State, Stmt> {
 fn return_stmt(s: State) -> ParseResult<State, Stmt> {
     map(
         seq((tag("return"), slws1, constrained(false, expr))),
-        |(_, _, expr)| Stmt {
-            id: 0,
-            kind: StmtKind::Return { expr: Some(expr) },
-        },
+        |(_, _, expr)| Stmt::Return(ReturnStmt::new_simple(expr.into())),
     )
     .parse(s)
 }
 
-fn type_leaf(s: State) -> ParseResult<State, TypeNode> {
+fn type_leaf(s: State) -> ParseResult<State, TypeHint> {
     alt((
         // map(tag("any"), |_| Type::Any),
-        map(tag("nil"), |_| TypeNode {
-            id: 0,
-            kind: TypeNodeKind::Nil,
+        map(tag("nil"), |_| TypeHint::Nil(NilTypeHint::new_simple())),
+        map(tag("bool"), |_| TypeHint::Bool(BoolTypeHint::new_simple())),
+        map(tag("str"), |_| TypeHint::Str(StrTypeHint::new_simple())),
+        map(tag("int"), |_| TypeHint::Int(IntTypeHint::new_simple())),
+        map(tag("float"), |_| {
+            TypeHint::Float(FloatTypeHint::new_simple())
         }),
-        map(tag("bool"), |_| TypeNode {
-            id: 0,
-            kind: TypeNodeKind::Bool,
-        }),
-        map(tag("str"), |_| TypeNode {
-            id: 0,
-            kind: TypeNodeKind::Str,
-        }),
-        map(tag("int"), |_| TypeNode {
-            id: 0,
-            kind: TypeNodeKind::Int,
-        }),
-        map(tag("float"), |_| TypeNode {
-            id: 0,
-            kind: TypeNodeKind::Float,
-        }),
-        map(tag("num"), |_| TypeNode {
-            id: 0,
-            kind: TypeNodeKind::Num,
-        }),
-        map(tag("regex"), |_| TypeNode {
-            id: 0,
-            kind: TypeNodeKind::Regex,
+        map(tag("regex"), |_| {
+            TypeHint::Regex(RegexTypeHint::new_simple())
         }),
         type_fn,
         // "dict" or "dict[K, V]"
@@ -1268,15 +1068,16 @@ fn type_leaf(s: State) -> ParseResult<State, TypeNode> {
                     seq((ws0, tag("]"))),
                 )),
             ),
-            |opt| TypeNode {
-                id: 0,
-                kind: TypeNodeKind::Dict(opt.map(|(k, _, _, _, v)| (k.into(), v.into()))),
+            |opt| match opt {
+                None => TypeHint::SomeDict(SomeDictTypeHint::new_simple()),
+                Some((k, _, _, _, v)) => {
+                    TypeHint::Dict(DictTypeHint::new_simple(k.into(), v.into()))
+                }
             },
         ),
         // implicitly typed tuple
-        map(tag("tuple"), |_| TypeNode {
-            id: 0,
-            kind: TypeNodeKind::Tuple(None),
+        map(tag("tuple"), |_| {
+            TypeHint::SomeTuple(SomeTupleTypeHint::new_simple())
         }),
         // (a, b, c, ..)
         map(
@@ -1287,37 +1088,27 @@ fn type_leaf(s: State) -> ParseResult<State, TypeNode> {
                     // (and "()" is still just the empty tuple)
                     ts.pop().unwrap()
                 } else {
-                    TypeNode {
-                        id: 0,
-                        kind: TypeNodeKind::Tuple(Some(ts)),
-                    }
+                    TypeHint::Tuple(TupleTypeHint::new_simple(ts))
                 }
             },
         ),
         // implicitly typed list
-        map(tag("list"), |_| TypeNode {
-            id: 0,
-            kind: TypeNodeKind::List(None),
+        map(tag("list"), |_| {
+            TypeHint::SomeList(SomeListTypeHint::new_simple())
         }),
         // explicitly typed list: [T]
         map(
             delimited(seq((tag("["), ws0)), typespec, seq((ws0, tag("]")))),
-            |t| TypeNode {
-                id: 0,
-                kind: TypeNodeKind::List(Some(t.into())),
-            },
+            |t| TypeHint::List(ListTypeHint::new_simple(t.into())),
         ),
-        map(type_var, |tv| TypeNode {
-            id: 0,
-            kind: TypeNodeKind::TypeVar(tv),
-        }),
+        map(type_var, |tv| TypeHint::Var(tv)),
         // recurse with parentheses
         parenthesized_type,
     ))
     .parse(s)
 }
 
-fn type_fn(s: State) -> ParseResult<State, TypeNode> {
+fn type_fn(s: State) -> ParseResult<State, TypeHint> {
     map(
         seq((
             tag("fn"),
@@ -1329,48 +1120,31 @@ fn type_fn(s: State) -> ParseResult<State, TypeNode> {
         )),
         |(_, generics_and_args, ret)| {
             if generics_and_args.is_none() && ret.is_none() {
-                return TypeNode {
-                    id: 0,
-                    kind: TypeNodeKind::Fun(None),
-                };
+                return TypeHint::SomeFn(SomeFnTypeHint::new_simple());
             }
 
             let (generics, (params, _)) = generics_and_args.unwrap_or_default();
             let generics = generics.map(|t| t.0).unwrap_or(vec![]);
-            let ret = ret.unwrap_or(TypeNode {
-                id: 0,
-                kind: TypeNodeKind::Nil,
-            });
+            let ret = ret.unwrap_or(TypeHint::Nil(NilTypeHint::new_simple()));
 
             // TODO: maybe validate?
 
-            TypeNode {
-                id: 0,
-                kind: TypeNodeKind::Fun(Some(FnTypeNode {
-                    id: 0,
-                    generics,
-                    params,
-                    ret: ret.into(),
-                })),
-            }
+            TypeHint::Fn(FnTypeHint::new_simple(generics, params, ret.into()))
         },
     )
     .parse(s)
 }
 
-fn parenthesized_type(s: State) -> ParseResult<State, TypeNode> {
+fn parenthesized_type(s: State) -> ParseResult<State, TypeHint> {
     delimited(seq((char('('), ws0)), typespec, seq((ws0, char(')')))).parse(s)
 }
 
-fn type_nullable_stack(s: State) -> ParseResult<State, TypeNode> {
+fn type_nullable_stack(s: State) -> ParseResult<State, TypeHint> {
     map(
         seq((many0(terminated(tag("?"), ws0)), type_leaf)),
         |(nullable, ty)| {
             if !nullable.is_empty() {
-                TypeNode {
-                    id: 0,
-                    kind: TypeNodeKind::Nullable(ty.into()),
-                }
+                TypeHint::Nullable(NullableTypeHint::new_simple(ty.into()))
             } else {
                 ty
             }
@@ -1379,7 +1153,7 @@ fn type_nullable_stack(s: State) -> ParseResult<State, TypeNode> {
     .parse(s)
 }
 
-fn type_union_stack(s: State) -> ParseResult<State, TypeNode> {
+fn type_union_stack(s: State) -> ParseResult<State, TypeHint> {
     type_nullable_stack
         // map(
         //     seq((
@@ -1398,7 +1172,7 @@ fn type_union_stack(s: State) -> ParseResult<State, TypeNode> {
         .parse(s)
 }
 
-fn typespec(s: State) -> ParseResult<State, TypeNode> {
+fn typespec(s: State) -> ParseResult<State, TypeHint> {
     type_union_stack.parse(s)
 }
 
@@ -1417,32 +1191,16 @@ fn declarable(s: State) -> ParseResult<State, Declarable> {
     .parse(s)
 }
 
-fn declare_guard_expr(s: State) -> ParseResult<State, DeclareGuardExpr> {
-    alt((
-        map(preceded(seq((tag("some"), ws1)), identifier), |id| {
-            DeclareGuardExpr {
-                id: 0,
-                kind: DeclareGuardExprKind::Some(id),
-            }
-        }),
-        map(identifier, |id| DeclareGuardExpr {
-            id: 0,
-            kind: DeclareGuardExprKind::Unguarded(id),
-        }),
-    ))
-    .parse(s)
-}
-
 fn declare_pattern(s: State) -> ParseResult<State, DeclarePattern> {
     alt((
         map(
             seq((
-                declare_guard_expr,
+                optional(seq((tag("some"), ws1))),
+                identifier,
                 optional(preceded(seq((ws0, tag(":"), ws0)), typespec)),
             )),
-            |(guard, ty)| DeclarePattern {
-                id: 0,
-                kind: DeclarePatternKind::Declare { guard, ty },
+            |(guard, var, ty)| {
+                DeclarePattern::Single(DeclareSingle::new_simple(guard.is_some(), var, ty))
             },
         ),
         delimited(
@@ -1465,22 +1223,15 @@ fn declare_pattern(s: State) -> ParseResult<State, DeclarePattern> {
                     )),
                 ))),
                 |opt| match opt {
-                    None => DeclarePattern {
-                        id: 0,
-                        kind: DeclarePatternKind::List {
-                            elements: vec![],
-                            rest: None,
-                        },
-                    },
+                    None => DeclarePattern::List(DeclareList::new_simple(vec![], None)),
                     Some((first, mut elements, _, rest)) => {
                         elements.insert(0, first);
-                        DeclarePattern {
-                            id: 0,
-                            kind: DeclarePatternKind::List {
-                                elements,
-                                rest: rest.flatten(),
-                            },
-                        }
+
+                        DeclarePattern::List(DeclareList::new_simple(
+                            elements,
+                            rest.flatten()
+                                .map(|(var, ty)| DeclareRest::new_simple(var, ty)),
+                        ))
                     }
                 },
             ),
@@ -1492,36 +1243,13 @@ fn declare_pattern(s: State) -> ParseResult<State, DeclarePattern> {
                 optional(seq((
                     declarable,
                     many0(preceded(seq((ws0, tag(","), ws0)), declarable)),
-                    ws0,
-                    optional(preceded(
-                        tag(","),
-                        optional(delimited(
-                            seq((ws0, tag(".."), ws0)),
-                            seq((
-                                identifier,
-                                optional(preceded(seq((ws0, tag(":"), ws0)), typespec)),
-                            )),
-                            optional(seq((ws0, tag(",")))),
-                        )),
-                    )),
                 ))),
                 |opt| match opt {
-                    None => DeclarePattern {
-                        id: 0,
-                        kind: DeclarePatternKind::Tuple {
-                            elements: vec![],
-                            rest: None,
-                        },
-                    },
-                    Some((first, mut elements, _, rest)) => {
+                    None => DeclarePattern::Tuple(DeclareTuple::new_simple(vec![])),
+                    Some((first, mut elements)) => {
                         elements.insert(0, first);
-                        DeclarePattern {
-                            id: 0,
-                            kind: DeclarePatternKind::Tuple {
-                                elements,
-                                rest: rest.flatten(),
-                            },
-                        }
+
+                        DeclarePattern::Tuple(DeclareTuple::new_simple(elements))
                     }
                 },
             ),
@@ -1542,10 +1270,7 @@ fn declare_stmt(s: State) -> ParseResult<State, Stmt> {
             ws0,
             constrained(false, expr),
         )),
-        |(_, _, pattern, _, _, _, expr)| Stmt {
-            id: 0,
-            kind: StmtKind::Declare { pattern, expr },
-        },
+        |(_, _, pattern, _, _, _, expr)| Stmt::Declare(DeclareStmt::new_simple(pattern, expr)),
     )
     .parse(s)
 }
@@ -1618,30 +1343,21 @@ fn stmt(s: State) -> ParseResult<State, Stmt> {
                 ))),
             )),
             |(le, ri)| match ri {
-                None => Some(Stmt {
-                    id: 0,
-                    kind: StmtKind::Expr { expr: le },
-                }),
+                None => Some(Stmt::Expr(ExprStmt::new_simple(le))),
                 Some((_, op, _, _, expr)) => {
-                    AssignPattern::try_from(le.clone())
-                        .ok()
-                        .map(|pattern| Stmt {
-                            id: 0,
-                            kind: StmtKind::Assign {
-                                pattern,
-                                expr: match op {
-                                    None => expr,
-                                    Some(op) => Expr {
-                                        id: 0,
-                                        kind: ExprKind::BinaryExpr {
-                                            left: Expr::from(le).into(),
-                                            op: op.into(),
-                                            right: expr.into(),
-                                        },
-                                    },
-                                },
+                    AssignPattern::try_from(le.clone()).ok().map(|pattern| {
+                        Stmt::Assign(AssignStmt::new_simple(
+                            pattern,
+                            match op {
+                                None => expr,
+                                Some(op) => Expr::Binary(BinaryExpr::new_simple(
+                                    Expr::from(le).into(),
+                                    op.into(),
+                                    expr.into(),
+                                )),
                             },
-                        })
+                        ))
+                    })
                 }
             },
         ),
@@ -1649,7 +1365,7 @@ fn stmt(s: State) -> ParseResult<State, Stmt> {
     .parse(s)
 }
 
-fn named_fn_item(s: State) -> ParseResult<State, Item> {
+fn named_fn_item(s: State) -> ParseResult<State, NamedFnItem> {
     map(
         seq((
             tag("fn"),
@@ -1670,18 +1386,14 @@ fn named_fn_item(s: State) -> ParseResult<State, Item> {
             ws0,
             tag("}"),
         )),
-        |(_, _, name, _, generics, _, _, params, _, _, _, ret, _, _, body, _, _)| Item {
-            id: 0,
-            kind: ItemKind::NamedFn {
+        |(_, _, name, _, generics, _, _, params, _, _, _, ret, _, _, body, _, _)| {
+            NamedFnItem::new_simple(
                 name,
-                decl: FnDecl {
-                    id: 0,
-                    generics: generics.map(|(generics, _)| generics).unwrap_or_default(),
-                    ret: ret.map(|(_, _, t, _)| t),
-                    params,
-                    body,
-                },
-            },
+                generics.map(|(generics, _)| generics).unwrap_or_default(),
+                ret.map(|(_, _, t, _)| t),
+                params,
+                body,
+            )
         },
     )
     .parse(s)
@@ -1689,7 +1401,7 @@ fn named_fn_item(s: State) -> ParseResult<State, Item> {
 
 fn item(s: State) -> ParseResult<State, Item> {
     alt((
-        named_fn_item,
+        map(named_fn_item, Item::NamedFn),
         // declare_stmt,
         // assign_stmt,
         // map(expr, |expr| Stmt::Expr { expr: expr.into() }),
@@ -1697,13 +1409,8 @@ fn item(s: State) -> ParseResult<State, Item> {
     .parse(s)
 }
 
-enum StmtOrItem {
-    Stmt(Stmt),
-    Item(Item),
-}
-
-fn stmt_or_item(s: State) -> ParseResult<State, StmtOrItem> {
-    alt((map(stmt, StmtOrItem::Stmt), map(item, StmtOrItem::Item))).parse(s)
+fn stmt_or_item(s: State) -> ParseResult<State, Either<Stmt, Item>> {
+    alt((map(stmt, Either::Left), map(item, Either::Right))).parse(s)
 }
 
 fn block_contents(s: State) -> ParseResult<State, Block> {
@@ -1723,14 +1430,14 @@ fn block_contents(s: State) -> ParseResult<State, Block> {
 
             if let Some((first, rest)) = m {
                 match first {
-                    StmtOrItem::Stmt(stmt) => block.stmts.push(stmt),
-                    StmtOrItem::Item(item) => block.items.push(item),
+                    Either::Left(stmt) => block.stmts.push(stmt),
+                    Either::Right(item) => block.items.push(item),
                 }
 
                 for el in rest {
                     match el {
-                        StmtOrItem::Stmt(stmt) => block.stmts.push(stmt),
-                        StmtOrItem::Item(item) => block.items.push(item),
+                        Either::Left(stmt) => block.stmts.push(stmt),
+                        Either::Right(item) => block.items.push(item),
                     }
                 }
             }
@@ -1809,13 +1516,13 @@ pub fn parse_declarable(input: &str) -> Declarable {
         .expect("parse declarable")
 }
 
-pub fn try_parse_type(input: &str) -> Option<TypeNode> {
+pub fn try_parse_type(input: &str) -> Option<TypeHint> {
     terminated(typespec, eof)
         .parse(input.trim().into())
         .map(|(_, t)| t)
 }
 
-pub fn parse_type(input: &str) -> TypeNode {
+pub fn parse_type(input: &str) -> TypeHint {
     try_parse_type(input).expect("can parse type")
 }
 
