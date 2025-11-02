@@ -1,8 +1,14 @@
-use tree_sitter::Node;
+use tree_sitter::{Node, Tree};
 
 use crate::ast::*;
 
-pub fn parse_document_ts(source: &str) -> Option<Document> {
+#[derive(Debug, Clone)]
+pub struct ParseResult {
+    pub tree: Tree,
+    pub document: Document,
+}
+
+pub fn parse_document_ts(source: &str) -> Option<ParseResult> {
     let mut parser = tree_sitter::Parser::new();
     let language = tree_sitter_adventlang::LANGUAGE;
     parser
@@ -18,12 +24,14 @@ pub fn parse_document_ts(source: &str) -> Option<Document> {
     }
 
     let converter = Converter { source };
-    Some(converter.as_doc(root_node))
+    let document = converter.as_doc(root_node);
+
+    Some(ParseResult { tree, document })
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::tree_sitter_parser::parse_document_ts;
+    use crate::{ParseResult, tree_sitter_parser::parse_document_ts};
 
     #[test]
     fn test() {
@@ -42,11 +50,11 @@ mod tests {
         // let source = "arr []= 7";
         let source = "arr[2] []= 7";
 
-        let doc = parse_document_ts(source).expect("can parse");
+        let ParseResult { document, .. } = parse_document_ts(source).expect("can parse");
 
         // let doc2 = parse_document(source).expect("can parse original");
 
-        println!("using tree sitter: {doc:#?}");
+        println!("using tree sitter: {document:#?}");
 
         // println!("using parser combinators: {doc2:#?}");
     }

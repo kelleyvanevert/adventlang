@@ -1,9 +1,12 @@
 #![allow(unused)]
 #![allow(dead_code)]
 
+use std::fmt::Display;
+
 use ena::unify::{InPlaceUnificationTable, UnifyKey};
 use fxhash::FxHashMap;
 use parser::ast::{self, AstNode};
+use thiserror::Error;
 
 use crate::{
     hir::{CanSubstitute, HirNode},
@@ -31,7 +34,8 @@ impl UnifyKey for TypeVar {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Error, Debug, Clone, PartialEq, Eq)]
+#[error("{kind}")]
 pub struct TypeError {
     pub kind: TypeErrorKind,
     pub node_id: usize,
@@ -43,9 +47,11 @@ impl CanSubstitute for TypeError {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub enum TypeErrorKind {
+    #[error("types are not equal: {0:?} != {1:?}")]
     NotEqual(Type, Type),
+    #[error("infinite type: {0:?} in {1:?}")]
     InfiniteType(TypeVar, Type),
 }
 
@@ -717,7 +723,24 @@ impl TypeCheckerCtx {
                 coalesce,
                 index,
             }) => {
-                todo!()
+                if coalesce {
+                    todo!()
+                }
+
+                let element_ty = Type::TypeVar(self.fresh_ty_var());
+                let list_ty = Type::List(element_ty.clone().into());
+
+                let expr = self.check_expr(env, *expr, list_ty, constraints);
+
+                let index = self.check_expr(env, *index, Type::Int, constraints);
+
+                hir::Expr::Index(hir::IndexExpr {
+                    id,
+                    expr: expr.into(),
+                    coalesce,
+                    index: index.into(),
+                    ty: element_ty,
+                })
             }
             ast::Expr::Member(_) => {
                 todo!()
@@ -907,31 +930,95 @@ impl TypeCheckerCtx {
 
 #[cfg(test)]
 mod test {
-    use parser::parse_document_ts;
+    use parser::{ParseResult, parse_document_ts};
+    use tree_sitter::Node;
 
     use crate::TypeCheckerCtx;
 
+    fn find_node_by_id(node: Node, target_id: usize) -> Option<Node> {
+        if node.id() == target_id {
+            return Some(node);
+        }
+
+        for child in node.children(&mut node.walk()) {
+            if let Some(found) = find_node_by_id(child, target_id) {
+                return Some(found);
+            }
+        }
+
+        None
+    }
+
     #[test]
     fn test() {
-        let doc = parse_document_ts(
-            "
-                // let h: bool = 5
-                // let h = 5
-                // let c = true
+        let source = "
+// let h: bool = 5
+// let h = 5
+// let c = true
 
-                // let c = [true]
-                // let (a, [b]) = (3, c)
+// let c = true
+// [c] = [4]
 
-                let c = true
-                [c] = [4]
-            ",
-        )
-        .expect("can parse");
+let c = [true]
+let f = [2]
+let (a, [b]) = (3, c)
+b = false
+b = f[0]
+";
+
+        let ParseResult { tree, document } = parse_document_ts(source).expect("can parse");
 
         let mut ctx = TypeCheckerCtx::new();
-        let typed_doc = ctx.typecheck(doc).expect("can type-check");
+        match ctx.typecheck(document) {
+            Ok(typed_doc) => {
+                println!("\nTYPED DOCUMENT (after substitution):\n{typed_doc:#?}");
+            }
+            Err(err) => {
+                println!("");
+                println!("Type-checking failed");
+                println!("====================");
 
-        println!("\nTYPED DOCUMENT (after substitution):\n{typed_doc:#?}");
+                let Some(error_node) = find_node_by_id(tree.root_node(), err.node_id) else {
+                    println!("(Could not find source node)");
+                    panic!("{err:?}");
+                };
+
+                let start_byte = error_node.start_byte();
+                let end_byte = error_node.end_byte();
+                let start_pos = error_node.start_position();
+                let end_pos = error_node.end_position();
+
+                // Split source into lines
+                let lines: Vec<&str> = source.lines().collect();
+
+                // Calculate which lines to show
+                let context_lines = 3;
+                let error_line = start_pos.row;
+                let first_line = error_line.saturating_sub(context_lines);
+                let last_line = (error_line + context_lines).min(lines.len() - 1);
+
+                // Add line numbers and source lines
+                for line_no in first_line..=last_line {
+                    if line_no < lines.len() {
+                        println!("{:4} | {}", line_no + 1, lines[line_no]);
+
+                        // Add error annotation on the line after the error
+                        if line_no == error_line {
+                            // Calculate the column position for the caret
+                            let column = start_pos.column;
+                            let spaces = " ".repeat(4 + 3 + column); // 4 for line no, 3 for " | "
+                            let carets = "^".repeat(if start_pos.row == end_pos.row {
+                                end_pos.column - start_pos.column
+                            } else {
+                                1
+                            });
+
+                            println!("{}{} {}", spaces, carets, err);
+                        }
+                    }
+                }
+            }
+        }
 
         todo!("")
     }

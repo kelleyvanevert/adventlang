@@ -8,3 +8,5 @@ im = "15.1.0"
 parser = { path = "../parser" }
 fxhash = "0.2.1"
 ena = "0.14.3"
+tree-sitter = "0.25.10"
+thiserror = "2.0.17"

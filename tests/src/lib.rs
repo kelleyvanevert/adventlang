@@ -35,7 +35,10 @@ mod tests {
 
         let doc1 = parse_document(&content).expect("Can parse with parser combinators");
 
-        let mut doc2 = parse_document_ts(&content).expect("Can parse with Tree-sitter");
+        let mut doc2 = parse_document_ts(&content)
+            .expect("Can parse with Tree-sitter")
+            .document;
+
         doc2.strip_ids();
 
         // if doc1 != doc2 {
