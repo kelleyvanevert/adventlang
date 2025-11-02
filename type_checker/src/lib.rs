@@ -1,6 +1,7 @@
 #![allow(unused)]
 #![allow(dead_code)]
 
+use ena::unify::{InPlaceUnificationTable, UnifyKey};
 use fxhash::FxHashMap;
 use parser::ast::{self, AstNode};
 
@@ -14,10 +15,37 @@ pub mod types;
 
 type Env = FxHashMap<String, Type>;
 
+impl UnifyKey for TypeVar {
+    type Value = Option<Type>;
+
+    fn from_index(u: u32) -> Self {
+        Self(u)
+    }
+
+    fn index(&self) -> u32 {
+        self.0
+    }
+
+    fn tag() -> &'static str {
+        "TypeVar"
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeError {
+    pub kind: TypeErrorKind,
+    pub node_id: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TypeErrorKind {
+    NotEqual(Type, Type),
+    InfiniteType(TypeVar, Type),
+}
+
 #[derive(Debug)]
 struct TypeCheckerCtx {
-    // unification table
-    next_ty_var: usize,
+    unification_table: InPlaceUnificationTable<TypeVar>,
 }
 
 #[derive(Debug)]
@@ -27,24 +55,127 @@ enum Constraint {
 
 impl TypeCheckerCtx {
     pub fn new() -> Self {
-        Self { next_ty_var: 0 }
+        Self {
+            unification_table: InPlaceUnificationTable::new(),
+        }
     }
 
     fn fresh_ty_var(&mut self) -> TypeVar {
-        let var = TypeVar(format!("#{}", self.next_ty_var));
-        self.next_ty_var += 1;
-        var
+        self.unification_table.new_key(None)
     }
 
     pub fn typecheck(&mut self, doc: ast::Document) -> hir::Document {
         let mut env = FxHashMap::default();
         let mut constraints = vec![];
         let typed_doc = self.infer_doc(&mut env, doc, &mut constraints);
-        println!("CONSTRAINTS:");
-        for c in constraints {
+
+        println!("\nTYPED DOCUMENT:\n{typed_doc:#?}");
+
+        println!("\nCONSTRAINTS:");
+        for c in &constraints {
             println!("{c:?}");
         }
+
+        self.unification(constraints)
+            .expect("unification to succeed");
+
+        println!("\nUNIFICATION TABLE:\n{:#?}", self.unification_table);
+
         typed_doc
+    }
+
+    fn unification(&mut self, constraints: Vec<Constraint>) -> Result<(), TypeError> {
+        for constr in constraints {
+            match constr {
+                Constraint::TypeEqual(node_id, left, right) => self
+                    .unify_ty_ty(left.clone(), right.clone())
+                    .map_err(|kind| TypeError {
+                        node_id,
+                        kind: TypeErrorKind::NotEqual(left, right),
+                    })?,
+            }
+        }
+
+        Ok(())
+    }
+
+    fn unify_ty_ty(&mut self, unnorm_left: Type, unnorm_right: Type) -> Result<(), TypeErrorKind> {
+        let left = self.normalize_ty(unnorm_left);
+        let right = self.normalize_ty(unnorm_right);
+
+        match (left, right) {
+            (Type::Nil, Type::Nil) => Ok(()),
+            (Type::Bool, Type::Bool) => Ok(()),
+            (Type::Str, Type::Str) => Ok(()),
+            (Type::Int, Type::Int) => Ok(()),
+            (Type::Float, Type::Float) => Ok(()),
+            (Type::Regex, Type::Regex) => Ok(()),
+            (Type::List(a), Type::List(b)) => self.unify_ty_ty(*a, *b),
+            (Type::Tuple(a), Type::Tuple(b)) if a.len() == b.len() => {
+                for (a, b) in a.into_iter().zip(b.into_iter()) {
+                    self.unify_ty_ty(a, b)?;
+                }
+                Ok(())
+            }
+            (
+                Type::Dict {
+                    key: a_key,
+                    val: a_val,
+                },
+                Type::Dict {
+                    key: b_key,
+                    val: b_val,
+                },
+            ) => {
+                self.unify_ty_ty(*a_key, *b_key)?;
+                self.unify_ty_ty(*a_val, *b_val)
+            }
+            (Type::Fn(_), Type::Fn(_)) => todo!(),
+            (Type::Nullable { child: a_child }, Type::Nullable { child: b_child }) => {
+                self.unify_ty_ty(*a_child, *b_child)
+            }
+            (Type::TypeVar(a), Type::TypeVar(b)) => self
+                .unification_table
+                .unify_var_var(a, b)
+                .map_err(|(l, r)| TypeErrorKind::NotEqual(l, r)),
+            (Type::TypeVar(v), ty) | (ty, Type::TypeVar(v)) => {
+                ty.occurs_check(v)
+                    .map_err(|ty| TypeErrorKind::InfiniteType(v, ty))?;
+
+                self.unification_table
+                    .unify_var_value(v, Some(ty))
+                    .map_err(|(l, r)| TypeErrorKind::NotEqual(l, r))
+            }
+            (left, right) => Err(TypeErrorKind::NotEqual(left, right)),
+        }
+    }
+
+    // do something with double nullability?
+    fn normalize_ty(&mut self, ty: Type) -> Type {
+        match ty {
+            Type::Nil | Type::Bool | Type::Str | Type::Int | Type::Float | Type::Regex => ty,
+            Type::Fn(_) => {
+                todo!()
+            }
+            Type::List(ty) => Type::List(self.normalize_ty(*ty).into()),
+            Type::Tuple(elements) => Type::Tuple(
+                elements
+                    .into_iter()
+                    .map(|ty| self.normalize_ty(ty))
+                    .collect(),
+            ),
+            Type::Dict { key, val } => Type::Dict {
+                key: self.normalize_ty(*key).into(),
+                val: self.normalize_ty(*val).into(),
+            },
+            Type::Nullable { child } => Type::Nullable {
+                child: self.normalize_ty(*child).into(),
+            },
+            Type::TypeVar(var) => match self.unification_table.probe_value(var) {
+                Some(ty) => self.normalize_ty(ty),
+                None => Type::TypeVar(self.unification_table.find(var)),
+            },
+        }
     }
 
     fn infer_doc(
@@ -129,43 +260,17 @@ impl TypeCheckerCtx {
                     ty: Type::Nil,
                 });
             }
-            ast::Stmt::Declare(ast::DeclareStmt { id, pattern, expr }) => match pattern {
-                ast::DeclarePattern::Single(single) => {
-                    if single.guard {
-                        panic!("can't use declare guard in declare stmt");
-                    }
+            ast::Stmt::Declare(ast::DeclareStmt { id, pattern, expr }) => {
+                let pattern = self.infer_declare_pattern(env, pattern, constraints);
+                let expr = self.check_expr(env, expr, pattern.ty(), constraints);
 
-                    let expr = match single.ty {
-                        None => {
-                            let expr = self.infer_expr(env, expr, constraints);
-                            env.insert(single.var.as_str().to_string(), expr.ty());
-                            expr
-                        }
-                        Some(hint) => {
-                            let ty = Type::from(&hint);
-                            env.insert(single.var.as_str().to_string(), ty.clone());
-                            self.check_expr(env, expr, ty, constraints)
-                        }
-                    };
-
-                    hir::Stmt::Declare(hir::DeclareStmt {
-                        id,
-                        pattern: hir::DeclarePattern::Single(hir::DeclareSingle {
-                            id: single.id,
-                            guard: single.guard, // = false
-                            var: hir::Var {
-                                id: single.var.id,
-                                name: single.var.name,
-                                ty: expr.ty(), // a bit excessive...
-                            },
-                            ty: expr.ty(),
-                        }),
-                        expr,
-                        ty: Type::Nil,
-                    })
-                }
-                _ => todo!(),
-            },
+                hir::Stmt::Declare(hir::DeclareStmt {
+                    id,
+                    pattern,
+                    expr,
+                    ty: Type::Nil,
+                })
+            }
             ast::Stmt::Assign(ast::AssignStmt { .. }) => {
                 todo!();
             }
@@ -178,6 +283,104 @@ impl TypeCheckerCtx {
                     expr,
                 });
             }
+        }
+    }
+
+    fn infer_declare_pattern(
+        &mut self,
+        env: &mut Env,
+        pattern: ast::DeclarePattern,
+        constraints: &mut Vec<Constraint>,
+    ) -> hir::DeclarePattern {
+        match pattern {
+            ast::DeclarePattern::Single(ast::DeclareSingle { id, guard, var, ty }) => {
+                if guard {
+                    // only if in declare-stmt
+                    panic!("can't use declare guard in declare stmt");
+                }
+
+                let ty = ty
+                    .map(|ty| Type::from(&ty))
+                    .unwrap_or_else(|| Type::TypeVar(self.fresh_ty_var()));
+
+                env.insert(var.as_str().to_string(), ty.clone());
+
+                hir::DeclarePattern::Single(hir::DeclareSingle {
+                    id,
+                    guard,
+                    ty: ty.clone(),
+                    var: hir::Var {
+                        id: var.id,
+                        name: var.name,
+                        ty, // a bit excessive...
+                    },
+                })
+            }
+            ast::DeclarePattern::List(ast::DeclareList { id, elements, rest }) => {
+                let element_ty = Type::TypeVar(self.fresh_ty_var());
+                let ty = Type::List(element_ty.clone().into());
+
+                let elements = elements
+                    .into_iter()
+                    .map(|el| {
+                        let decl = self.infer_declarable(env, el, constraints);
+                        constraints.push(Constraint::TypeEqual(
+                            decl.id(),
+                            decl.ty(),
+                            element_ty.clone(),
+                        ));
+                        decl
+                    })
+                    .collect::<Vec<_>>();
+
+                let rest = rest.map(|ast::DeclareRest { id, var, ty }| {
+                    let ty = ty
+                        .map(|ty| Type::from(&ty))
+                        .unwrap_or_else(|| Type::TypeVar(self.fresh_ty_var()));
+
+                    hir::DeclareRest {
+                        id,
+                        ty: ty.clone(),
+                        var: hir::Var {
+                            id: var.id,
+                            name: var.name,
+                            ty, // a bit excessive...
+                        },
+                    }
+                });
+
+                hir::DeclarePattern::List(hir::DeclareList {
+                    id,
+                    elements,
+                    rest,
+                    ty,
+                })
+            }
+            _ => todo!(),
+        }
+    }
+
+    fn infer_declarable(
+        &mut self,
+        env: &mut Env,
+        declarable: ast::Declarable,
+        constraints: &mut Vec<Constraint>,
+    ) -> hir::Declarable {
+        let ast::Declarable {
+            id,
+            pattern,
+            fallback,
+        } = declarable;
+
+        let pattern = self.infer_declare_pattern(env, pattern, constraints);
+
+        let fallback = fallback.map(|expr| self.check_expr(env, expr, pattern.ty(), constraints));
+
+        hir::Declarable {
+            id,
+            ty: pattern.ty(),
+            pattern,
+            fallback,
         }
     }
 
@@ -517,12 +720,18 @@ mod test {
 
     #[test]
     fn test() {
-        let doc = parse_document_ts("let h: bool = 5").expect("can parse");
+        let doc = parse_document_ts(
+            "
+                // let h: bool = 5
+                // let h = 5
+                let [a, b] = [3, 4]
+            ",
+        )
+        .expect("can parse");
 
         let mut ctx = TypeCheckerCtx::new();
         let typed_doc = ctx.typecheck(doc);
 
-        println!("TYPED DOCUMENT:\n{typed_doc:#?}");
         todo!("")
     }
 }

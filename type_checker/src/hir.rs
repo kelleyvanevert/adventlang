@@ -42,11 +42,14 @@ macro_rules! hir_nodes {
     () => {};
 
     (
+        $($display_template:expr;)?
+        $(#[$struct_meta:meta])*
         struct $name:ident {
             $($($skip_strip_id:lifetime)? $field:ident: $field_ty:ty,)*
         }
         $($rest:tt)*
     ) => {
+        $(#[$struct_meta])*
         #[derive(Debug, Clone, PartialEq, Eq, Hash)]
         pub struct $name {
             pub id: usize,
@@ -77,11 +80,13 @@ macro_rules! hir_nodes {
     };
 
     (
+        $(#[$struct_meta:meta])*
         enum $name:ident {
             $($variant:ident($field_ty:ident),)*
         }
         $($rest:tt)*
     ) => {
+        $(#[$struct_meta])*
         #[derive(Debug, Clone, PartialEq, Eq, Hash)]
         pub enum $name {
             $($variant($field_ty),)*
@@ -120,28 +125,34 @@ macro_rules! hir_nodes {
 }
 
 hir_nodes! {
+    "{str}";
     struct Identifier {
         '_ str: String,
     }
 
+    "{name}";
     struct Var {
         '_ name: String,
     }
 
+    "{if guard}some {/}{var}";
     struct DeclareSingle {
         '_ guard: bool,
         var: Var,
     }
 
+    "{for el in elements}{el}, {/for}{some rest}.. {rest}{/some}";
     struct DeclareList {
         elements: Vec<Declarable>,
         rest: Option<DeclareRest>,
     }
 
+    "{for el in elements}{el}, {/for}";
     struct DeclareTuple {
         elements: Vec<Declarable>,
     }
 
+    "{var}";
     struct DeclareRest {
         var: Var,
         // ty: Option<TypeHint>,
@@ -153,20 +164,24 @@ hir_nodes! {
         Tuple(DeclareTuple),
     }
 
+    "{pattern}{some fallback}{fallback}{/some}";
     struct Declarable {
         pattern: DeclarePattern,
         fallback: Option<Expr>,
     }
 
+    "{var}";
     struct AssignLocVar {
         var: Var,
     }
 
+    "{container}[{index}]";
     struct AssignLocIndex {
         container: Box<AssignLoc>,
         index: Expr,
     }
 
+    "{container}.{member}";
     struct AssignLocMember {
         container: Box<AssignLoc>,
         member: Identifier,
@@ -178,15 +193,18 @@ hir_nodes! {
         Member(AssignLocMember),
     }
 
+    "{loc}";
     struct AssignPatternSingle {
         loc: AssignLoc,
     }
 
+    "{for el in elements}{el}, {/for}{some splat}.. {splat}{/some}";
     struct AssignPatternList {
         elements: Vec<AssignPattern>,
         splat: Option<Box<AssignPattern>>,
     }
 
+    "{for el in elements}{el}, {/for}";
     struct AssignPatternTuple {
         elements: Vec<AssignPattern>,
     }
@@ -197,10 +215,12 @@ hir_nodes! {
         Tuple(AssignPatternTuple),
     }
 
+    "{str}";
     struct StrPieceFragment {
         '_ str: String,
     }
 
+    "{{{expr}}}";
     struct StrPieceInterpolation {
         expr: Expr,
     }
@@ -210,11 +230,13 @@ hir_nodes! {
         Interpolation(StrPieceInterpolation),
     }
 
+    "{some name}{name} = {/some}{expr}";
     struct Argument {
         name: Option<Identifier>,
         expr: Expr,
     }
 
+    "{key}";
     struct DictKey {
         key: DictKeyKind,
     }
@@ -224,10 +246,12 @@ hir_nodes! {
         Expr(Expr),
     }
 
+    "";
     struct StrExpr {
         pieces: Vec<StrPiece>,
     }
 
+    "nil";
     struct NilExpr {}
 
     struct RegexExpr {
