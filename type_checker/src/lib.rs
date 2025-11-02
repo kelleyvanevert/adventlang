@@ -37,10 +37,30 @@ pub struct TypeError {
     pub node_id: usize,
 }
 
+impl CanSubstitute for TypeError {
+    fn substitute(&mut self, unification_table: &mut InPlaceUnificationTable<TypeVar>) {
+        self.kind.substitute(unification_table);
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeErrorKind {
     NotEqual(Type, Type),
     InfiniteType(TypeVar, Type),
+}
+
+impl CanSubstitute for TypeErrorKind {
+    fn substitute(&mut self, unification_table: &mut InPlaceUnificationTable<TypeVar>) {
+        match self {
+            Self::NotEqual(a, b) => {
+                a.substitute(unification_table);
+                b.substitute(unification_table);
+            }
+            Self::InfiniteType(v, ty) => {
+                ty.substitute(unification_table);
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -64,24 +84,27 @@ impl TypeCheckerCtx {
         self.unification_table.new_key(None)
     }
 
-    pub fn typecheck(&mut self, doc: ast::Document) -> hir::Document {
+    pub fn typecheck(&mut self, doc: ast::Document) -> Result<hir::Document, TypeError> {
         let mut env = FxHashMap::default();
         let mut constraints = vec![];
         let mut typed_doc = self.infer_doc(&mut env, doc, &mut constraints);
 
-        println!("\nCONSTRAINTS:");
-        for c in &constraints {
-            println!("{c:?}");
-        }
+        // println!("\nCONSTRAINTS:");
+        // for c in &constraints {
+        //     println!("{c:?}");
+        // }
 
         self.unification(constraints)
-            .expect("unification to succeed");
+            // make sure that the best-effort substitution that we produced is included in the error report
+            .map_err(|mut err| {
+                err.substitute(&mut self.unification_table);
+                err
+            })?;
 
+        // substitute throughout the doc
         typed_doc.substitute(&mut self.unification_table);
 
-        println!("\nTYPED DOCUMENT (after substitution):\n{typed_doc:#?}");
-
-        typed_doc
+        Ok(typed_doc)
     }
 
     fn unification(&mut self, constraints: Vec<Constraint>) -> Result<(), TypeError> {
@@ -271,8 +294,16 @@ impl TypeCheckerCtx {
                     ty: Type::Nil,
                 })
             }
-            ast::Stmt::Assign(ast::AssignStmt { .. }) => {
-                todo!();
+            ast::Stmt::Assign(ast::AssignStmt { id, pattern, expr }) => {
+                let pattern = self.infer_assign_pattern(env, pattern, constraints);
+                let expr = self.check_expr(env, expr, pattern.ty(), constraints);
+
+                hir::Stmt::Assign(hir::AssignStmt {
+                    id,
+                    pattern,
+                    expr,
+                    ty: Type::Nil,
+                })
             }
             ast::Stmt::Expr(ast::ExprStmt { id, expr }) => {
                 let expr = self.infer_expr(env, expr, constraints);
@@ -286,10 +317,137 @@ impl TypeCheckerCtx {
         }
     }
 
+    fn infer_assign_pattern(
+        &mut self,
+        env: &mut Env,
+        pattern: ast::AssignPattern,
+        constraints: &mut Vec<Constraint>,
+    ) -> hir::AssignPattern {
+        match pattern {
+            ast::AssignPattern::Single(ast::AssignSingle { id, loc }) => {
+                let loc = self.infer_location(env, loc, constraints);
+
+                hir::AssignPattern::Single(hir::AssignSingle {
+                    id,
+                    ty: loc.ty(),
+                    loc,
+                })
+            }
+            ast::AssignPattern::List(ast::AssignList {
+                id,
+                elements,
+                splat,
+            }) => {
+                let element_ty = Type::TypeVar(self.fresh_ty_var());
+                let ty = Type::List(element_ty.clone().into());
+
+                let elements = elements
+                    .into_iter()
+                    .map(|pat| {
+                        let pat = self.infer_assign_pattern(env, pat, constraints);
+                        constraints.push(Constraint::TypeEqual(
+                            pat.id(),
+                            pat.ty(),
+                            element_ty.clone(),
+                        ));
+                        pat
+                    })
+                    .collect::<Vec<_>>();
+
+                let splat = splat.map(|pat| {
+                    let pat = self.infer_assign_pattern(env, *pat, constraints);
+
+                    constraints.push(Constraint::TypeEqual(pat.id(), pat.ty(), ty.clone()));
+
+                    pat.into()
+                });
+
+                hir::AssignPattern::List(hir::AssignList {
+                    id,
+                    elements,
+                    splat,
+                    ty,
+                })
+            }
+            ast::AssignPattern::Tuple(ast::AssignTuple { id, elements }) => {
+                let element_types = elements
+                    .iter()
+                    .map(|_| Type::TypeVar(self.fresh_ty_var()))
+                    .collect::<Vec<_>>();
+
+                let ty = Type::Tuple(element_types.clone());
+
+                let elements = elements
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, el)| {
+                        let decl = self.infer_assign_pattern(env, el, constraints);
+                        constraints.push(Constraint::TypeEqual(
+                            decl.id(),
+                            decl.ty(),
+                            element_types[i].clone(),
+                        ));
+                        decl
+                    })
+                    .collect::<Vec<_>>();
+
+                hir::AssignPattern::Tuple(hir::AssignTuple { id, elements, ty })
+            }
+        }
+    }
+
+    fn infer_location(
+        &mut self,
+        env: &mut Env,
+        loc: ast::AssignLoc,
+        constraints: &mut Vec<Constraint>,
+    ) -> hir::AssignLoc {
+        match loc {
+            ast::AssignLoc::Var(ast::AssignLocVar { id, var }) => {
+                let ty = env[var.as_str()].clone();
+
+                return hir::AssignLoc::Var(hir::AssignLocVar {
+                    id,
+                    ty: ty.clone(),
+                    var: hir::Var {
+                        id: var.id,
+                        ty,
+                        name: var.name,
+                    },
+                });
+            }
+            ast::AssignLoc::Index(ast::AssignLocIndex {
+                id,
+                container,
+                index,
+            }) => {
+                let container = self.infer_location(env, *container, constraints);
+                let element_ty = Type::TypeVar(self.fresh_ty_var());
+
+                constraints.push(Constraint::TypeEqual(
+                    id,
+                    container.ty(),
+                    Type::List(element_ty.clone().into()),
+                ));
+
+                let index = self.check_expr(env, index, Type::Int, constraints);
+
+                hir::AssignLoc::Index(hir::AssignLocIndex {
+                    id,
+                    container: container.into(),
+                    index,
+                    ty: element_ty.clone(),
+                })
+            }
+            ast::AssignLoc::Member(_) => todo!(),
+        }
+    }
+
     fn infer_declare_pattern(
         &mut self,
         env: &mut Env,
         pattern: ast::DeclarePattern,
+        // allow_guard
         constraints: &mut Vec<Constraint>,
     ) -> hir::DeclarePattern {
         match pattern {
@@ -356,7 +514,30 @@ impl TypeCheckerCtx {
                     ty,
                 })
             }
-            _ => todo!(),
+            ast::DeclarePattern::Tuple(ast::DeclareTuple { id, elements }) => {
+                let element_types = elements
+                    .iter()
+                    .map(|_| Type::TypeVar(self.fresh_ty_var()))
+                    .collect::<Vec<_>>();
+
+                let ty = Type::Tuple(element_types.clone());
+
+                let elements = elements
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, el)| {
+                        let decl = self.infer_declarable(env, el, constraints);
+                        constraints.push(Constraint::TypeEqual(
+                            decl.id(),
+                            decl.ty(),
+                            element_types[i].clone(),
+                        ));
+                        decl
+                    })
+                    .collect::<Vec<_>>();
+
+                hir::DeclarePattern::Tuple(hir::DeclareTuple { id, elements, ty })
+            }
         }
     }
 
@@ -517,13 +698,25 @@ impl TypeCheckerCtx {
                     ty: list_ty,
                 });
             }
-            ast::Expr::Tuple(_) => {
-                todo!()
+            ast::Expr::Tuple(ast::TupleExpr { id, elements }) => {
+                let elements = elements
+                    .into_iter()
+                    .map(|expr| self.infer_expr(env, expr, constraints))
+                    .collect::<Vec<_>>();
+
+                let ty = Type::Tuple(elements.iter().map(|el| el.ty()).collect());
+
+                return hir::Expr::Tuple(hir::TupleExpr { id, elements, ty });
             }
             ast::Expr::Dict(_) => {
                 todo!()
             }
-            ast::Expr::Index(_) => {
+            ast::Expr::Index(ast::IndexExpr {
+                id,
+                expr,
+                coalesce,
+                index,
+            }) => {
                 todo!()
             }
             ast::Expr::Member(_) => {
@@ -724,14 +917,21 @@ mod test {
             "
                 // let h: bool = 5
                 // let h = 5
+                // let c = true
+
+                // let c = [true]
+                // let (a, [b]) = (3, c)
+
                 let c = true
-                let [a, b] = [3, c]
+                [c] = [4]
             ",
         )
         .expect("can parse");
 
         let mut ctx = TypeCheckerCtx::new();
-        let typed_doc = ctx.typecheck(doc);
+        let typed_doc = ctx.typecheck(doc).expect("can type-check");
+
+        println!("\nTYPED DOCUMENT (after substitution):\n{typed_doc:#?}");
 
         todo!("")
     }

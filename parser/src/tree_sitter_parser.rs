@@ -469,16 +469,16 @@ impl<'a> Converter<'a> {
 
     fn as_assign_pattern(&self, node: Node) -> AssignPattern {
         match node.kind() {
-            "assign_location" => AssignPattern::Single(AssignPatternSingle {
+            "assign_location" => AssignPattern::Single(AssignSingle {
                 id: node.id(),
                 loc: self.as_lookup(node.child(0).unwrap()),
             }),
-            "assign_list" => AssignPattern::List(AssignPatternList {
+            "assign_list" => AssignPattern::List(AssignList {
                 id: node.id(),
                 elements: node.map_children("element", |child| self.as_assign_pattern(child)),
                 splat: node.map_opt_child("splat", |child| self.as_assign_pattern(child).into()),
             }),
-            "assign_tuple" => AssignPattern::Tuple(AssignPatternTuple {
+            "assign_tuple" => AssignPattern::Tuple(AssignTuple {
                 id: node.id(),
                 elements: node.map_children("element", |child| self.as_assign_pattern(child)),
             }),
@@ -579,9 +579,7 @@ impl<'a> Converter<'a> {
                 }
 
                 let lefthand_expr = match &pattern {
-                    AssignPattern::Single(AssignPatternSingle { loc, .. }) => {
-                        Expr::from(loc.clone())
-                    }
+                    AssignPattern::Single(AssignSingle { loc, .. }) => Expr::from(loc.clone()),
                     _ => panic!("can't op-assign or push-assign to list or tuple pattern"),
                 };
 

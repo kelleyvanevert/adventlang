@@ -172,23 +172,23 @@ ast_nodes! {
         Member(AssignLocMember),
     }
 
-    struct AssignPatternSingle {
+    struct AssignSingle {
         loc: AssignLoc,
     }
 
-    struct AssignPatternList {
+    struct AssignList {
         elements: Vec<AssignPattern>,
         splat: Option<Box<AssignPattern>>,
     }
 
-    struct AssignPatternTuple {
+    struct AssignTuple {
         elements: Vec<AssignPattern>,
     }
 
     enum AssignPattern {
-        Single(AssignPatternSingle),
-        List(AssignPatternList),
-        Tuple(AssignPatternTuple),
+        Single(AssignSingle),
+        List(AssignList),
+        Tuple(AssignTuple),
     }
 
     struct StrPieceFragment {
@@ -630,7 +630,7 @@ impl TryFrom<Expr> for AssignPattern {
                     .transpose()
                     .map(|a| a.map(Box::new))?;
 
-                Ok(AssignPattern::List(AssignPatternList {
+                Ok(AssignPattern::List(AssignList {
                     id,
                     elements,
                     splat,
@@ -642,10 +642,11 @@ impl TryFrom<Expr> for AssignPattern {
                     .map(|el| AssignPattern::try_from(el))
                     .try_collect()?;
 
-                Ok(AssignPattern::Tuple(AssignPatternTuple { id, elements }))
+                Ok(AssignPattern::Tuple(AssignTuple { id, elements }))
             }
-            _ => AssignLoc::try_from(expr)
-                .map(|loc| AssignPattern::Single(AssignPatternSingle { id, loc })),
+            _ => {
+                AssignLoc::try_from(expr).map(|loc| AssignPattern::Single(AssignSingle { id, loc }))
+            }
         }
     }
 }

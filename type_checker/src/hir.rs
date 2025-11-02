@@ -260,25 +260,25 @@ hir_nodes! {
     }
 
     "{loc}";
-    struct AssignPatternSingle {
+    struct AssignSingle {
         loc: AssignLoc,
     }
 
     "{for el in elements}{el}, {/for}{some splat}.. {splat}{/some}";
-    struct AssignPatternList {
+    struct AssignList {
         elements: Vec<AssignPattern>,
         splat: Option<Box<AssignPattern>>,
     }
 
     "{for el in elements}{el}, {/for}";
-    struct AssignPatternTuple {
+    struct AssignTuple {
         elements: Vec<AssignPattern>,
     }
 
     enum AssignPattern {
-        Single(AssignPatternSingle),
-        List(AssignPatternList),
-        Tuple(AssignPatternTuple),
+        Single(AssignSingle),
+        List(AssignList),
+        Tuple(AssignTuple),
     }
 
     "{str}";
@@ -286,7 +286,7 @@ hir_nodes! {
         '_ str: String,
     }
 
-    "{{{expr}}}";
+    "\\{{expr}\\}";
     struct StrPieceInterpolation {
         expr: Expr,
     }
@@ -312,7 +312,7 @@ hir_nodes! {
         Expr(Expr),
     }
 
-    "";
+    "\"{for piece in pieces}{piece}{/for}\"";
     struct StrExpr {
         pieces: Vec<StrPiece>,
     }
@@ -320,67 +320,81 @@ hir_nodes! {
     "nil";
     struct NilExpr {}
 
+    "/{str}/";
     struct RegexExpr {
         '_ str: String,
     }
 
+    "{value}";
     struct BoolExpr {
         '_ value: bool,
     }
 
+    "{value}";
     struct IntExpr {
         '_ value: i64,
     }
 
+    "{str}";
     struct FloatExpr {
         '_ str: String,
     }
 
+    "{var}";
     struct VarExpr {
         var: Var,
     }
 
+    "{op}({expr})";
     struct UnaryExpr {
         expr: Box<Expr>,
         '_ op: String,
     }
 
+    "({left} {op} {right})";
     struct BinaryExpr {
         left: Box<Expr>,
         '_ op: String,
         right: Box<Expr>,
     }
 
+    "{for el in elements}{el}, {/for}{some splat}.. {splat}{/some}";
     struct ListExpr {
         elements: Vec<Expr>,
         splat: Option<Box<Expr>>,
     }
 
+    "{for el in elements}{el}, {/for}";
     struct TupleExpr {
         elements: Vec<Expr>,
     }
 
+    "@\\{{->}\n{for entry in entries}{entry},\n{/for}{<-}\n\\}";
     struct DictExpr {
         entries: Vec<DictEntry>,
     }
 
+    "[{key}]: {value}";
     struct DictEntry {
         key: DictKey,
         value: Expr,
     }
 
+    "{expr}{if coalesce}?{/if}[{index}]";
     struct IndexExpr {
         expr: Box<Expr>,
         '_ coalesce: bool,
         index: Box<Expr>,
     }
 
+    "{expr}{if coalesce}?{/if}.{member}";
     struct MemberExpr {
         expr: Box<Expr>,
         '_ coalesce: bool,
         member: Identifier,
     }
 
+    "({f}){if coalesce}?{/if}({for arg in args}{arg}, {/for})";
     struct CallExpr {
         f: Box<Expr>,
         '_ postfix: bool,
@@ -400,6 +414,7 @@ hir_nodes! {
         els: Option<Block>,
     }
 
+    "{some label}{label}: {/some}while {body}";
     struct WhileExpr {
         label: Option<Identifier>,
         pattern: Option<DeclarePattern>,
@@ -497,11 +512,13 @@ hir_nodes! {
         Expr(ExprStmt),
     }
 
+    "\\{{->}\n{<-}\n\\}";
     struct Block {
         items: Vec<Item>,
         stmts: Vec<Stmt>,
     }
 
+    "{body}";
     struct Document {
         body: Block,
     }
