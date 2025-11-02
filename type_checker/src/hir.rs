@@ -131,7 +131,6 @@ hir_nodes! {
     struct DeclareSingle {
         '_ guard: bool,
         var: Var,
-        // ty: Option<TypeHint>,
     }
 
     struct DeclareList {
@@ -373,12 +372,12 @@ hir_nodes! {
     }
 
     struct BreakStmt {
-        label: Option<Identifier>,
+        '_ label: Option<String>,
         expr: Option<Expr>,
     }
 
     struct ContinueStmt {
-        label: Option<Identifier>,
+        '_ label: Option<String>,
     }
 
     struct ReturnStmt {
