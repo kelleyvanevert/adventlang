@@ -6,7 +6,7 @@ use fxhash::FxHashMap;
 use parser::ast::{self, AstNode};
 
 use crate::{
-    hir::HirNode,
+    hir::{CanSubstitute, HirNode},
     types::{FnType, Type, TypeVar},
 };
 
@@ -67,9 +67,7 @@ impl TypeCheckerCtx {
     pub fn typecheck(&mut self, doc: ast::Document) -> hir::Document {
         let mut env = FxHashMap::default();
         let mut constraints = vec![];
-        let typed_doc = self.infer_doc(&mut env, doc, &mut constraints);
-
-        println!("\nTYPED DOCUMENT:\n{typed_doc:#?}");
+        let mut typed_doc = self.infer_doc(&mut env, doc, &mut constraints);
 
         println!("\nCONSTRAINTS:");
         for c in &constraints {
@@ -79,7 +77,9 @@ impl TypeCheckerCtx {
         self.unification(constraints)
             .expect("unification to succeed");
 
-        println!("\nUNIFICATION TABLE:\n{:#?}", self.unification_table);
+        typed_doc.substitute(&mut self.unification_table);
+
+        println!("\nTYPED DOCUMENT (after substitution):\n{typed_doc:#?}");
 
         typed_doc
     }
@@ -724,7 +724,8 @@ mod test {
             "
                 // let h: bool = 5
                 // let h = 5
-                let [a, b] = [3, 4]
+                let c = true
+                let [a, b] = [3, c]
             ",
         )
         .expect("can parse");

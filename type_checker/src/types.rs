@@ -1,4 +1,4 @@
-use ena::unify::EqUnifyValue;
+use ena::unify::{EqUnifyValue, InPlaceUnificationTable};
 use parser::ast;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
@@ -96,6 +96,62 @@ impl Type {
             Type::Nullable { child } => {
                 (*child).occurs_check(var).map_err(|_| self.clone());
                 Ok(())
+            }
+        }
+    }
+
+    pub fn substitute(
+        &mut self,
+        /* unbound, */
+        unification_table: &mut InPlaceUnificationTable<TypeVar>,
+    ) {
+        println!("substituting at {:?}", self);
+        // *self = Type::Bool;
+
+        match self {
+            Type::Bool | Type::Int | Type::Float | Type::Regex | Type::Str | Type::Nil => {}
+            Type::TypeVar(v) => {
+                let root = unification_table.find(*v);
+                match unification_table.probe_value(root) {
+                    Some(mut ty) => {
+                        //
+                        println!("  probed to be {:?}", ty);
+                        ty.substitute(unification_table);
+
+                        *self = ty; // (!)
+                    }
+                    None => {
+                        // let mut unbound = BTreeSet::new();
+                        // unbound.insert(root);
+                        // (unbound, Type::Var(root))
+
+                        println!("Replacing {:?}", self);
+                        println!("  with: {:?}", root);
+                        *self = Type::TypeVar(root);
+                    }
+                }
+            }
+            Type::List(element) => {
+                element.substitute(unification_table);
+            }
+            Type::Tuple(elements) => {
+                for el in elements {
+                    el.substitute(unification_table);
+                }
+            }
+            Type::Dict { key, val } => {
+                key.substitute(unification_table);
+                val.substitute(unification_table);
+            }
+            Type::Nullable { child } => {
+                child.substitute(unification_table);
+            }
+            Type::Fn(FnType {
+                generics,
+                params,
+                ret,
+            }) => {
+                todo!()
             }
         }
     }

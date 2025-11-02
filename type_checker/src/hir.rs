@@ -1,8 +1,40 @@
+use ena::unify::InPlaceUnificationTable;
+
 use crate::types::{Type, TypeVar};
 
 pub trait HirNode {
     fn id(&self) -> usize;
     fn ty(&self) -> Type;
+}
+
+pub trait CanSubstitute {
+    fn substitute(
+        &mut self,
+        /* unbound, */
+        unification_table: &mut InPlaceUnificationTable<TypeVar>,
+    );
+}
+
+impl<T: CanSubstitute> CanSubstitute for Option<T> {
+    fn substitute(&mut self, unification_table: &mut InPlaceUnificationTable<TypeVar>) {
+        if let Some(inner) = self {
+            inner.substitute(unification_table);
+        }
+    }
+}
+
+impl<T: CanSubstitute> CanSubstitute for Vec<T> {
+    fn substitute(&mut self, unification_table: &mut InPlaceUnificationTable<TypeVar>) {
+        for item in self {
+            item.substitute(unification_table);
+        }
+    }
+}
+
+impl<T: CanSubstitute> CanSubstitute for Box<T> {
+    fn substitute(&mut self, unification_table: &mut InPlaceUnificationTable<TypeVar>) {
+        self.as_mut().substitute(unification_table);
+    }
 }
 
 pub trait StripIds {
@@ -38,6 +70,13 @@ macro_rules! strip_ids_of_fields {
     };
 }
 
+macro_rules! substitute_for_fields {
+    ($self:ident, $field:ident, $arg:expr, $skip_strip_id:lifetime,) => {};
+    ($self:ident, $field:ident, $arg:expr,) => {
+        $self.$field.substitute($arg);
+    };
+}
+
 macro_rules! hir_nodes {
     () => {};
 
@@ -64,6 +103,19 @@ macro_rules! hir_nodes {
 
             fn ty(&self) -> Type {
                 self.ty.clone()
+            }
+        }
+
+        impl CanSubstitute for $name {
+            fn substitute(
+                &mut self,
+                /* unbound, */
+                unification_table: &mut InPlaceUnificationTable<TypeVar>,
+            ) {
+                self.ty.substitute(unification_table);
+                $(
+                    substitute_for_fields!(self, $field, unification_table, $($skip_strip_id,)?);
+                )*
             }
         }
 
@@ -105,6 +157,20 @@ macro_rules! hir_nodes {
                 match self {
                     $(
                         $name::$variant(inner) => inner.ty(),
+                    )*
+                }
+            }
+        }
+
+        impl CanSubstitute for $name {
+            fn substitute(
+                &mut self,
+                /* unbound, */
+                unification_table: &mut InPlaceUnificationTable<TypeVar>,
+            ) {
+                match self {
+                    $(
+                        $name::$variant(inner) => inner.substitute(unification_table),
                     )*
                 }
             }
@@ -385,8 +451,8 @@ hir_nodes! {
 
     struct NamedFnItem {
         name: Identifier, // or `Var`?
-        '_ generics: Vec<TypeVar>,
-        '_ ret: Type,
+        // '_ generics: Vec<TypeVar>,
+        // '_ ret: Type,
         params: Vec<Declarable>,
         body: Block,
     }
