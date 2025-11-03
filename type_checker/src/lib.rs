@@ -1411,6 +1411,33 @@ mod test {
             ",
             "int != bool",
         );
+
+        should_not_typecheck(
+            "
+                // result IS used, so this causes a type-error
+                let res = if true {
+                    5
+                } else if true {
+                    3
+                } else {
+                    false
+                }
+            ",
+            "int != bool",
+        );
+
+        should_typecheck(
+            "
+                // result IS used, so this causes a type-error
+                let res = if true {
+                    5
+                } else if true {
+                    3
+                } else {
+                    3
+                }
+            ",
+        );
     }
 
     #[test]
