@@ -57,8 +57,12 @@ pub struct TypeError {
 }
 
 impl CanSubstitute for TypeError {
-    fn substitute(&mut self, unification_table: &mut InPlaceUnificationTable<TypeVar>) {
-        self.kind.substitute(unification_table);
+    fn substitute(
+        &mut self,
+        bound: &mut Vec<TypeVar>,
+        unification_table: &mut InPlaceUnificationTable<TypeVar>,
+    ) {
+        self.kind.substitute(bound, unification_table);
     }
 }
 
@@ -71,14 +75,18 @@ pub enum TypeErrorKind {
 }
 
 impl CanSubstitute for TypeErrorKind {
-    fn substitute(&mut self, unification_table: &mut InPlaceUnificationTable<TypeVar>) {
+    fn substitute(
+        &mut self,
+        bound: &mut Vec<TypeVar>,
+        unification_table: &mut InPlaceUnificationTable<TypeVar>,
+    ) {
         match self {
             Self::NotEqual(a, b) => {
-                a.substitute(unification_table);
-                b.substitute(unification_table);
+                a.substitute(bound, unification_table);
+                b.substitute(bound, unification_table);
             }
             Self::InfiniteType(v, ty) => {
-                ty.substitute(unification_table);
+                ty.substitute(bound, unification_table);
             }
         }
     }
@@ -126,12 +134,12 @@ impl TypeCheckerCtx {
         self.unification(constraints)
             // make sure that the best-effort substitution that we produced is included in the error report
             .map_err(|mut err| {
-                err.substitute(&mut self.unification_table);
+                err.substitute(&mut vec![], &mut self.unification_table);
                 err
             })?;
 
         // substitute throughout the doc
-        typed_doc.substitute(&mut self.unification_table);
+        typed_doc.substitute(&mut vec![], &mut self.unification_table);
 
         Ok(typed_doc)
     }
@@ -206,9 +214,15 @@ impl TypeCheckerCtx {
     fn normalize_ty(&mut self, ty: Type) -> Type {
         match ty {
             Type::Nil | Type::Bool | Type::Str | Type::Int | Type::Float | Type::Regex => ty,
-            Type::Fn(_) => {
-                todo!()
-            }
+            Type::Fn(FnType {
+                generics,
+                params,
+                ret,
+            }) => Type::Fn(FnType {
+                generics,
+                params: params.into_iter().map(|ty| self.normalize_ty(ty)).collect(),
+                ret: self.normalize_ty(*ret).into(),
+            }),
             Type::List(ty) => Type::List(self.normalize_ty(*ty).into()),
             Type::Tuple(elements) => Type::Tuple(
                 elements
@@ -227,6 +241,36 @@ impl TypeCheckerCtx {
                 Some(ty) => self.normalize_ty(ty),
                 None => Type::TypeVar(self.unification_table.find(var)),
             },
+        }
+    }
+
+    fn convert_hint_to_type(&mut self, ty: &ast::TypeHint) -> Type {
+        match ty {
+            ast::TypeHint::Bool(_) => Type::Bool,
+            ast::TypeHint::Int(_) => Type::Int,
+            ast::TypeHint::Float(_) => Type::Float,
+            ast::TypeHint::Regex(_) => Type::Regex,
+            ast::TypeHint::Str(_) => Type::Str,
+            ast::TypeHint::Nil(_) => Type::Nil,
+            // ast::TypeHint::SomeFn(_) => Type::Nil,
+            ast::TypeHint::Fn(ast::FnTypeHint {
+                id,
+                generics,
+                params,
+                ret,
+            }) => Type::Fn(FnType {
+                generics: generics
+                    .into_iter()
+                    // TODO somehow manage these
+                    .map(|var_hint| self.fresh_ty_var())
+                    .collect(),
+                params: params
+                    .into_iter()
+                    .map(|hint| self.convert_hint_to_type(hint))
+                    .collect(),
+                ret: self.convert_hint_to_type(&ret).into(),
+            }),
+            ty => todo!("can't convert typehint to type: {:?}", ty),
         }
     }
 
@@ -512,7 +556,7 @@ impl TypeCheckerCtx {
                 }
 
                 let ty = ty
-                    .map(|ty| Type::from(&ty))
+                    .map(|ty| self.convert_hint_to_type(&ty))
                     .unwrap_or_else(|| Type::TypeVar(self.fresh_ty_var()));
 
                 env.locals.insert(var.as_str().to_string(), ty.clone());
@@ -547,7 +591,7 @@ impl TypeCheckerCtx {
 
                 let rest = rest.map(|ast::DeclareRest { id, var, ty }| {
                     let ty = ty
-                        .map(|ty| Type::from(&ty))
+                        .map(|ty| self.convert_hint_to_type(&ty))
                         .unwrap_or_else(|| Type::TypeVar(self.fresh_ty_var()));
 
                     hir::DeclareRest {
@@ -797,8 +841,29 @@ impl TypeCheckerCtx {
             ast::Expr::Call(_) => {
                 todo!()
             }
-            ast::Expr::AnonymousFn(_) => {
-                todo!()
+            ast::Expr::AnonymousFn(ast::AnonymousFnExpr { id, params, body }) => {
+                let params = params
+                    .into_iter()
+                    .map(|decl| self.infer_declarable(env, decl, constraints))
+                    .collect::<Vec<_>>();
+
+                let mut child_env = env.clone();
+                child_env.curr_loop = None;
+                child_env.loops = FxHashMap::default();
+                let body = self.infer_block(env, body, constraints, true);
+
+                let ty = Type::Fn(FnType {
+                    generics: vec![],
+                    params: params.iter().map(|param| param.ty()).collect(),
+                    ret: body.ty().into(),
+                });
+
+                hir::Expr::AnonymousFn(hir::AnonymousFnExpr {
+                    id,
+                    params,
+                    body,
+                    ty,
+                })
             }
             ast::Expr::IfLet(ast::IfLetExpr {
                 id,
@@ -979,8 +1044,8 @@ mod test {
                     TypeErrorKind::NotEqual(le, ri) => {
                         if let Some(diff) = diff {
                             let (a, b) = diff.split_once(" != ").unwrap();
-                            let a = Type::from(&parse_type(a));
-                            let b = Type::from(&parse_type(b));
+                            let a = ctx.convert_hint_to_type(&parse_type(a));
+                            let b = ctx.convert_hint_to_type(&parse_type(b));
                             if a == le && b == ri || a == ri && b == le {
                                 // all good
                             } else {
@@ -1049,7 +1114,7 @@ mod test {
     }
 
     #[test]
-    fn test() {
+    fn declarations_and_assignments() {
         should_typecheck("let h = 5");
 
         should_typecheck("let [c] = [4]; c = 3");
@@ -1081,6 +1146,12 @@ mod test {
             Some("int != bool"),
         );
 
+        // a hack to check the type of the fn
+        should_not_typecheck("let h = || { 3 }; h = 6", Some("int != fn() -> int"));
+    }
+
+    #[test]
+    fn if_branches() {
         should_typecheck(
             "
                 // result isn't used, so branches are allowed to diverge in type
@@ -1103,7 +1174,10 @@ mod test {
             ",
             Some("int != bool"),
         );
+    }
 
+    #[test]
+    fn looping_and_breaking() {
         should_not_typecheck(
             "
                 let r = 4

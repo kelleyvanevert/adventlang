@@ -10,30 +10,43 @@ pub trait HirNode {
 pub trait CanSubstitute {
     fn substitute(
         &mut self,
+        bound: &mut Vec<TypeVar>,
         /* unbound, */
         unification_table: &mut InPlaceUnificationTable<TypeVar>,
     );
 }
 
 impl<T: CanSubstitute> CanSubstitute for Option<T> {
-    fn substitute(&mut self, unification_table: &mut InPlaceUnificationTable<TypeVar>) {
+    fn substitute(
+        &mut self,
+        bound: &mut Vec<TypeVar>,
+        unification_table: &mut InPlaceUnificationTable<TypeVar>,
+    ) {
         if let Some(inner) = self {
-            inner.substitute(unification_table);
+            inner.substitute(bound, unification_table);
         }
     }
 }
 
 impl<T: CanSubstitute> CanSubstitute for Vec<T> {
-    fn substitute(&mut self, unification_table: &mut InPlaceUnificationTable<TypeVar>) {
+    fn substitute(
+        &mut self,
+        bound: &mut Vec<TypeVar>,
+        unification_table: &mut InPlaceUnificationTable<TypeVar>,
+    ) {
         for item in self {
-            item.substitute(unification_table);
+            item.substitute(bound, unification_table);
         }
     }
 }
 
 impl<T: CanSubstitute> CanSubstitute for Box<T> {
-    fn substitute(&mut self, unification_table: &mut InPlaceUnificationTable<TypeVar>) {
-        self.as_mut().substitute(unification_table);
+    fn substitute(
+        &mut self,
+        bound: &mut Vec<TypeVar>,
+        unification_table: &mut InPlaceUnificationTable<TypeVar>,
+    ) {
+        self.as_mut().substitute(bound, unification_table);
     }
 }
 
@@ -71,9 +84,9 @@ macro_rules! strip_ids_of_fields {
 }
 
 macro_rules! substitute_for_fields {
-    ($self:ident, $field:ident, $arg:expr, $skip_strip_id:lifetime,) => {};
-    ($self:ident, $field:ident, $arg:expr,) => {
-        $self.$field.substitute($arg);
+    ($self:ident, $field:ident, $arg1:expr, $arg2:expr, $skip_strip_id:lifetime,) => {};
+    ($self:ident, $field:ident, $arg1:expr, $arg2:expr,) => {
+        $self.$field.substitute($arg1, $arg2);
     };
 }
 
@@ -109,12 +122,13 @@ macro_rules! hir_nodes {
         impl CanSubstitute for $name {
             fn substitute(
                 &mut self,
+                bound: &mut Vec<TypeVar>,
                 /* unbound, */
                 unification_table: &mut InPlaceUnificationTable<TypeVar>,
             ) {
-                self.ty.substitute(unification_table);
+                self.ty.substitute(bound, unification_table);
                 $(
-                    substitute_for_fields!(self, $field, unification_table, $($skip_strip_id,)?);
+                    substitute_for_fields!(self, $field, bound, unification_table, $($skip_strip_id,)?);
                 )*
             }
         }
@@ -165,12 +179,13 @@ macro_rules! hir_nodes {
         impl CanSubstitute for $name {
             fn substitute(
                 &mut self,
+                bound: &mut Vec<TypeVar>,
                 /* unbound, */
                 unification_table: &mut InPlaceUnificationTable<TypeVar>,
             ) {
                 match self {
                     $(
-                        $name::$variant(inner) => inner.substitute(unification_table),
+                        $name::$variant(inner) => inner.substitute(bound, unification_table),
                     )*
                 }
             }

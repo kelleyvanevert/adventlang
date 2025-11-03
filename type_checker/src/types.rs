@@ -29,20 +29,6 @@ pub struct FnType {
     pub ret: Box<Type>,
 }
 
-impl From<&ast::TypeHint> for Type {
-    fn from(ty: &ast::TypeHint) -> Self {
-        match ty {
-            ast::TypeHint::Bool(_) => Type::Bool,
-            ast::TypeHint::Int(_) => Type::Int,
-            ast::TypeHint::Float(_) => Type::Float,
-            ast::TypeHint::Regex(_) => Type::Regex,
-            ast::TypeHint::Str(_) => Type::Str,
-            ast::TypeHint::Nil(_) => Type::Nil,
-            ty => todo!("can convert typehint to type: {:?}", ty),
-        }
-    }
-}
-
 impl Type {
     pub fn apply_unary_op(&self, op: &str) -> Type {
         match (self, op) {
@@ -76,7 +62,16 @@ impl Type {
                 params,
                 ret,
             }) => {
-                todo!()
+                if generics.contains(&var) {
+                    // the variable is shadowed
+                    return Ok(());
+                }
+
+                for p in params {
+                    p.occurs_check(var).map_err(|_| self.clone());
+                }
+                (*ret).occurs_check(var).map_err(|_| self.clone());
+                Ok(())
             }
             Type::List(element_ty) => {
                 (*element_ty).occurs_check(var).map_err(|_| self.clone());
@@ -102,6 +97,7 @@ impl Type {
 
     pub fn substitute(
         &mut self,
+        bound: &mut Vec<TypeVar>,
         /* unbound, */
         unification_table: &mut InPlaceUnificationTable<TypeVar>,
     ) {
@@ -111,12 +107,16 @@ impl Type {
         match self {
             Type::Bool | Type::Int | Type::Float | Type::Regex | Type::Str | Type::Nil => {}
             Type::TypeVar(v) => {
+                if bound.contains(v) {
+                    return;
+                }
+
                 let root = unification_table.find(*v);
                 match unification_table.probe_value(root) {
                     Some(mut ty) => {
                         //
                         println!("  probed to be {:?}", ty);
-                        ty.substitute(unification_table);
+                        ty.substitute(bound, unification_table);
 
                         *self = ty; // (!)
                     }
@@ -132,26 +132,31 @@ impl Type {
                 }
             }
             Type::List(element) => {
-                element.substitute(unification_table);
+                element.substitute(bound, unification_table);
             }
             Type::Tuple(elements) => {
                 for el in elements {
-                    el.substitute(unification_table);
+                    el.substitute(bound, unification_table);
                 }
             }
             Type::Dict { key, val } => {
-                key.substitute(unification_table);
-                val.substitute(unification_table);
+                key.substitute(bound, unification_table);
+                val.substitute(bound, unification_table);
             }
             Type::Nullable { child } => {
-                child.substitute(unification_table);
+                child.substitute(bound, unification_table);
             }
             Type::Fn(FnType {
                 generics,
                 params,
                 ret,
             }) => {
-                todo!()
+                bound.extend_from_slice(generics);
+
+                for p in params {
+                    p.substitute(bound, unification_table);
+                }
+                ret.substitute(bound, unification_table);
             }
         }
     }
