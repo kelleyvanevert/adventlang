@@ -17,6 +17,15 @@ use crate::{
 pub mod hir;
 pub mod types;
 
+// TODO:
+// - [ ] generics
+// - [ ] named and optional params/args
+// - [ ] unary/binary operators ("can't apply op + on typevar")
+// - [ ] underspecified types ("fn", "dict")
+// - [ ] dicts + members
+// - [ ] coalescing + nullability
+// - [ ] if-let, while, while-let, do, do-while, for
+
 #[derive(Debug, Clone)]
 struct Env {
     locals: FxHashMap<String, Type>,
@@ -77,6 +86,8 @@ pub enum TypeErrorKind {
     NotCallable(Type),
     #[error("arguments don't match up with callee")]
     ArgsMismatch,
+    #[error("local not defined: {0}")]
+    MissingLocal(String),
 }
 
 impl CanSubstitute for TypeErrorKind {
@@ -97,6 +108,7 @@ impl CanSubstitute for TypeErrorKind {
                 t.substitute(bound, unification_table);
             }
             Self::ArgsMismatch => {}
+            Self::MissingLocal(_) => {}
         }
     }
 }
@@ -338,8 +350,14 @@ impl TypeCheckerCtx {
             ty: Type::Nil,
         };
 
-        for item in block.items {
-            let typed_item = self.infer_item(env, item, constraints);
+        let mut item_placeholder_types = vec![];
+        for item in &block.items {
+            item_placeholder_types.push(self.prepare_item(env, item.clone(), constraints));
+        }
+
+        for (i, item) in block.items.into_iter().enumerate() {
+            let typed_item =
+                self.infer_item(env, item, item_placeholder_types[i].clone(), constraints)?;
             typed_block.items.push(typed_item);
         }
 
@@ -356,15 +374,81 @@ impl TypeCheckerCtx {
         Ok(typed_block)
     }
 
-    fn infer_item(
+    fn prepare_item(
         &mut self,
         env: &mut Env,
         item: ast::Item,
         constraints: &mut Vec<Constraint>,
-    ) -> hir::Item {
+    ) -> Type {
         match item {
-            ast::Item::NamedFn(named_fn) => {
-                todo!("infer named fn")
+            ast::Item::NamedFn(ast::NamedFnItem {
+                id,
+                name,
+                generics,
+                params,
+                ret,
+                body,
+            }) => {
+                let placeholder_ty = Type::TypeVar(self.fresh_ty_var());
+                env.locals.insert(name.str.clone(), placeholder_ty.clone());
+                placeholder_ty
+            }
+        }
+    }
+
+    fn infer_item(
+        &mut self,
+        env: &mut Env,
+        item: ast::Item,
+        placeholder_ty: Type,
+        constraints: &mut Vec<Constraint>,
+    ) -> Result<hir::Item, TypeError> {
+        match item {
+            ast::Item::NamedFn(ast::NamedFnItem {
+                id,
+                name,
+                generics,
+                params,
+                ret,
+                body,
+            }) => {
+                let params = params
+                    .into_iter()
+                    .map(|decl| self.infer_declarable(env, decl, constraints))
+                    .try_collect::<Vec<_>>()?;
+
+                let mut child_env = env.clone();
+                child_env.curr_loop = None;
+                child_env.loops = FxHashMap::default();
+                let body = self.infer_block(env, body, constraints, true)?;
+
+                let generics = generics
+                    .into_iter()
+                    .map(|var_hint| {
+                        todo!("manage generics in scope");
+                        self.fresh_ty_var()
+                    })
+                    .collect::<Vec<_>>();
+
+                let ty = Type::Fn(FnType {
+                    generics: generics.clone(),
+                    params: params.iter().map(|param| param.ty()).collect(),
+                    ret: body.ty().into(),
+                });
+
+                constraints.push(Constraint::TypeEqual(id, ty.clone(), placeholder_ty));
+
+                Ok(hir::Item::NamedFn(hir::NamedFnItem {
+                    id,
+                    name: hir::Identifier {
+                        id: name.id,
+                        str: name.str,
+                        ty: ty.clone(),
+                    },
+                    params,
+                    body,
+                    ty: Type::Nil,
+                }))
             }
         }
     }
@@ -787,7 +871,12 @@ impl TypeCheckerCtx {
                 }));
             }
             ast::Expr::Var(ast::VarExpr { id, var }) => {
-                let ty = env.locals[var.as_str()].clone();
+                let Some(ty) = env.locals.get(var.as_str()).cloned() else {
+                    return Err(TypeError {
+                        node_id: id,
+                        kind: TypeErrorKind::MissingLocal(var.name.clone()),
+                    });
+                };
 
                 return Ok(hir::Expr::Var(hir::VarExpr {
                     id,
@@ -1178,6 +1267,7 @@ mod test {
                     }
                     ("ArgsMismatch", TypeErrorKind::ArgsMismatch) => {}
                     ("NotCallable", TypeErrorKind::NotCallable(_)) => {}
+                    ("MissingLocal", TypeErrorKind::MissingLocal(_)) => {}
                     (diff, TypeErrorKind::NotEqual(le, ri)) if diff.contains(" != ") => {
                         let (a, b) = diff.split_once(" != ").unwrap();
                         let a = ctx.convert_hint_to_type(&parse_type(a));
@@ -1422,10 +1512,36 @@ mod test {
 
         should_typecheck(
             "
-                let f = |a, b| { a }
-                f(5, 3)
-                f(5, f(5, f(5, 3)))
+                let f1 = |a, b| { a }
+                fn f2(a, b) { a }
+
+                f2(5, f1(5, f2(5, 3)))
             ",
+        );
+
+        should_not_typecheck(
+            "
+                fn a() { b(5) }
+                fn b() { a() }
+            ",
+            "",
+        );
+
+        should_typecheck(
+            "
+                fn a(x: bool) { c() }
+                fn b(n: int) { a(true) }
+                fn c() { b(5) }
+            ",
+        );
+
+        should_not_typecheck(
+            "
+                let a = |x: bool| { c() }
+                let b = |n: int| { a(true) }
+                let c = || { b(5) }
+            ",
+            "MissingLocal",
         );
     }
 }
