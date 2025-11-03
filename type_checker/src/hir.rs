@@ -192,6 +192,11 @@ macro_rules! hir_nodes {
 
 hir_nodes! {
     "{str}";
+    struct Label {
+        '_ str: String,
+    }
+
+    "{str}";
     struct Identifier {
         '_ str: String,
     }
@@ -408,33 +413,50 @@ hir_nodes! {
     }
 
     struct IfExpr {
-        pattern: Option<DeclarePattern>,
         cond: Box<Expr>,
         then: Block,
         els: Option<Block>,
     }
 
-    "{some label}{label}: {/some}while {body}";
+    struct IfLetExpr {
+        pattern: DeclarePattern,
+        cond: Box<Expr>,
+        then: Block,
+        els: Option<Block>,
+    }
+
     struct WhileExpr {
-        label: Option<Identifier>,
-        pattern: Option<DeclarePattern>,
+        label: Option<Label>,
         cond: Box<Expr>,
         body: Block,
     }
 
-    struct DoWhileExpr {
-        label: Option<Identifier>,
+    struct WhileLetExpr {
+        label: Option<Label>,
+        pattern: DeclarePattern,
+        cond: Box<Expr>,
         body: Block,
-        cond: Option<Box<Expr>>,
+    }
+
+    struct DoExpr {
+        label: Option<Label>,
+        body: Block,
+    }
+
+    struct DoWhileExpr {
+        label: Option<Label>,
+        body: Block,
+        cond: Box<Expr>,
     }
 
     struct LoopExpr {
-        label: Option<Identifier>,
+        // label: Option<Label>,
+        '_ label: String,
         body: Block,
     }
 
     struct ForExpr {
-        label: Option<Identifier>,
+        label: Option<Label>,
         pattern: DeclarePattern,
         range: Box<Expr>,
         body: Block,
@@ -458,7 +480,10 @@ hir_nodes! {
         Call(CallExpr),
         AnonymousFn(AnonymousFnExpr),
         If(IfExpr),
+        IfLet(IfLetExpr),
         While(WhileExpr),
+        WhileLet(WhileLetExpr),
+        Do(DoExpr),
         DoWhile(DoWhileExpr),
         Loop(LoopExpr),
         For(ForExpr),
@@ -477,12 +502,12 @@ hir_nodes! {
     }
 
     struct BreakStmt {
-        '_ label: Option<String>,
+        '_ label: String,
         expr: Option<Expr>,
     }
 
     struct ContinueStmt {
-        '_ label: Option<String>,
+        label: Option<Label>,
     }
 
     struct ReturnStmt {

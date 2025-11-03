@@ -113,6 +113,10 @@ macro_rules! ast_nodes {
 }
 
 ast_nodes! {
+    struct Label {
+        '_ str: String,
+    }
+
     struct Identifier {
         '_ str: String,
     }
@@ -297,33 +301,50 @@ ast_nodes! {
         body: Block,
     }
 
-    struct IfExpr {
-        pattern: Option<DeclarePattern>,
+    struct IfLetExpr {
+        pattern: DeclarePattern,
         cond: Box<Expr>,
         then: Block,
         els: Option<Block>,
     }
 
-    struct WhileExpr {
-        label: Option<Identifier>,
-        pattern: Option<DeclarePattern>,
+    struct IfExpr {
+        cond: Box<Expr>,
+        then: Block,
+        els: Option<Block>,
+    }
+
+    struct WhileLetExpr {
+        label: Option<Label>,
+        pattern: DeclarePattern,
         cond: Box<Expr>,
         body: Block,
     }
 
-    struct DoWhileExpr {
-        label: Option<Identifier>,
+    struct WhileExpr {
+        label: Option<Label>,
+        cond: Box<Expr>,
         body: Block,
-        cond: Option<Box<Expr>>,
+    }
+
+    struct DoExpr {
+        label: Option<Label>,
+        body: Block,
+    }
+
+    struct DoWhileExpr {
+        label: Option<Label>,
+        body: Block,
+        cond: Box<Expr>,
     }
 
     struct LoopExpr {
-        label: Option<Identifier>,
+        label: Option<Label>,
         body: Block,
     }
 
     struct ForExpr {
-        label: Option<Identifier>,
+        label: Option<Label>,
         pattern: DeclarePattern,
         range: Box<Expr>,
         body: Block,
@@ -347,7 +368,10 @@ ast_nodes! {
         Call(CallExpr),
         AnonymousFn(AnonymousFnExpr),
         If(IfExpr),
+        IfLet(IfLetExpr),
         While(WhileExpr),
+        WhileLet(WhileLetExpr),
+        Do(DoExpr),
         DoWhile(DoWhileExpr),
         Loop(LoopExpr),
         For(ForExpr),
@@ -366,12 +390,12 @@ ast_nodes! {
     }
 
     struct BreakStmt {
-        label: Option<Identifier>,
+        label: Option<Label>,
         expr: Option<Expr>,
     }
 
     struct ContinueStmt {
-        label: Option<Identifier>,
+        label: Option<Label>,
     }
 
     struct ReturnStmt {
@@ -477,6 +501,12 @@ ast_nodes! {
     }
 }
 
+impl Into<Label> for String {
+    fn into(self) -> Label {
+        Label { id: 0, str: self }
+    }
+}
+
 impl Into<Identifier> for String {
     fn into(self) -> Identifier {
         Identifier { id: 0, str: self }
@@ -488,6 +518,15 @@ impl Into<Var> for String {
         Var {
             id: 0,
             name: self.into(),
+        }
+    }
+}
+
+impl Into<Label> for &str {
+    fn into(self) -> Label {
+        Label {
+            id: 0,
+            str: self.to_string(),
         }
     }
 }
@@ -519,6 +558,12 @@ impl Identifier {
 impl Var {
     pub fn as_str(&self) -> &str {
         &self.name
+    }
+}
+
+impl Label {
+    pub fn as_str(&self) -> &str {
+        &self.str
     }
 }
 

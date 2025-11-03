@@ -335,11 +335,11 @@ impl<'a> Converter<'a> {
                     pieces
                 },
             }),
-            "block_expr" => Expr::DoWhile(DoWhileExpr {
+            // TODO: `{}` instead of `do {}` ??
+            "block_expr" => Expr::Do(DoExpr {
                 id: node.id(),
                 label: None,
                 body: self.as_block(node),
-                cond: None,
             }),
             "regular_call_expr" => Expr::Call(CallExpr {
                 id: node.id(),
@@ -406,15 +406,29 @@ impl<'a> Converter<'a> {
                 id: node.id(),
                 label: node.map_opt_child("label", |node| self.as_label(node)),
                 body: node.map_child("body", |node| self.as_block(node)),
-                cond: node.map_opt_child("cond", |node| self.as_expr(node).into()),
-            }),
-            "while_expr" => Expr::While(WhileExpr {
-                id: node.id(),
-                label: node.map_opt_child("label", |node| self.as_label(node)),
-                pattern: node.map_opt_child("pattern", |node| self.as_declare_pattern(node).into()),
                 cond: node.map_child("cond", |node| self.as_expr(node).into()),
-                body: node.map_child("body", |node| self.as_block(node)),
             }),
+            "while_expr" => {
+                let label = node.map_opt_child("label", |node| self.as_label(node));
+                let cond = node.map_child("cond", |node| self.as_expr(node).into());
+                let body = node.map_child("body", |node| self.as_block(node));
+
+                match node.map_opt_child("pattern", |node| self.as_declare_pattern(node).into()) {
+                    None => Expr::While(WhileExpr {
+                        id: node.id(),
+                        label,
+                        cond,
+                        body,
+                    }),
+                    Some(pattern) => Expr::WhileLet(WhileLetExpr {
+                        id: node.id(),
+                        label,
+                        pattern,
+                        cond,
+                        body,
+                    }),
+                }
+            }
             "loop_expr" => Expr::Loop(LoopExpr {
                 id: node.id(),
                 label: node.map_opt_child("label", |node| self.as_label(node)),
@@ -427,12 +441,10 @@ impl<'a> Converter<'a> {
                 range: node.map_child("range", |node| self.as_expr(node).into()),
                 body: node.map_child("body", |node| self.as_block(node)),
             }),
-            "if_expr" => Expr::If(IfExpr {
-                id: node.id(),
-                pattern: node.map_opt_child("pattern", |node| self.as_declare_pattern(node)),
-                cond: node.map_child("cond", |node| self.as_expr(node).into()),
-                then: node.map_child("body", |node| self.as_block(node)),
-                els: {
+            "if_expr" => {
+                let cond = node.map_child("cond", |node| self.as_expr(node).into());
+                let then = node.map_child("body", |node| self.as_block(node));
+                let els = {
                     if let Some(else_if) = node.map_opt_child("else_if", |node| self.as_expr(node))
                     {
                         Some(Block {
@@ -449,8 +461,24 @@ impl<'a> Converter<'a> {
                     } else {
                         None
                     }
-                },
-            }),
+                };
+
+                match node.map_opt_child("pattern", |node| self.as_declare_pattern(node)) {
+                    None => Expr::If(IfExpr {
+                        id: node.id(),
+                        cond,
+                        then,
+                        els,
+                    }),
+                    Some(pattern) => Expr::IfLet(IfLetExpr {
+                        id: node.id(),
+                        pattern,
+                        cond,
+                        then,
+                        els,
+                    }),
+                }
+            }
             _ => panic!("can't interpret as expr: {:?}", node),
         }
     }
@@ -645,8 +673,8 @@ impl<'a> Converter<'a> {
         }
     }
 
-    fn as_label(&self, node: Node) -> Identifier {
-        self.as_identifier(node.child(1).unwrap())
+    fn as_label(&self, node: Node) -> Label {
+        self.as_str(node).trim().into()
     }
 
     fn as_typevar(&self, node: Node) -> VarTypeHint {

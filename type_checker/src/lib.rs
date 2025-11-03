@@ -16,7 +16,22 @@ use crate::{
 pub mod hir;
 pub mod types;
 
-type Env = FxHashMap<String, Type>;
+#[derive(Debug, Clone)]
+struct Env {
+    locals: FxHashMap<String, Type>,
+    loops: FxHashMap<String, Type>,
+    curr_loop: Option<String>,
+}
+
+impl Env {
+    fn new() -> Self {
+        Self {
+            locals: FxHashMap::default(),
+            loops: FxHashMap::default(),
+            curr_loop: None,
+        }
+    }
+}
 
 impl UnifyKey for TypeVar {
     type Value = Option<Type>;
@@ -72,6 +87,7 @@ impl CanSubstitute for TypeErrorKind {
 #[derive(Debug)]
 struct TypeCheckerCtx {
     unification_table: InPlaceUnificationTable<TypeVar>,
+    next_loop_id: usize,
 }
 
 #[derive(Debug)]
@@ -83,7 +99,14 @@ impl TypeCheckerCtx {
     pub fn new() -> Self {
         Self {
             unification_table: InPlaceUnificationTable::new(),
+            next_loop_id: 0,
         }
+    }
+
+    fn fresh_loop_label(&mut self) -> String {
+        let id = format!("'{}", self.next_loop_id);
+        self.next_loop_id += 1;
+        id
     }
 
     fn fresh_ty_var(&mut self) -> TypeVar {
@@ -91,7 +114,7 @@ impl TypeCheckerCtx {
     }
 
     pub fn typecheck(&mut self, doc: ast::Document) -> Result<hir::Document, TypeError> {
-        let mut env = FxHashMap::default();
+        let mut env = Env::new();
         let mut constraints = vec![];
         let mut typed_doc = self.infer_doc(&mut env, doc, &mut constraints);
 
@@ -215,7 +238,7 @@ impl TypeCheckerCtx {
     ) -> hir::Document {
         hir::Document {
             id: doc.id,
-            body: self.infer_block(env, doc.body, constraints),
+            body: self.infer_block(env, doc.body, constraints, false),
             ty: Type::Nil,
         }
     }
@@ -225,6 +248,7 @@ impl TypeCheckerCtx {
         env: &mut Env,
         block: ast::Block,
         constraints: &mut Vec<Constraint>,
+        use_result: bool,
     ) -> hir::Block {
         let mut typed_block = hir::Block {
             id: block.id(),
@@ -238,9 +262,13 @@ impl TypeCheckerCtx {
             typed_block.items.push(typed_item);
         }
 
-        for stmt in block.stmts {
-            let typed_stmt = self.infer_stmt(env, stmt, constraints);
-            typed_block.ty = typed_stmt.ty();
+        let num_stmts = block.stmts.len();
+        for (i, stmt) in block.stmts.into_iter().enumerate() {
+            let is_last = i + 1 == num_stmts;
+            let typed_stmt = self.infer_stmt(env, stmt, constraints, use_result && is_last);
+            if is_last && use_result {
+                typed_block.ty = typed_stmt.ty();
+            }
             typed_block.stmts.push(typed_stmt);
         }
 
@@ -265,27 +293,47 @@ impl TypeCheckerCtx {
         env: &mut Env,
         stmt: ast::Stmt,
         constraints: &mut Vec<Constraint>,
+        use_result: bool,
     ) -> hir::Stmt {
         match stmt {
             ast::Stmt::Break(ast::BreakStmt { id, label, expr }) => {
+                let expr = expr.map(|expr| self.infer_expr(env, expr, constraints, true));
+
+                let label = label.map(|ast::Label { id, str }| str).unwrap_or_else(|| {
+                    env.curr_loop
+                        .clone()
+                        .expect("break can only be used inside a loop")
+                });
+
+                // Enforce the surrounding loop (or the ancestor with the given label) to have the given type
+                let expr_ty = expr.as_ref().map(|e| e.ty()).unwrap_or(Type::Nil);
+                if let Some(prev_loop_type) = env.loops.insert(label.clone(), expr_ty.clone()) {
+                    // If that loop already has been typed, add a type constraint
+                    constraints.push(Constraint::TypeEqual(id, prev_loop_type, expr_ty));
+                }
+
                 return hir::Stmt::Break(hir::BreakStmt {
                     id,
-                    label: label.map(|id| id.str),
-                    expr: expr.map(|expr| self.infer_expr(env, expr, constraints)),
+                    label,
+                    expr,
                     ty: Type::Nil,
                 });
             }
             ast::Stmt::Continue(ast::ContinueStmt { id, label }) => {
                 return hir::Stmt::Continue(hir::ContinueStmt {
                     id,
-                    label: label.map(|id| id.str),
+                    label: label.map(|ast::Label { id, str }| hir::Label {
+                        id,
+                        str,
+                        ty: Type::Nil,
+                    }),
                     ty: Type::Nil,
                 });
             }
             ast::Stmt::Return(ast::ReturnStmt { id, expr }) => {
                 return hir::Stmt::Return(hir::ReturnStmt {
                     id,
-                    expr: expr.map(|expr| self.infer_expr(env, expr, constraints)),
+                    expr: expr.map(|expr| self.infer_expr(env, expr, constraints, true)),
                     ty: Type::Nil,
                 });
             }
@@ -312,7 +360,7 @@ impl TypeCheckerCtx {
                 })
             }
             ast::Stmt::Expr(ast::ExprStmt { id, expr }) => {
-                let expr = self.infer_expr(env, expr, constraints);
+                let expr = self.infer_expr(env, expr, constraints, use_result);
 
                 return hir::Stmt::Expr(hir::ExprStmt {
                     id,
@@ -410,7 +458,7 @@ impl TypeCheckerCtx {
     ) -> hir::AssignLoc {
         match loc {
             ast::AssignLoc::Var(ast::AssignLocVar { id, var }) => {
-                let ty = env[var.as_str()].clone();
+                let ty = env.locals[var.as_str()].clone();
 
                 return hir::AssignLoc::Var(hir::AssignLocVar {
                     id,
@@ -467,7 +515,7 @@ impl TypeCheckerCtx {
                     .map(|ty| Type::from(&ty))
                     .unwrap_or_else(|| Type::TypeVar(self.fresh_ty_var()));
 
-                env.insert(var.as_str().to_string(), ty.clone());
+                env.locals.insert(var.as_str().to_string(), ty.clone());
 
                 hir::DeclarePattern::Single(hir::DeclareSingle {
                     id,
@@ -576,6 +624,7 @@ impl TypeCheckerCtx {
         env: &mut Env,
         expr: ast::Expr,
         constraints: &mut Vec<Constraint>,
+        use_result: bool,
     ) -> hir::Expr {
         match expr {
             ast::Expr::Str(ast::StrExpr { id, pieces }) => {
@@ -598,7 +647,7 @@ impl TypeCheckerCtx {
                             }) => hir::StrPiece::Interpolation(hir::StrPieceInterpolation {
                                 id,
                                 ty: Type::Str,
-                                expr: self.infer_expr(env, expr, constraints),
+                                expr: self.infer_expr(env, expr, constraints, true),
                             }),
                         })
                         .collect(),
@@ -640,7 +689,7 @@ impl TypeCheckerCtx {
                 });
             }
             ast::Expr::Var(ast::VarExpr { id, var }) => {
-                let ty = env[var.as_str()].clone();
+                let ty = env.locals[var.as_str()].clone();
 
                 return hir::Expr::Var(hir::VarExpr {
                     id,
@@ -653,7 +702,7 @@ impl TypeCheckerCtx {
                 });
             }
             ast::Expr::Unary(ast::UnaryExpr { id, op, expr }) => {
-                let expr = self.infer_expr(env, *expr, constraints);
+                let expr = self.infer_expr(env, *expr, constraints, true);
 
                 return hir::Expr::Unary(hir::UnaryExpr {
                     id,
@@ -668,8 +717,8 @@ impl TypeCheckerCtx {
                 op,
                 right,
             }) => {
-                let left = self.infer_expr(env, *left, constraints);
-                let right = self.infer_expr(env, *right, constraints);
+                let left = self.infer_expr(env, *left, constraints, true);
+                let right = self.infer_expr(env, *right, constraints, true);
 
                 return hir::Expr::Binary(hir::BinaryExpr {
                     id,
@@ -707,7 +756,7 @@ impl TypeCheckerCtx {
             ast::Expr::Tuple(ast::TupleExpr { id, elements }) => {
                 let elements = elements
                     .into_iter()
-                    .map(|expr| self.infer_expr(env, expr, constraints))
+                    .map(|expr| self.infer_expr(env, expr, constraints, true))
                     .collect::<Vec<_>>();
 
                 let ty = Type::Tuple(elements.iter().map(|el| el.ty()).collect());
@@ -751,17 +800,104 @@ impl TypeCheckerCtx {
             ast::Expr::AnonymousFn(_) => {
                 todo!()
             }
-            ast::Expr::If(_) => {
+            ast::Expr::IfLet(ast::IfLetExpr {
+                id,
+                pattern,
+                cond,
+                then,
+                els,
+            }) => {
                 todo!()
             }
+            ast::Expr::If(ast::IfExpr {
+                id,
+                cond,
+                then,
+                els,
+            }) => {
+                let cond = self.check_expr(env, *cond, Type::Bool, constraints);
+
+                let mut then_branch_env = env.clone();
+                let then = self.infer_block(&mut then_branch_env, then, constraints, true);
+
+                let mut else_branch_env = env.clone();
+                let els =
+                    els.map(|els| self.infer_block(&mut else_branch_env, els, constraints, true));
+
+                let ty = match (use_result, &els) {
+                    (false, _) => Type::Nil,
+                    (true, None) => Type::Nil,
+                    (true, Some(els)) => {
+                        constraints.push(Constraint::TypeEqual(els.id(), then.ty(), els.ty()));
+                        els.ty()
+                    }
+                };
+
+                hir::Expr::If(hir::IfExpr {
+                    id,
+                    cond: cond.into(),
+                    then,
+                    els,
+                    ty,
+                })
+            }
             ast::Expr::While(_) => {
+                todo!()
+            }
+            ast::Expr::WhileLet(_) => {
+                todo!()
+            }
+            ast::Expr::Do(ast::DoExpr { id, label, body }) => {
                 todo!()
             }
             ast::Expr::DoWhile(_) => {
                 todo!()
             }
-            ast::Expr::Loop(_) => {
-                todo!()
+            ast::Expr::Loop(ast::LoopExpr { id, label, body }) => {
+                let label = label
+                    .map(|l| l.str)
+                    .unwrap_or_else(|| self.fresh_loop_label());
+
+                let mut child_env = env.clone();
+                child_env.curr_loop = Some(label.clone());
+
+                let body = self.infer_block(&mut child_env, body, constraints, false);
+
+                let ty = child_env.loops.get(&label).cloned().unwrap_or(Type::Nil);
+
+                /*
+
+                // 'find :: nil
+                let h = 'find: loop {
+                    ...
+                }
+
+                // 'find :: bool
+                let h = 'find: loop {
+                    break 'find with false
+                }
+
+                // outer 'find :: nil
+                // inner 'find :: bool
+                let h = 'find: loop {
+                    'find: loop {
+                        break 'find with false
+                    }
+                }
+
+                // do-expr :: int
+                let h = do {
+                    4
+                }
+
+                */
+
+                hir::Expr::Loop(hir::LoopExpr {
+                    id,
+                    label,
+                    body,
+                    ty,
+                })
             }
             ast::Expr::For(_) => {
                 todo!()
@@ -777,150 +913,9 @@ impl TypeCheckerCtx {
         constraints: &mut Vec<Constraint>,
     ) -> hir::Expr {
         match (&expr, &ty) {
-            // primitive literals
-            (
-                ast::Expr::Nil(_)
-                | ast::Expr::Str(_)
-                | ast::Expr::Regex(_)
-                | ast::Expr::Bool(_)
-                | ast::Expr::Int(_)
-                | ast::Expr::Float(_),
-                _,
-            ) => {
-                let expr = self.infer_expr(env, expr, constraints);
-                constraints.push(Constraint::TypeEqual(expr.id(), expr.ty(), ty));
-                expr
-            }
-            // ast::Expr::Regex(ast::RegexExpr { id, str }) => {
-            //     return hir::Expr::Regex(hir::RegexExpr {
-            //         id,
-            //         str,
-            //         ty: Type::Regex,
-            //     });
-            // }
-            // ast::Expr::Bool(ast::BoolExpr { id, value }) => {
-            //     return hir::Expr::Bool(hir::BoolExpr {
-            //         id,
-            //         ty: Type::Bool,
-            //         value,
-            //     });
-            // }
-            // ast::Expr::Int(ast::IntExpr { id, value }) => {
-            //     return hir::Expr::Int(hir::IntExpr {
-            //         id,
-            //         ty: Type::Int,
-            //         value,
-            //     });
-            // }
-            // ast::Expr::Float(ast::FloatExpr { id, str }) => {
-            //     return hir::Expr::Float(hir::FloatExpr {
-            //         id,
-            //         ty: Type::Float,
-            //         str,
-            //     });
-            // }
-            // ast::Expr::Var(ast::VarExpr { id, var }) => {
-            //     let ty = env[var.as_str()].clone();
-
-            //     return hir::Expr::Var(hir::VarExpr {
-            //         id,
-            //         ty: ty.clone(),
-            //         var: hir::Var {
-            //             id: var.id,
-            //             ty,
-            //             name: var.name,
-            //         },
-            //     });
-            // }
-            // ast::Expr::Unary(ast::UnaryExpr { id, op, expr }) => {
-            //     let expr = self.infer_expr(env, *expr, constraints);
-
-            //     return hir::Expr::Unary(hir::UnaryExpr {
-            //         id,
-            //         ty: expr.ty().apply_unary_op(&op),
-            //         expr: expr.into(),
-            //         op,
-            //     });
-            // }
-            // ast::Expr::Binary(ast::BinaryExpr {
-            //     id,
-            //     left,
-            //     op,
-            //     right,
-            // }) => {
-            //     let left = self.infer_expr(env, *left, constraints);
-            //     let right = self.infer_expr(env, *right, constraints);
-
-            //     return hir::Expr::Binary(hir::BinaryExpr {
-            //         id,
-            //         ty: left.ty().apply_binary_op(&op, &right.ty()),
-            //         left: left.into(),
-            //         right: right.into(),
-            //         op,
-            //     });
-            // }
-            // ast::Expr::List(ast::ListExpr {
-            //     id,
-            //     elements,
-            //     splat,
-            // }) => {
-            //     let element_ty = Type::TypeVar(self.fresh_ty_var());
-            //     let list_ty = Type::List(element_ty.clone().into());
-
-            //     let elements = elements
-            //         .into_iter()
-            //         .map(|expr| self.check_expr(env, expr, element_ty.clone(), constraints))
-            //         .collect::<Vec<_>>();
-
-            //     let splat = splat.map(|expr| {
-            //         self.check_expr(env, *expr, list_ty.clone(), constraints)
-            //             .into()
-            //     });
-
-            //     return hir::Expr::List(hir::ListExpr {
-            //         id,
-            //         elements,
-            //         splat,
-            //         ty: list_ty,
-            //     });
-            // }
-            // ast::Expr::Tuple(_) => {
-            //     todo!()
-            // }
-            // ast::Expr::Dict(_) => {
-            //     todo!()
-            // }
-            // ast::Expr::Index(_) => {
-            //     todo!()
-            // }
-            // ast::Expr::Member(_) => {
-            //     todo!()
-            // }
-            // ast::Expr::Call(_) => {
-            //     todo!()
-            // }
-            // ast::Expr::AnonymousFn(_) => {
-            //     todo!()
-            // }
-            // ast::Expr::If(_) => {
-            //     todo!()
-            // }
-            // ast::Expr::While(_) => {
-            //     todo!()
-            // }
-            // ast::Expr::DoWhile(_) => {
-            //     todo!()
-            // }
-            // ast::Expr::Loop(_) => {
-            //     todo!()
-            // }
-            // ast::Expr::For(_) => {
-            //     todo!()
-            // }
-
-            // general fallback
+            // just a fallback for now
             (_, _) => {
-                let expr = self.infer_expr(env, expr, constraints);
+                let expr = self.infer_expr(env, expr, constraints, true);
                 constraints.push(Constraint::TypeEqual(expr.id(), expr.ty(), ty));
                 expr
             }
@@ -952,18 +947,31 @@ mod test {
     #[test]
     fn test() {
         let source = "
-// let h: bool = 5
-// let h = 5
-// let c = true
+// let h: bool = 5 // fails
+let h = 5
 
-// let c = true
-// [c] = [4]
+let c = true
+// [c] = [4] // fails
 
 let c = [true]
 let f = [2]
 let (a, [b]) = (3, c)
 b = false
-b = f[0]
+b = c[0] // fails if changed to: f[0]
+
+// fails if it's an assignment, because then the result is used and therefore the branches must be similarly typed
+if true {
+    5
+} else {
+    true
+}
+
+let r = 4
+r = 'a: loop {
+    let h = 7
+    break 'a with 5 // fails if expr omitted
+    // break 'a with true // fails because it's not the same type as the other break
+}
 ";
 
         let ParseResult { tree, document } = parse_document_ts(source).expect("can parse");

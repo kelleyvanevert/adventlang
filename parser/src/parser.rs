@@ -119,8 +119,12 @@ fn type_var(s: State) -> ParseResult<State, VarTypeHint> {
     .parse(s)
 }
 
-fn label(s: State) -> ParseResult<State, Identifier> {
-    preceded(tag("'"), identifier).parse(s)
+fn label(s: State) -> ParseResult<State, Label> {
+    map(preceded(tag("'"), raw_identifier), |mut str| {
+        str.insert(0, '\'');
+        Label { id: 0, str }
+    })
+    .parse(s)
 }
 
 fn slws0(s: State<'_>) -> ParseResult<State<'_>, &str> {
@@ -427,20 +431,22 @@ fn if_expr(s: State) -> ParseResult<State, Expr> {
             )),
         )),
         |(_, _, (pattern, cond), _, then, further)| {
-            Expr::If(IfExpr::new_simple(
-                pattern,
-                cond.into(),
-                then,
-                match further {
-                    Some(Either::Left(if_expr)) => Some(Block {
-                        id: 0,
-                        items: vec![],
-                        stmts: vec![Stmt::Expr(ExprStmt::new_simple(if_expr))],
-                    }),
-                    Some(Either::Right(else_block)) => Some(else_block),
-                    _ => None,
-                },
-            ))
+            let els = match further {
+                Some(Either::Left(if_expr)) => Some(Block {
+                    id: 0,
+                    items: vec![],
+                    stmts: vec![Stmt::Expr(ExprStmt::new_simple(if_expr))],
+                }),
+                Some(Either::Right(else_block)) => Some(else_block),
+                _ => None,
+            };
+
+            match pattern {
+                None => Expr::If(IfExpr::new_simple(cond.into(), then, els)),
+                Some(pattern) => {
+                    Expr::IfLet(IfLetExpr::new_simple(pattern, cond.into(), then, els))
+                }
+            }
         },
     )
     .parse(s)
@@ -458,8 +464,9 @@ fn do_while_expr(s: State) -> ParseResult<State, Expr> {
                 maybe_parenthesized(constrained(true, expr)),
             )),
         )),
-        |(label, _, _, body, cond)| {
-            Expr::DoWhile(DoWhileExpr::new_simple(label, body, cond.map(Box::new)))
+        |(label, _, _, body, cond)| match cond {
+            None => Expr::Do(DoExpr::new_simple(label, body)),
+            Some(cond) => Expr::DoWhile(DoWhileExpr::new_simple(label, body, cond.into())),
         },
     )
     .parse(s)
@@ -495,8 +502,11 @@ fn while_expr(s: State) -> ParseResult<State, Expr> {
             ws0,
             delimited(seq((char('{'), ws0)), block_contents, seq((ws0, char('}')))),
         )),
-        |(label, _, _, (pattern, cond), _, body)| {
-            Expr::While(WhileExpr::new_simple(label, pattern, cond.into(), body))
+        |(label, _, _, (pattern, cond), _, body)| match pattern {
+            None => Expr::While(WhileExpr::new_simple(label, cond.into(), body)),
+            Some(pattern) => {
+                Expr::WhileLet(WhileLetExpr::new_simple(label, pattern, cond.into(), body))
+            }
         },
     )
     .parse(s)
