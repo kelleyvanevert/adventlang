@@ -318,7 +318,7 @@ hir_nodes! {
 
     "{some name}{name} = {/some}{expr}";
     struct Argument {
-        name: Option<Identifier>,
+        '_ name: Option<String>,
         expr: Expr,
     }
 

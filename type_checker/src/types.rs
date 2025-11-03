@@ -42,6 +42,7 @@ impl Type {
     pub fn apply_binary_op(&self, op: &str, right: &Type) -> Type {
         match (self, op, right) {
             (Type::Bool, "||" | "&&", Type::Bool) => Type::Bool,
+            (Type::Int, "+", Type::Int) => Type::Int,
             // etc.
             _ => panic!("Cannot apply binary operator {op} to types {self:?} and {right:?}"),
         }
