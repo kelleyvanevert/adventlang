@@ -29,8 +29,8 @@ pub mod types;
 // DONE:
 // - [x] unification
 // - [x] loops, labels, breaking, typing blocks
-// - [x] typing and calling function
-// - [x] pretty source-pointing error messages
+// - [x] functions
+// - [x] pretty error messages around source code
 // - [x] 80%
 
 #[derive(Debug, Clone)]
