@@ -25,6 +25,13 @@ pub mod types;
 // - [ ] dicts + members
 // - [ ] coalescing + nullability
 // - [ ] if-let, while, while-let, do, do-while, for
+//
+// DONE:
+// - [x] unification
+// - [x] loops, labels, breaking, typing blocks
+// - [x] typing and calling function
+// - [x] pretty source-pointing error messages
+// - [x] 80%
 
 #[derive(Debug, Clone)]
 struct Env {
