@@ -199,7 +199,33 @@ impl TypeCheckerCtx {
                 self.unify_ty_ty(*a_key, *b_key)?;
                 self.unify_ty_ty(*a_val, *b_val)
             }
-            (Type::Fn(_), Type::Fn(_)) => todo!(),
+            (
+                Type::Fn(FnType {
+                    generics: a_generics,
+                    params: a_params,
+                    ret: a_ret,
+                }),
+                Type::Fn(FnType {
+                    generics: b_generics,
+                    params: b_params,
+                    ret: b_ret,
+                }),
+            ) => {
+                if a_generics.len() > 0 || b_generics.len() > 0 {
+                    todo!()
+                }
+
+                if a_params.len() != b_params.len() {
+                    return Err(TypeErrorKind::ArgsMismatch);
+                }
+
+                for (a, b) in a_params.into_iter().zip(b_params) {
+                    self.unify_ty_ty(a, b)?;
+                }
+
+                self.unify_ty_ty(*a_ret, *b_ret)?;
+                Ok(())
+            }
             (Type::Nullable { child: a_child }, Type::Nullable { child: b_child }) => {
                 self.unify_ty_ty(*a_child, *b_child)
             }
@@ -210,6 +236,8 @@ impl TypeCheckerCtx {
             (Type::TypeVar(v), ty) | (ty, Type::TypeVar(v)) => {
                 ty.occurs_check(v)
                     .map_err(|ty| TypeErrorKind::InfiniteType(v, ty))?;
+
+                // println!("unify {v:?} and {ty:?} succeeded");
 
                 self.unification_table
                     .unify_var_value(v, Some(ty))
@@ -878,11 +906,33 @@ impl TypeCheckerCtx {
                 let f = self.infer_expr(env, *f, constraints, true)?;
 
                 let f_ty = f.ty();
-                let Type::Fn(f_ty) = f.ty() else {
-                    return Err(TypeError {
-                        node_id: id,
-                        kind: TypeErrorKind::NotCallable(f_ty),
-                    });
+
+                let f_ty = match f_ty {
+                    Type::Fn(f_ty) => f_ty,
+                    Type::TypeVar(v) => {
+                        let f_ty = FnType {
+                            generics: vec![], // TODO -- how ???
+                            params: args
+                                .iter()
+                                .map(|_| Type::TypeVar(self.fresh_ty_var()))
+                                .collect(),
+                            ret: Type::TypeVar(self.fresh_ty_var()).into(),
+                        };
+
+                        constraints.push(Constraint::TypeEqual(
+                            f.id(),
+                            Type::TypeVar(v),
+                            Type::Fn(f_ty.clone()),
+                        ));
+
+                        f_ty
+                    }
+                    ty => {
+                        return Err(TypeError {
+                            node_id: id,
+                            kind: TypeErrorKind::NotCallable(ty),
+                        });
+                    }
                 };
 
                 if f_ty.params.len() != args.len() {
@@ -1113,21 +1163,22 @@ mod test {
         let mut ctx = TypeCheckerCtx::new();
         match ctx.typecheck(document) {
             Ok(typed_doc) => {
-                println!("!!!!!");
-                println!("Document should not type-check, but did. Expected err: {expected_err:?}");
-                println!("-----");
+                println!("");
+                println!("Document should not type-check, but did");
+                println!("====================");
+                println!("- expected: {expected_err}");
                 println!("{source}");
                 panic!();
                 // println!("\nTYPED DOCUMENT (after substitution):\n{typed_doc:#?}");
             }
             Err(err) => {
-                match (expected_err, err.kind) {
+                match (expected_err, err.kind.clone()) {
                     ("", _) => {
                         // no expectations
                     }
                     ("ArgsMismatch", TypeErrorKind::ArgsMismatch) => {}
                     ("NotCallable", TypeErrorKind::NotCallable(_)) => {}
-                    (diff, TypeErrorKind::NotEqual(le, ri)) => {
+                    (diff, TypeErrorKind::NotEqual(le, ri)) if diff.contains(" != ") => {
                         let (a, b) = diff.split_once(" != ").unwrap();
                         let a = ctx.convert_hint_to_type(&parse_type(a));
                         let b = ctx.convert_hint_to_type(&parse_type(b));
@@ -1140,6 +1191,7 @@ mod test {
                             );
                             println!("- expected: {:?} != {:?}", a, b);
                             println!("- encountered: {:?} != {:?}", le, ri);
+                            print_type_error(source, tree, err);
                             panic!();
                         }
                     }
@@ -1150,6 +1202,7 @@ mod test {
                         );
                         println!("- expected: {expected_err}");
                         println!("- encountered: {kind:?}");
+                        print_type_error(source, tree, err);
                         panic!()
                     }
                 }
@@ -1341,7 +1394,13 @@ mod test {
 
         should_not_typecheck("(|| { 3 })(4)", "ArgsMismatch");
 
-        should_not_typecheck("let h = 6; h(4)", "NotCallable");
+        should_not_typecheck(
+            "
+                let h = 6
+                h(true)
+            ",
+            "",
+        );
 
         should_typecheck("(|g| { 3 })(4)");
 
@@ -1349,6 +1408,23 @@ mod test {
             "
                 let f = |a, b| { a }
                 f(5, 3)
+            ",
+        );
+
+        should_not_typecheck(
+            "
+                let f = |a, b| { a }
+                f(5, 3)
+                f(5, true)
+            ",
+            "int != bool",
+        );
+
+        should_typecheck(
+            "
+                let f = |a, b| { a }
+                f(5, 3)
+                f(5, f(5, f(5, 3)))
             ",
         );
     }
