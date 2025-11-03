@@ -38,7 +38,7 @@ impl From<&ast::TypeHint> for Type {
             ast::TypeHint::Regex(_) => Type::Regex,
             ast::TypeHint::Str(_) => Type::Str,
             ast::TypeHint::Nil(_) => Type::Nil,
-            _ => todo!(),
+            ty => todo!("can convert typehint to type: {:?}", ty),
         }
     }
 }

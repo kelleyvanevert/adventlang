@@ -925,10 +925,10 @@ impl TypeCheckerCtx {
 
 #[cfg(test)]
 mod test {
-    use parser::{ParseResult, parse_document_ts};
-    use tree_sitter::Node;
+    use parser::{ParseResult, parse_document_ts, parse_type};
+    use tree_sitter::{Node, Tree};
 
-    use crate::TypeCheckerCtx;
+    use crate::{TypeCheckerCtx, TypeError, TypeErrorKind, types::Type};
 
     fn find_node_by_id(node: Node, target_id: usize) -> Option<Node> {
         if node.id() == target_id {
@@ -944,90 +944,232 @@ mod test {
         None
     }
 
-    #[test]
-    fn test() {
-        let source = "
-// let h: bool = 5 // fails
-let h = 5
-
-let c = true
-// [c] = [4] // fails
-
-let c = [true]
-let f = [2]
-let (a, [b]) = (3, c)
-b = false
-b = c[0] // fails if changed to: f[0]
-
-// fails if it's an assignment, because then the result is used and therefore the branches must be similarly typed
-if true {
-    5
-} else {
-    true
-}
-
-let r = 4
-r = 'a: loop {
-    let h = 7
-    break 'a with 5 // fails if expr omitted
-    // break 'a with true // fails because it's not the same type as the other break
-}
-";
-
+    fn should_typecheck(source: &str) {
         let ParseResult { tree, document } = parse_document_ts(source).expect("can parse");
 
         let mut ctx = TypeCheckerCtx::new();
         match ctx.typecheck(document) {
             Ok(typed_doc) => {
-                println!("\nTYPED DOCUMENT (after substitution):\n{typed_doc:#?}");
+                // ok
+                // println!("\nTYPED DOCUMENT (after substitution):\n{typed_doc:#?}");
             }
             Err(err) => {
-                println!("");
-                println!("Type-checking failed");
-                println!("====================");
+                print_type_error(source, tree, err);
+                panic!();
+            }
+        }
+    }
 
-                let Some(error_node) = find_node_by_id(tree.root_node(), err.node_id) else {
-                    println!("(Could not find source node)");
-                    panic!("{err:?}");
-                };
+    fn should_not_typecheck(source: &str, diff: Option<&str>) {
+        let ParseResult { tree, document } = parse_document_ts(source).expect("can parse");
 
-                let start_byte = error_node.start_byte();
-                let end_byte = error_node.end_byte();
-                let start_pos = error_node.start_position();
-                let end_pos = error_node.end_position();
-
-                // Split source into lines
-                let lines: Vec<&str> = source.lines().collect();
-
-                // Calculate which lines to show
-                let context_lines = 3;
-                let error_line = start_pos.row;
-                let first_line = error_line.saturating_sub(context_lines);
-                let last_line = (error_line + context_lines).min(lines.len() - 1);
-
-                // Add line numbers and source lines
-                for line_no in first_line..=last_line {
-                    if line_no < lines.len() {
-                        println!("{:4} | {}", line_no + 1, lines[line_no]);
-
-                        // Add error annotation on the line after the error
-                        if line_no == error_line {
-                            // Calculate the column position for the caret
-                            let column = start_pos.column;
-                            let spaces = " ".repeat(4 + 3 + column); // 4 for line no, 3 for " | "
-                            let carets = "^".repeat(if start_pos.row == end_pos.row {
-                                end_pos.column - start_pos.column
+        let mut ctx = TypeCheckerCtx::new();
+        match ctx.typecheck(document) {
+            Ok(typed_doc) => {
+                println!("!!!!!");
+                println!("Document should not type-check, but did. Expected type diff: {diff:?}");
+                println!("-----");
+                println!("{source}");
+                panic!();
+                // println!("\nTYPED DOCUMENT (after substitution):\n{typed_doc:#?}");
+            }
+            Err(err) => {
+                match err.kind {
+                    TypeErrorKind::InfiniteType(_, _) => panic!(),
+                    TypeErrorKind::NotEqual(le, ri) => {
+                        if let Some(diff) = diff {
+                            let (a, b) = diff.split_once(" != ").unwrap();
+                            let a = Type::from(&parse_type(a));
+                            let b = Type::from(&parse_type(b));
+                            if a == le && b == ri || a == ri && b == le {
+                                // all good
                             } else {
-                                1
-                            });
-
-                            println!("{}{} {}", spaces, carets, err);
+                                println!("!!!!!");
+                                println!(
+                                    "Document correctly failed at type-check, but with different error"
+                                );
+                                println!("- expected: {:?} != {:?}", a, b);
+                                println!("- type error: {:?} != {:?}", le, ri);
+                                panic!();
+                            }
                         }
                     }
                 }
+                // println!("Document should type-check, but didn't");
+                // print_type_error(source, tree, err);
+                // panic!();
             }
         }
+    }
 
-        todo!("")
+    fn print_type_error(source: &str, tree: Tree, err: TypeError) {
+        println!("");
+        println!("Type-checking failed");
+        println!("====================");
+
+        let Some(error_node) = find_node_by_id(tree.root_node(), err.node_id) else {
+            println!("(Could not find source node)");
+            panic!("{err:?}");
+        };
+
+        let start_byte = error_node.start_byte();
+        let end_byte = error_node.end_byte();
+        let start_pos = error_node.start_position();
+        let end_pos = error_node.end_position();
+
+        // Split source into lines
+        let lines: Vec<&str> = source.lines().collect();
+
+        // Calculate which lines to show
+        let context_lines = 3;
+        let error_line = start_pos.row;
+        let first_line = error_line.saturating_sub(context_lines);
+        let last_line = (error_line + context_lines).min(lines.len() - 1);
+
+        // Add line numbers and source lines
+        for line_no in first_line..=last_line {
+            if line_no < lines.len() {
+                println!("{:4} | {}", line_no + 1, lines[line_no]);
+
+                // Add error annotation on the line after the error
+                if line_no == error_line {
+                    // Calculate the column position for the caret
+                    let column = start_pos.column;
+                    let spaces = " ".repeat(4 + 3 + column); // 4 for line no, 3 for " | "
+                    let carets = "^".repeat(if start_pos.row == end_pos.row {
+                        end_pos.column - start_pos.column
+                    } else {
+                        1
+                    });
+
+                    println!("{}{} {}", spaces, carets, err);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test() {
+        should_typecheck("let h = 5");
+
+        should_typecheck("let [c] = [4]; c = 3");
+
+        should_not_typecheck("let [c] = [4]; c = true", None);
+
+        should_not_typecheck("let [c] = 4", None);
+
+        should_not_typecheck("let h: bool = 5", Some("int != bool"));
+
+        should_typecheck(
+            "
+                let c = [true]
+                let f = [2]
+                let (a, [b]) = (3, c)
+                b = false
+                b = c[0]
+            ",
+        );
+
+        should_not_typecheck(
+            "
+                let c = [true]
+                let f = [2]
+                let (a, [b]) = (3, c)
+                b = false
+                b = f[0]
+            ",
+            Some("int != bool"),
+        );
+
+        should_typecheck(
+            "
+                // result isn't used, so branches are allowed to diverge in type
+                if true {
+                    5
+                } else {
+                    true
+                }
+            ",
+        );
+
+        should_not_typecheck(
+            "
+                // result IS used, so this causes a type-error
+                let res = if true {
+                    5
+                } else {
+                    true
+                }
+            ",
+            Some("int != bool"),
+        );
+
+        should_not_typecheck(
+            "
+                let r = 4
+                r = loop {}
+            ",
+            Some("nil != int"),
+        );
+
+        should_not_typecheck(
+            "
+                let r = 4
+                r = 'a: loop { break 'a }
+            ",
+            Some("nil != int"),
+        );
+
+        should_typecheck(
+            "
+                let r = 4
+                r = loop {
+                    let h = 7
+                    break with 5
+                }
+                r = 'a: loop {
+                    let h = 7
+                    break 'a with 5
+                }
+                r = 'a: loop {
+                    let h = 7
+                    break with 5
+                }
+            ",
+        );
+
+        should_not_typecheck(
+            "
+                let r = 4
+                r = loop {
+                    let h = 7
+                    break with 5
+                    break with true
+                }
+            ",
+            Some("bool != int"),
+        );
+
+        should_not_typecheck(
+            "
+                loop {
+                    let h = 7
+                    break
+                    break with true
+                }
+            ",
+            Some("bool != nil"),
+        );
+
+        should_not_typecheck(
+            "
+                loop {
+                    let h = 7
+                    break
+                    break with true
+                }
+            ",
+            Some("bool != nil"),
+        );
     }
 }
