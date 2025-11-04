@@ -473,7 +473,7 @@ impl<'a> Converter<'a> {
                     Some(pattern) => Expr::IfLet(IfLetExpr {
                         id: node.id(),
                         pattern,
-                        cond,
+                        expr: cond,
                         then,
                         els,
                     }),

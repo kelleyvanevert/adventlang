@@ -303,7 +303,7 @@ ast_nodes! {
 
     struct IfLetExpr {
         pattern: DeclarePattern,
-        cond: Box<Expr>,
+        expr: Box<Expr>,
         then: Block,
         els: Option<Block>,
     }

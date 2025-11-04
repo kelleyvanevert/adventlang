@@ -159,7 +159,7 @@ impl TypeCheckerCtx {
         //     println!("{c:?}");
         // }
 
-        self.unification(constraints)
+        self.solve_constraints(constraints)
             // make sure that the best-effort substitution that we produced is included in the error report
             .map_err(|mut err| {
                 err.substitute(&mut vec![], &mut self.unification_table);
@@ -172,11 +172,11 @@ impl TypeCheckerCtx {
         Ok(typed_doc)
     }
 
-    fn unification(&mut self, constraints: Vec<Constraint>) -> Result<(), TypeError> {
+    fn solve_constraints(&mut self, constraints: Vec<Constraint>) -> Result<(), TypeError> {
         for constr in constraints {
             match constr {
                 Constraint::TypeEqual(node_id, left, right) => self
-                    .unify_ty_ty(left.clone(), right.clone())
+                    .check_ty_equal(left.clone(), right.clone())
                     .map_err(|kind| TypeError {
                         node_id,
                         kind: TypeErrorKind::NotEqual(left, right),
@@ -187,7 +187,11 @@ impl TypeCheckerCtx {
         Ok(())
     }
 
-    fn unify_ty_ty(&mut self, unnorm_left: Type, unnorm_right: Type) -> Result<(), TypeErrorKind> {
+    fn check_ty_equal(
+        &mut self,
+        unnorm_left: Type,
+        unnorm_right: Type,
+    ) -> Result<(), TypeErrorKind> {
         let left = self.normalize_ty(unnorm_left);
         let right = self.normalize_ty(unnorm_right);
 
@@ -198,10 +202,10 @@ impl TypeCheckerCtx {
             (Type::Int, Type::Int) => Ok(()),
             (Type::Float, Type::Float) => Ok(()),
             (Type::Regex, Type::Regex) => Ok(()),
-            (Type::List(a), Type::List(b)) => self.unify_ty_ty(*a, *b),
+            (Type::List(a), Type::List(b)) => self.check_ty_equal(*a, *b),
             (Type::Tuple(a), Type::Tuple(b)) if a.len() == b.len() => {
                 for (a, b) in a.into_iter().zip(b.into_iter()) {
-                    self.unify_ty_ty(a, b)?;
+                    self.check_ty_equal(a, b)?;
                 }
                 Ok(())
             }
@@ -215,8 +219,8 @@ impl TypeCheckerCtx {
                     val: b_val,
                 },
             ) => {
-                self.unify_ty_ty(*a_key, *b_key)?;
-                self.unify_ty_ty(*a_val, *b_val)
+                self.check_ty_equal(*a_key, *b_key)?;
+                self.check_ty_equal(*a_val, *b_val)
             }
             (
                 Type::Fn(FnType {
@@ -239,14 +243,14 @@ impl TypeCheckerCtx {
                 }
 
                 for (a, b) in a_params.into_iter().zip(b_params) {
-                    self.unify_ty_ty(a, b)?;
+                    self.check_ty_equal(a, b)?;
                 }
 
-                self.unify_ty_ty(*a_ret, *b_ret)?;
+                self.check_ty_equal(*a_ret, *b_ret)?;
                 Ok(())
             }
             (Type::Nullable { child: a_child }, Type::Nullable { child: b_child }) => {
-                self.unify_ty_ty(*a_child, *b_child)
+                self.check_ty_equal(*a_child, *b_child)
             }
             (Type::TypeVar(a), Type::TypeVar(b)) => self
                 .unification_table
@@ -1095,11 +1099,38 @@ impl TypeCheckerCtx {
             ast::Expr::IfLet(ast::IfLetExpr {
                 id,
                 pattern,
-                cond,
+                expr,
                 then,
                 els,
             }) => {
-                todo!()
+                let pattern = self.infer_declare_pattern(env, pattern, constraints)?;
+                let expr = self.check_expr(env, *expr, pattern.ty(), constraints)?;
+
+                let mut then_branch_env = env.clone();
+                let then = self.infer_block(&mut then_branch_env, then, constraints, true)?;
+
+                let mut else_branch_env = env.clone();
+                let els = els
+                    .map(|els| self.infer_block(&mut else_branch_env, els, constraints, true))
+                    .transpose()?;
+
+                let ty = match (use_result, &els) {
+                    (false, _) => Type::Nil,
+                    (true, None) => Type::Nil,
+                    (true, Some(els)) => {
+                        constraints.push(Constraint::TypeEqual(els.id(), then.ty(), els.ty()));
+                        els.ty()
+                    }
+                };
+
+                return Ok(hir::Expr::IfLet(hir::IfLetExpr {
+                    id,
+                    pattern,
+                    expr: expr.into(),
+                    then,
+                    els,
+                    ty,
+                }));
             }
             ast::Expr::If(ast::IfExpr {
                 id,
@@ -1438,6 +1469,30 @@ mod test {
                 }
             ",
         );
+    }
+
+    #[test]
+    fn if_let_branches() {
+        should_typecheck(
+            "
+                if let h = true {}
+                if let [a, b] = [2] {}
+            ",
+        );
+
+        should_not_typecheck(
+            "
+                if let (a, b, c) = (1, 2) {}
+            ",
+            "",
+        );
+
+        // should_typecheck(
+        //     "
+        //         let a = nil
+        //         if let [b, c] = a {}
+        //     ",
+        // );
     }
 
     #[test]
