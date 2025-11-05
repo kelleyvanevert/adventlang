@@ -444,38 +444,24 @@ impl<'a> Converter<'a> {
             "if_expr" => {
                 let cond = node.map_child("cond", |node| self.as_expr(node).into());
                 let then = node.map_child("body", |node| self.as_block(node));
-                let els = {
-                    if let Some(else_if) = node.map_opt_child("else_if", |node| self.as_expr(node))
-                    {
-                        Some(Block {
-                            id: node.id(),
-                            items: vec![],
-                            stmts: vec![Stmt::Expr(ExprStmt {
-                                id: node.id(),
-                                expr: else_if,
-                            })],
-                        })
-                    } else if let Some(els) = node.map_opt_child("else", |node| self.as_block(node))
-                    {
-                        Some(els)
-                    } else {
-                        None
-                    }
-                };
+                let else_if = node.map_opt_child("else_if", |node| self.as_expr(node).into());
+                let else_then = node.map_opt_child("else", |node| self.as_block(node));
 
                 match node.map_opt_child("pattern", |node| self.as_declare_pattern(node)) {
                     None => Expr::If(IfExpr {
                         id: node.id(),
                         cond,
                         then,
-                        els,
+                        else_if,
+                        else_then,
                     }),
                     Some(pattern) => Expr::IfLet(IfLetExpr {
                         id: node.id(),
                         pattern,
                         expr: cond,
                         then,
-                        els,
+                        else_if,
+                        else_then,
                     }),
                 }
             }

@@ -431,21 +431,25 @@ fn if_expr(s: State) -> ParseResult<State, Expr> {
             )),
         )),
         |(_, _, (pattern, cond), _, then, further)| {
-            let els = match further {
-                Some(Either::Left(if_expr)) => Some(Block {
-                    id: 0,
-                    items: vec![],
-                    stmts: vec![Stmt::Expr(ExprStmt::new_simple(if_expr))],
-                }),
+            let else_if = match further.clone() {
+                Some(Either::Left(if_expr)) => Some(if_expr.into()),
+                _ => None,
+            };
+
+            let else_then = match further {
                 Some(Either::Right(else_block)) => Some(else_block),
                 _ => None,
             };
 
             match pattern {
-                None => Expr::If(IfExpr::new_simple(cond.into(), then, els)),
-                Some(pattern) => {
-                    Expr::IfLet(IfLetExpr::new_simple(pattern, cond.into(), then, els))
-                }
+                None => Expr::If(IfExpr::new_simple(cond.into(), then, else_if, else_then)),
+                Some(pattern) => Expr::IfLet(IfLetExpr::new_simple(
+                    pattern,
+                    cond.into(),
+                    then,
+                    else_if,
+                    else_then,
+                )),
             }
         },
     )

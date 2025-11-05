@@ -305,13 +305,15 @@ ast_nodes! {
         pattern: DeclarePattern,
         expr: Box<Expr>,
         then: Block,
-        els: Option<Block>,
+        else_if: Option<Box<Expr>>,
+        else_then: Option<Block>,
     }
 
     struct IfExpr {
         cond: Box<Expr>,
         then: Block,
-        els: Option<Block>,
+        else_if: Option<Box<Expr>>,
+        else_then: Option<Block>,
     }
 
     struct WhileLetExpr {
