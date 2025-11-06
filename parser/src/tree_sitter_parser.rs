@@ -3,12 +3,44 @@ use tree_sitter::{Node, Tree};
 use crate::ast::*;
 
 #[derive(Debug, Clone)]
-pub struct ParseResult {
+pub struct ParseResult<'a> {
+    pub source: &'a str,
+    ast_node_origin: Vec<usize>,
     pub tree: Tree,
     pub document: Document,
 }
 
-pub fn parse_document_ts(source: &str) -> Option<ParseResult> {
+impl<'a> ParseResult<'a> {
+    pub fn find_cst_node(&'a self, ast_node_id: usize) -> Node<'a> {
+        let Some(cst_node_id) = self.ast_node_origin.get(ast_node_id).cloned() else {
+            panic!("Could not find CST node ID associated to AST node ID {ast_node_id}");
+        };
+
+        let Some(node) = find_node_by_id(self.tree.root_node(), cst_node_id) else {
+            panic!(
+                "Could not find CST node associated with AST node ID {ast_node_id}, CST node ID {cst_node_id}"
+            );
+        };
+
+        node
+    }
+}
+
+fn find_node_by_id(node: Node, target_id: usize) -> Option<Node> {
+    if node.id() == target_id {
+        return Some(node);
+    }
+
+    for child in node.children(&mut node.walk()) {
+        if let Some(found) = find_node_by_id(child, target_id) {
+            return Some(found);
+        }
+    }
+
+    None
+}
+
+pub fn parse_document_ts<'a>(source: &'a str) -> Option<ParseResult<'a>> {
     let mut parser = tree_sitter::Parser::new();
     let language = tree_sitter_adventlang::LANGUAGE;
     parser
@@ -23,10 +55,15 @@ pub fn parse_document_ts(source: &str) -> Option<ParseResult> {
         return None;
     }
 
-    let converter = Converter { source };
+    let mut converter = Converter::new(source);
     let document = converter.as_doc(root_node);
 
-    Some(ParseResult { tree, document })
+    Some(ParseResult {
+        source,
+        tree,
+        document,
+        ast_node_origin: converter.ast_node_origin,
+    })
 }
 
 #[cfg(test)]
@@ -62,19 +99,38 @@ mod tests {
 
 struct Converter<'a> {
     source: &'a str,
+    next_ast_node_id: usize,
+    ast_node_origin: Vec<usize>,
 }
 
 impl<'a> Converter<'a> {
-    fn as_doc(&self, node: Node) -> Document {
+    fn new(source: &'a str) -> Self {
+        Self {
+            source,
+            next_ast_node_id: 0,
+            ast_node_origin: vec![],
+        }
+    }
+
+    fn fresh_ast_node_id(&mut self, source_node: Node) -> usize {
+        // source_node.id()
+
+        let id = self.next_ast_node_id;
+        self.ast_node_origin.push(source_node.id());
+        self.next_ast_node_id += 1;
+        id
+    }
+
+    fn as_doc(&mut self, node: Node) -> Document {
         Document {
-            id: node.id(),
+            id: self.fresh_ast_node_id(node),
             body: self.as_block(node),
         }
     }
 
-    fn as_block(&self, node: Node) -> Block {
+    fn as_block(&mut self, node: Node) -> Block {
         let mut block = Block {
-            id: node.id(),
+            id: self.fresh_ast_node_id(node),
             items: vec![],
             stmts: vec![],
         };
@@ -91,23 +147,37 @@ impl<'a> Converter<'a> {
         block
     }
 
-    fn as_type(&self, node: Node) -> TypeHint {
+    fn as_type(&mut self, node: Node) -> TypeHint {
         match node.kind() {
             "parenthesized_type" => node.map_child("child", |node| self.as_type(node)),
             "type_identifier" => TypeHint::Var(self.as_typevar(node)),
-            "nil_type" => TypeHint::Nil(NilTypeHint { id: node.id() }),
-            "bool_type" => TypeHint::Bool(BoolTypeHint { id: node.id() }),
-            "str_type" => TypeHint::Str(StrTypeHint { id: node.id() }),
-            "int_type" => TypeHint::Int(IntTypeHint { id: node.id() }),
-            "float_type" => TypeHint::Float(FloatTypeHint { id: node.id() }),
-            "regex_type" => TypeHint::Regex(RegexTypeHint { id: node.id() }),
+            "nil_type" => TypeHint::Nil(NilTypeHint {
+                id: self.fresh_ast_node_id(node),
+            }),
+            "bool_type" => TypeHint::Bool(BoolTypeHint {
+                id: self.fresh_ast_node_id(node),
+            }),
+            "str_type" => TypeHint::Str(StrTypeHint {
+                id: self.fresh_ast_node_id(node),
+            }),
+            "int_type" => TypeHint::Int(IntTypeHint {
+                id: self.fresh_ast_node_id(node),
+            }),
+            "float_type" => TypeHint::Float(FloatTypeHint {
+                id: self.fresh_ast_node_id(node),
+            }),
+            "regex_type" => TypeHint::Regex(RegexTypeHint {
+                id: self.fresh_ast_node_id(node),
+            }),
             "tuple_type" => {
                 let element_types = node.map_children("element", |node| self.as_type(node));
                 if element_types.len() == 0 {
-                    TypeHint::SomeTuple(SomeTupleTypeHint { id: node.id() })
+                    TypeHint::SomeTuple(SomeTupleTypeHint {
+                        id: self.fresh_ast_node_id(node),
+                    })
                 } else {
                     TypeHint::Tuple(TupleTypeHint {
-                        id: node.id(),
+                        id: self.fresh_ast_node_id(node),
                         element_types,
                     })
                 }
@@ -115,9 +185,11 @@ impl<'a> Converter<'a> {
             "list_type" => {
                 let ty = node.map_opt_child("elements", |node| self.as_type(node));
                 match ty {
-                    None => TypeHint::SomeList(SomeListTypeHint { id: node.id() }),
+                    None => TypeHint::SomeList(SomeListTypeHint {
+                        id: self.fresh_ast_node_id(node),
+                    }),
                     Some(ty) => TypeHint::List(ListTypeHint {
-                        id: node.id(),
+                        id: self.fresh_ast_node_id(node),
                         elements_ty: ty.into(),
                     }),
                 }
@@ -127,15 +199,17 @@ impl<'a> Converter<'a> {
                 let val = node.map_opt_child("val", |node| self.as_type(node));
                 match (key, val) {
                     (Some(key), Some(val)) => TypeHint::Dict(DictTypeHint {
-                        id: node.id(),
+                        id: self.fresh_ast_node_id(node),
                         key_ty: key.into(),
                         value_ty: val.into(),
                     }),
-                    _ => TypeHint::SomeDict(SomeDictTypeHint { id: node.id() }),
+                    _ => TypeHint::SomeDict(SomeDictTypeHint {
+                        id: self.fresh_ast_node_id(node),
+                    }),
                 }
             }
             "nullable_type" => TypeHint::Nullable(NullableTypeHint {
-                id: node.id(),
+                id: self.fresh_ast_node_id(node),
                 child: node.map_child("child", |node| self.as_type(node)).into(),
             }),
             "fn_type" => {
@@ -146,33 +220,37 @@ impl<'a> Converter<'a> {
                 // todo improve, this is not correct
                 if ret.is_some() || (generics.len() + params.len() > 0) {
                     TypeHint::Fn(FnTypeHint {
-                        id: node.id(),
+                        id: self.fresh_ast_node_id(node),
                         generics,
                         params,
                         ret: ret.unwrap().into(),
                     })
                 } else {
-                    TypeHint::SomeFn(SomeFnTypeHint { id: node.id() })
+                    TypeHint::SomeFn(SomeFnTypeHint {
+                        id: self.fresh_ast_node_id(node),
+                    })
                 }
             }
             _ => panic!("can't interpret as type: {:?}", node),
         }
     }
 
-    fn as_expr(&self, node: Node) -> Expr {
+    fn as_expr(&mut self, node: Node) -> Expr {
         match node.kind() {
             "parenthesized_expr" => node.map_child("child", |node| self.as_expr(node)),
             "integer_literal" => Expr::Int(IntExpr {
-                id: node.id(),
+                id: self.fresh_ast_node_id(node),
                 value: self.as_int(node),
             }),
             "boolean_literal" => Expr::Bool(BoolExpr {
-                id: node.id(),
+                id: self.fresh_ast_node_id(node),
                 value: self.as_str(node).trim() == "true",
             }),
-            "nil_literal" => Expr::Nil(NilExpr { id: node.id() }),
+            "nil_literal" => Expr::Nil(NilExpr {
+                id: self.fresh_ast_node_id(node),
+            }),
             "regex_literal" => Expr::Regex(RegexExpr {
-                id: node.id(),
+                id: self.fresh_ast_node_id(node),
                 str: self
                     .as_str(node)
                     .trim()
@@ -183,52 +261,55 @@ impl<'a> Converter<'a> {
                     .to_string(),
             }),
             "float_literal" => Expr::Float(FloatExpr {
-                id: node.id(),
+                id: self.fresh_ast_node_id(node),
                 str: self.as_str(node).trim().to_string(),
             }),
             "identifier" => Expr::Var(VarExpr {
-                id: node.id(),
+                id: self.fresh_ast_node_id(node),
                 var: self.as_var(node),
             }),
             "unary_expression" => Expr::Unary(UnaryExpr {
-                id: node.id(),
+                id: self.fresh_ast_node_id(node),
                 op: node.map_child("op", |node| self.as_string(node).into()),
                 expr: node.map_child("expr", |node| self.as_expr(node).into()),
             }),
             "binary_expr" => Expr::Binary(BinaryExpr {
-                id: node.id(),
+                id: self.fresh_ast_node_id(node),
                 left: node.map_child("left", |node| self.as_expr(node).into()),
                 op: node.map_child("operator", |node| self.as_string(node).into()),
                 right: node.map_child("right", |node| self.as_expr(node).into()),
             }),
             "list_expr" => Expr::List(ListExpr {
-                id: node.id(),
+                id: self.fresh_ast_node_id(node),
                 elements: node.map_children("element", |child| self.as_expr(child)),
                 splat: node.map_opt_child("splat", |child| self.as_expr(child).into()),
             }),
             "tuple_expr" => Expr::Tuple(TupleExpr {
-                id: node.id(),
+                id: self.fresh_ast_node_id(node),
                 elements: node.map_children("element", |child| self.as_expr(child)),
             }),
             "dict_expr" => Expr::Dict(DictExpr {
-                id: node.id(),
+                id: self.fresh_ast_node_id(node),
                 entries: node.map_children("pair", |node| {
                     if let Some(var) = node.map_opt_child("id_key", |node| self.as_var(node)) {
                         DictEntry {
-                            id: node.id(),
+                            id: self.fresh_ast_node_id(node),
                             key: DictKey {
-                                id: node.id(),
+                                id: self.fresh_ast_node_id(node),
                                 key: DictKeyKind::Identifier(var.clone().into()),
                             },
                             value: node
                                 .map_opt_child("val", |node| self.as_expr(node))
-                                .unwrap_or(Expr::Var(VarExpr { id: node.id(), var })),
+                                .unwrap_or(Expr::Var(VarExpr {
+                                    id: self.fresh_ast_node_id(node),
+                                    var,
+                                })),
                         }
                     } else {
                         let key_node_id = node.map_child("expr_key", |node| node.id());
 
                         DictEntry {
-                            id: node.id(),
+                            id: self.fresh_ast_node_id(node),
                             key: DictKey {
                                 id: key_node_id,
                                 key: DictKeyKind::Expr(
@@ -245,7 +326,7 @@ impl<'a> Converter<'a> {
                 }),
             }),
             "str_literal" => Expr::Str(StrExpr {
-                id: node.id(),
+                id: self.fresh_ast_node_id(node),
 
                 pieces: {
                     let mut opened = false;
@@ -327,7 +408,7 @@ impl<'a> Converter<'a> {
 
                     if str.len() > 0 {
                         pieces.push(StrPiece::Fragment(StrPieceFragment {
-                            id: node.id(), // hacky
+                            id: self.fresh_ast_node_id(node), // hacky
                             str,
                         }));
                     }
@@ -337,73 +418,76 @@ impl<'a> Converter<'a> {
             }),
             // TODO: `{}` instead of `do {}` ??
             "block_expr" => Expr::Do(DoExpr {
-                id: node.id(),
+                id: self.fresh_ast_node_id(node),
                 label: None,
                 body: self.as_block(node),
             }),
             "regular_call_expr" => Expr::Call(CallExpr {
-                id: node.id(),
+                id: self.fresh_ast_node_id(node),
                 f: node.map_child("function", |node| self.as_expr(node)).into(),
                 postfix: false,
                 coalesce: node.has_child("coalesce"),
                 args: node.map_children("argument", |node| Argument {
-                    id: node.id(),
+                    id: self.fresh_ast_node_id(node),
                     name: node.map_opt_child("name", |node| self.as_identifier(node)),
                     expr: node.map_child("expr", |node| self.as_expr(node)),
                 }),
             }),
             "postfix_index_expr" | "index_expr" => Expr::Index(IndexExpr {
-                id: node.id(),
+                id: self.fresh_ast_node_id(node),
                 expr: node.map_child("container", |node| self.as_expr(node).into()),
                 coalesce: node.has_child("coalesce"),
                 index: node.map_child("index", |node| self.as_expr(node).into()),
             }),
             "member_expr" => Expr::Member(MemberExpr {
-                id: node.id(),
+                id: self.fresh_ast_node_id(node),
                 expr: node.map_child("container", |node| self.as_expr(node).into()),
                 coalesce: node.has_child("coalesce"),
                 member: node.map_child("member", |node| self.as_identifier(node).into()),
             }),
             "postfix_call_expr" => {
                 let mut args = vec![Argument {
-                    id: node.id(),
+                    id: self.fresh_ast_node_id(node),
                     expr: node.map_child("left", |node| self.as_expr(node)),
                     name: None,
                 }];
 
                 if let Some(expr) = node.map_opt_child("right", |node| self.as_expr(node)) {
                     args.push(Argument {
-                        id: node.id(),
+                        id: self.fresh_ast_node_id(node),
                         expr,
                         name: None,
                     })
                 }
 
                 args.extend(node.map_children("named_arg", |node| Argument {
-                    id: node.id(),
+                    id: self.fresh_ast_node_id(node),
                     name: Some(node.map_child("name", |node| self.as_identifier(node))),
                     expr: node.map_child("expr", |node| self.as_expr(node)),
                 }));
 
                 Expr::Call(CallExpr {
-                    id: node.id(),
-                    f: Expr::Var(VarExpr {
-                        id: node.id(),
-                        var: node.map_child("function", |node| self.as_var(node)),
-                    })
-                    .into(),
+                    id: self.fresh_ast_node_id(node),
+                    f: node
+                        .map_child("function", |node| {
+                            Expr::Var(VarExpr {
+                                id: self.fresh_ast_node_id(node),
+                                var: self.as_var(node),
+                            })
+                        })
+                        .into(),
                     postfix: true,
                     coalesce: node.has_child("coalesce"),
                     args,
                 })
             }
             "anonymous_fn" => Expr::AnonymousFn(AnonymousFnExpr {
-                id: node.id(),
+                id: self.fresh_ast_node_id(node),
                 params: node.map_children("param", |node| self.as_declarable(node)),
                 body: node.map_child("body", |node| self.as_block(node)),
             }),
             "do_while_expr" => Expr::DoWhile(DoWhileExpr {
-                id: node.id(),
+                id: self.fresh_ast_node_id(node),
                 label: node.map_opt_child("label", |node| self.as_label(node)),
                 body: node.map_child("body", |node| self.as_block(node)),
                 cond: node.map_child("cond", |node| self.as_expr(node).into()),
@@ -415,13 +499,13 @@ impl<'a> Converter<'a> {
 
                 match node.map_opt_child("pattern", |node| self.as_declare_pattern(node).into()) {
                     None => Expr::While(WhileExpr {
-                        id: node.id(),
+                        id: self.fresh_ast_node_id(node),
                         label,
                         cond,
                         body,
                     }),
                     Some(pattern) => Expr::WhileLet(WhileLetExpr {
-                        id: node.id(),
+                        id: self.fresh_ast_node_id(node),
                         label,
                         pattern,
                         cond,
@@ -430,12 +514,12 @@ impl<'a> Converter<'a> {
                 }
             }
             "loop_expr" => Expr::Loop(LoopExpr {
-                id: node.id(),
+                id: self.fresh_ast_node_id(node),
                 label: node.map_opt_child("label", |node| self.as_label(node)),
                 body: node.map_child("body", |node| self.as_block(node)),
             }),
             "for_expr" => Expr::For(ForExpr {
-                id: node.id(),
+                id: self.fresh_ast_node_id(node),
                 label: node.map_opt_child("label", |node| self.as_label(node)),
                 pattern: node.map_child("pattern", |node| self.as_declare_pattern(node)),
                 range: node.map_child("range", |node| self.as_expr(node).into()),
@@ -449,14 +533,14 @@ impl<'a> Converter<'a> {
 
                 match node.map_opt_child("pattern", |node| self.as_declare_pattern(node)) {
                     None => Expr::If(IfExpr {
-                        id: node.id(),
+                        id: self.fresh_ast_node_id(node),
                         cond,
                         then,
                         else_if,
                         else_then,
                     }),
                     Some(pattern) => Expr::IfLet(IfLetExpr {
-                        id: node.id(),
+                        id: self.fresh_ast_node_id(node),
                         pattern,
                         expr: cond,
                         then,
@@ -469,19 +553,19 @@ impl<'a> Converter<'a> {
         }
     }
 
-    fn as_lookup(&self, node: Node) -> AssignLoc {
+    fn as_lookup(&mut self, node: Node) -> AssignLoc {
         match node.kind() {
             "identifier" => AssignLoc::Var(AssignLocVar {
-                id: node.id(),
+                id: self.fresh_ast_node_id(node),
                 var: self.as_var(node),
             }),
             "index_lookup" => AssignLoc::Index(AssignLocIndex {
-                id: node.id(),
+                id: self.fresh_ast_node_id(node),
                 container: node.map_child("container", |node| self.as_lookup(node).into()),
                 index: node.map_child("index", |node| self.as_expr(node)),
             }),
             "member_lookup" => AssignLoc::Member(AssignLocMember {
-                id: node.id(),
+                id: self.fresh_ast_node_id(node),
                 container: node.map_child("container", |node| self.as_lookup(node).into()),
                 member: node.map_child("member", |node| self.as_identifier(node)),
             }),
@@ -489,35 +573,35 @@ impl<'a> Converter<'a> {
         }
     }
 
-    fn as_assign_pattern(&self, node: Node) -> AssignPattern {
+    fn as_assign_pattern(&mut self, node: Node) -> AssignPattern {
         match node.kind() {
             "assign_location" => AssignPattern::Single(AssignSingle {
-                id: node.id(),
+                id: self.fresh_ast_node_id(node),
                 loc: self.as_lookup(node.child(0).unwrap()),
             }),
             "assign_list" => AssignPattern::List(AssignList {
-                id: node.id(),
+                id: self.fresh_ast_node_id(node),
                 elements: node.map_children("element", |child| self.as_assign_pattern(child)),
                 splat: node.map_opt_child("splat", |child| self.as_assign_pattern(child).into()),
             }),
             "assign_tuple" => AssignPattern::Tuple(AssignTuple {
-                id: node.id(),
+                id: self.fresh_ast_node_id(node),
                 elements: node.map_children("element", |child| self.as_assign_pattern(child)),
             }),
             _ => panic!("can't interpret as assign pattern: {:?}", node),
         }
     }
 
-    fn as_declare_pattern(&self, node: Node) -> DeclarePattern {
+    fn as_declare_pattern(&mut self, node: Node) -> DeclarePattern {
         match node.kind() {
             "declare_var" => DeclarePattern::Single(DeclareSingle {
-                id: node.id(),
+                id: self.fresh_ast_node_id(node),
                 guard: node.child_by_field_name("guard").is_some(),
                 var: self.as_var(node.child_by_field_name("name").unwrap()),
                 ty: node.map_opt_child("type", |node| self.as_type(node)),
             }),
             "declare_list" => DeclarePattern::List(DeclareList {
-                id: node.id(),
+                id: self.fresh_ast_node_id(node),
                 elements: node.map_children("element", |child| self.as_declarable(child)),
                 rest: node.map_opt_child("splat", |child| DeclareRest {
                     id: child.id(),
@@ -526,7 +610,7 @@ impl<'a> Converter<'a> {
                 }),
             }),
             "declare_tuple" => DeclarePattern::Tuple(DeclareTuple {
-                id: node.id(),
+                id: self.fresh_ast_node_id(node),
                 elements: node.map_children("element", |child| self.as_declarable(child)),
                 // rest: node.map_opt_child("splat", |child| {
                 //     (
@@ -539,9 +623,9 @@ impl<'a> Converter<'a> {
         }
     }
 
-    fn as_declarable(&self, node: Node) -> Declarable {
+    fn as_declarable(&mut self, node: Node) -> Declarable {
         Declarable {
-            id: node.id(),
+            id: self.fresh_ast_node_id(node),
             pattern: self.as_declare_pattern(node.child(0).unwrap()),
             fallback: node
                 .child_by_field_name("fallback")
@@ -549,10 +633,10 @@ impl<'a> Converter<'a> {
         }
     }
 
-    fn as_item(&self, node: Node) -> Item {
+    fn as_item(&mut self, node: Node) -> Item {
         match node.kind() {
             "named_fn_item" => Item::NamedFn(NamedFnItem {
-                id: node.id(),
+                id: self.fresh_ast_node_id(node),
                 name: node.map_child("name", |node| self.as_identifier(node)),
                 generics: node.map_children("generic", |node| self.as_typevar(node)),
                 ret: node.map_opt_child("return", |node| self.as_type(node)),
@@ -563,38 +647,38 @@ impl<'a> Converter<'a> {
         }
     }
 
-    fn as_stmt(&self, node: Node) -> Stmt {
+    fn as_stmt(&mut self, node: Node) -> Stmt {
         match node.kind() {
             "expr_stmt" => Stmt::Expr(ExprStmt {
-                id: node.id(),
+                id: self.fresh_ast_node_id(node),
                 expr: self.as_expr(node.child(0).unwrap()),
             }),
             "continue_stmt" => Stmt::Continue(ContinueStmt {
-                id: node.id(),
+                id: self.fresh_ast_node_id(node),
                 label: node.map_opt_child("label", |node| self.as_label(node)),
             }),
             "break_stmt" => Stmt::Break(BreakStmt {
-                id: node.id(),
+                id: self.fresh_ast_node_id(node),
                 label: node.map_opt_child("label", |node| self.as_label(node)),
                 expr: node.map_opt_child("expr", |node| self.as_expr(node)),
             }),
             "return_stmt" => Stmt::Return(ReturnStmt {
-                id: node.id(),
+                id: self.fresh_ast_node_id(node),
                 expr: node.map_opt_child("expr", |node| self.as_expr(node)),
             }),
             "declare_stmt" => Stmt::Declare(DeclareStmt {
-                id: node.id(),
+                id: self.fresh_ast_node_id(node),
                 pattern: node.map_child("pattern", |node| self.as_declare_pattern(node)),
                 expr: node.map_child("expr", |node| self.as_expr(node)),
             }),
             "assign_stmt" => {
                 let pattern = node.map_child("pattern", |node| self.as_assign_pattern(node));
                 let expr = node.map_child("expr", |node| self.as_expr(node));
-                let op = node.map_child("op", |node| self.as_str(node).trim());
+                let op = node.map_child("op", |node| self.as_str(node).trim().to_string());
 
                 if op == "=" {
                     return Stmt::Assign(AssignStmt {
-                        id: node.id(),
+                        id: self.fresh_ast_node_id(node),
                         pattern,
                         expr,
                     });
@@ -623,10 +707,10 @@ impl<'a> Converter<'a> {
                 // }
 
                 Stmt::Assign(AssignStmt {
-                    id: node.id(),
+                    id: self.fresh_ast_node_id(node),
                     pattern,
                     expr: Expr::Binary(BinaryExpr {
-                        id: node.id(),
+                        id: self.fresh_ast_node_id(node),
                         left: lefthand_expr.into(),
                         op: op.strip_suffix('=').unwrap().into(),
                         right: expr.into(),
@@ -637,40 +721,40 @@ impl<'a> Converter<'a> {
         }
     }
 
-    fn as_str(&self, node: Node) -> &str {
+    fn as_str(&mut self, node: Node) -> &str {
         node.utf8_text(self.source.as_bytes()).unwrap()
     }
 
-    fn as_string(&self, node: Node) -> String {
+    fn as_string(&mut self, node: Node) -> String {
         self.as_str(node).into()
     }
 
-    fn as_identifier(&self, node: Node) -> Identifier {
+    fn as_identifier(&mut self, node: Node) -> Identifier {
         Identifier {
-            id: node.id(),
+            id: self.fresh_ast_node_id(node),
             str: self.as_str(node).trim().into(),
         }
     }
 
-    fn as_var(&self, node: Node) -> Var {
+    fn as_var(&mut self, node: Node) -> Var {
         Var {
-            id: node.id(),
+            id: self.fresh_ast_node_id(node),
             name: self.as_str(node).trim().into(),
         }
     }
 
-    fn as_label(&self, node: Node) -> Label {
+    fn as_label(&mut self, node: Node) -> Label {
         self.as_str(node).trim().into()
     }
 
-    fn as_typevar(&self, node: Node) -> VarTypeHint {
+    fn as_typevar(&mut self, node: Node) -> VarTypeHint {
         VarTypeHint {
-            id: node.id(),
+            id: self.fresh_ast_node_id(node),
             var: self.as_identifier(node),
         }
     }
 
-    fn as_int(&self, node: Node) -> i64 {
+    fn as_int(&mut self, node: Node) -> i64 {
         let str = self.as_str(node).trim();
         str.parse()
             .expect(&format!("can parse str as int: [{str}]"))

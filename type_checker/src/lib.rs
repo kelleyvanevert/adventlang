@@ -360,9 +360,7 @@ impl TypeCheckerCtx {
     ) -> Result<Type, TypeError> {
         self.infer_block(env, &doc.body, constraints, false)?;
 
-        Ok(Type::Nil)
-
-        // self.assign(doc.id(), Type::Nil)
+        self.assign(doc.id(), Type::Nil)
     }
 
     fn infer_block(
@@ -393,9 +391,7 @@ impl TypeCheckerCtx {
             }
         }
 
-        println!("assign block {} -- ty {:?}", block.id(), ty);
-        Ok(ty)
-        // self.assign(block.id(), ty)
+        self.assign(block.id(), ty)
     }
 
     fn prepare_item(
@@ -1049,41 +1045,27 @@ mod test {
 
     use crate::{TypeCheckerCtx, TypeError, TypeErrorKind, types::Type};
 
-    fn find_node_by_id(node: Node, target_id: usize) -> Option<Node> {
-        if node.id() == target_id {
-            return Some(node);
-        }
-
-        for child in node.children(&mut node.walk()) {
-            if let Some(found) = find_node_by_id(child, target_id) {
-                return Some(found);
-            }
-        }
-
-        None
-    }
-
     fn should_typecheck(source: &str) {
-        let ParseResult { tree, document } = parse_document_ts(source).expect("can parse");
+        let parse_result = parse_document_ts(source).expect("can parse");
 
         let mut ctx = TypeCheckerCtx::new();
-        match ctx.typecheck(&document) {
+        match ctx.typecheck(&parse_result.document) {
             Ok(typed_doc) => {
                 // ok
                 // println!("\nTYPED DOCUMENT (after substitution):\n{typed_doc:#?}");
             }
             Err(err) => {
-                print_type_error(source, tree, err);
+                print_type_error(parse_result, err);
                 panic!();
             }
         }
     }
 
     fn should_not_typecheck(source: &str, expected_err: &str) {
-        let ParseResult { tree, document } = parse_document_ts(source).expect("can parse");
+        let parse_result = parse_document_ts(source).expect("can parse");
 
         let mut ctx = TypeCheckerCtx::new();
-        match ctx.typecheck(&document) {
+        match ctx.typecheck(&parse_result.document) {
             Ok(typed_doc) => {
                 println!("");
                 println!("Document should not type-check, but did");
@@ -1116,7 +1098,7 @@ mod test {
                             );
                             println!("- expected: {:?} != {:?}", a, b);
                             println!("- encountered: {:?} != {:?}", le, ri);
-                            print_type_error(source, tree, err);
+                            print_type_error(parse_result, err);
                             panic!();
                         }
                     }
@@ -1127,7 +1109,7 @@ mod test {
                         );
                         println!("- expected: {expected_err}");
                         println!("- encountered: {kind:?}");
-                        print_type_error(source, tree, err);
+                        print_type_error(parse_result, err);
                         panic!()
                     }
                 }
@@ -1135,15 +1117,12 @@ mod test {
         }
     }
 
-    fn print_type_error(source: &str, tree: Tree, err: TypeError) {
+    fn print_type_error(parse_result: ParseResult, err: TypeError) {
         println!("");
         println!("Type-checking failed");
         println!("====================");
 
-        let Some(error_node) = find_node_by_id(tree.root_node(), err.node_id) else {
-            println!("(Could not find source node)");
-            panic!("{err:?}");
-        };
+        let error_node = parse_result.find_cst_node(err.node_id);
 
         let start_byte = error_node.start_byte();
         let end_byte = error_node.end_byte();
@@ -1151,7 +1130,7 @@ mod test {
         let end_pos = error_node.end_position();
 
         // Split source into lines
-        let lines: Vec<&str> = source.lines().collect();
+        let lines: Vec<&str> = parse_result.source.lines().collect();
 
         // Calculate which lines to show
         let context_lines = 3;
