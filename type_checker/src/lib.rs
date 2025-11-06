@@ -119,13 +119,14 @@ impl TypeErrorKind {
 #[derive(Debug)]
 struct TypeCheckerCtx {
     unification_table: InPlaceUnificationTable<TypeVar>,
+    constraints: Vec<Constraint>,
     next_loop_id: usize,
 
     // node id -> type
     types: FxHashMap<usize, Type>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum Constraint {
     TypeEqual(usize, Type, Type),
 }
@@ -134,6 +135,7 @@ impl TypeCheckerCtx {
     pub fn new() -> Self {
         Self {
             unification_table: InPlaceUnificationTable::new(),
+            constraints: vec![],
             next_loop_id: 0,
             types: FxHashMap::default(),
         }
@@ -151,15 +153,14 @@ impl TypeCheckerCtx {
 
     pub fn typecheck(&mut self, doc: &ast::Document) -> Result<(), TypeError> {
         let mut env = Env::new();
-        let mut constraints = vec![];
-        let mut typed_doc = self.infer_doc(&mut env, doc, &mut constraints)?;
+        let mut typed_doc = self.infer_doc(&mut env, doc)?;
 
         // println!("\nCONSTRAINTS:");
         // for c in &constraints {
         //     println!("{c:?}");
         // }
 
-        self.solve_constraints(constraints)
+        self.solve_constraints()
             // make sure that the best-effort substitution that we produced is included in the error report
             .map_err(|mut err| {
                 err.substitute(&mut vec![], &mut self.unification_table);
@@ -172,8 +173,8 @@ impl TypeCheckerCtx {
         Ok(())
     }
 
-    fn solve_constraints(&mut self, constraints: Vec<Constraint>) -> Result<(), TypeError> {
-        for constr in constraints {
+    fn solve_constraints(&mut self) -> Result<(), TypeError> {
+        for constr in self.constraints.clone() {
             match constr {
                 Constraint::TypeEqual(node_id, left, right) => self
                     .check_ty_equal(left.clone(), right.clone())
@@ -334,7 +335,11 @@ impl TypeCheckerCtx {
         }
     }
 
-    fn assign(&mut self, id: usize, ty: Type) -> Result<Type, TypeError> {
+    fn assign(&mut self, id: usize, mut ty: Type) -> Result<Type, TypeError> {
+        let is_var = matches!(ty, Type::TypeVar(_));
+
+        if !is_var {}
+
         if let Some(prev) = self.types.insert(id, ty.clone()) {
             panic!(
                 "Error: node {id} was already assigned a type: {prev:?}, while being assign a new type: {ty:?}"
@@ -352,13 +357,8 @@ impl TypeCheckerCtx {
         ty
     }
 
-    fn infer_doc(
-        &mut self,
-        env: &mut Env,
-        doc: &ast::Document,
-        constraints: &mut Vec<Constraint>,
-    ) -> Result<Type, TypeError> {
-        self.infer_block(env, &doc.body, constraints, false)?;
+    fn infer_doc(&mut self, env: &mut Env, doc: &ast::Document) -> Result<Type, TypeError> {
+        self.infer_block(env, &doc.body, false)?;
 
         self.assign(doc.id(), Type::Nil)
     }
@@ -367,25 +367,23 @@ impl TypeCheckerCtx {
         &mut self,
         env: &mut Env,
         block: &ast::Block,
-        constraints: &mut Vec<Constraint>,
         use_result: bool,
     ) -> Result<Type, TypeError> {
         let mut ty = Type::Nil;
 
         let mut item_placeholder_types = vec![];
         for item in &block.items {
-            item_placeholder_types.push(self.prepare_item(env, item, constraints));
+            item_placeholder_types.push(self.prepare_item(env, item));
         }
 
         for (i, item) in block.items.iter().enumerate() {
-            let typed_item =
-                self.infer_item(env, item, item_placeholder_types[i].clone(), constraints)?;
+            let typed_item = self.infer_item(env, item, item_placeholder_types[i].clone())?;
         }
 
         let num_stmts = block.stmts.len();
         for (i, stmt) in block.stmts.iter().enumerate() {
             let is_last = i + 1 == num_stmts;
-            self.infer_stmt(env, stmt, constraints, use_result && is_last)?;
+            self.infer_stmt(env, stmt, use_result && is_last)?;
             if is_last && use_result {
                 ty = self.get_ty(stmt.id());
             }
@@ -394,12 +392,7 @@ impl TypeCheckerCtx {
         self.assign(block.id(), ty)
     }
 
-    fn prepare_item(
-        &mut self,
-        env: &mut Env,
-        item: &ast::Item,
-        constraints: &mut Vec<Constraint>,
-    ) -> Type {
+    fn prepare_item(&mut self, env: &mut Env, item: &ast::Item) -> Type {
         match item {
             ast::Item::NamedFn(ast::NamedFnItem {
                 id,
@@ -421,7 +414,6 @@ impl TypeCheckerCtx {
         env: &mut Env,
         item: &ast::Item,
         placeholder_ty: Type,
-        constraints: &mut Vec<Constraint>,
     ) -> Result<Type, TypeError> {
         match item {
             ast::Item::NamedFn(ast::NamedFnItem {
@@ -434,13 +426,13 @@ impl TypeCheckerCtx {
             }) => {
                 let params = params
                     .into_iter()
-                    .map(|decl| self.infer_declarable(env, decl, constraints))
+                    .map(|decl| self.infer_declarable(env, decl))
                     .try_collect::<Vec<_>>()?;
 
                 let mut child_env = env.clone();
                 child_env.curr_loop = None;
                 child_env.loops = FxHashMap::default();
-                let body_ty = self.infer_block(env, body, constraints, true)?;
+                let body_ty = self.infer_block(env, body, true)?;
 
                 let generics = generics
                     .into_iter()
@@ -456,7 +448,8 @@ impl TypeCheckerCtx {
                     ret: body_ty.into(),
                 });
 
-                constraints.push(Constraint::TypeEqual(*id, ty.clone(), placeholder_ty));
+                self.constraints
+                    .push(Constraint::TypeEqual(*id, ty.clone(), placeholder_ty));
 
                 self.assign(*id, Type::Nil)
             }
@@ -467,14 +460,13 @@ impl TypeCheckerCtx {
         &mut self,
         env: &mut Env,
         stmt: &ast::Stmt,
-        constraints: &mut Vec<Constraint>,
         use_result: bool,
     ) -> Result<Type, TypeError> {
         match stmt {
             ast::Stmt::Break(ast::BreakStmt { id, label, expr }) => {
                 let expr_ty = expr
                     .as_ref()
-                    .map(|expr| self.infer_expr(env, expr, constraints, true))
+                    .map(|expr| self.infer_expr(env, expr, true))
                     .transpose()?
                     .unwrap_or(Type::Nil);
 
@@ -490,7 +482,8 @@ impl TypeCheckerCtx {
                 // Enforce the surrounding loop (or the ancestor with the given label) to have the given type
                 if let Some(prev_loop_type) = env.loops.insert(label.clone(), expr_ty.clone()) {
                     // If that loop already has been typed, add a type constraint
-                    constraints.push(Constraint::TypeEqual(*id, prev_loop_type, expr_ty));
+                    self.constraints
+                        .push(Constraint::TypeEqual(*id, prev_loop_type, expr_ty));
                 }
 
                 return self.assign(*id, Type::Nil);
@@ -501,25 +494,25 @@ impl TypeCheckerCtx {
             ast::Stmt::Return(ast::ReturnStmt { id, expr }) => {
                 let expr = expr
                     .as_ref()
-                    .map(|expr| self.infer_expr(env, expr, constraints, true))
+                    .map(|expr| self.infer_expr(env, expr, true))
                     .transpose()?;
 
                 return self.assign(*id, Type::Nil);
             }
             ast::Stmt::Declare(ast::DeclareStmt { id, pattern, expr }) => {
-                let pattern_ty = self.infer_declare_pattern(env, pattern, constraints)?;
-                self.check_expr(env, expr, pattern_ty, constraints)?;
+                let pattern_ty = self.infer_declare_pattern(env, pattern)?;
+                self.check_expr(env, expr, pattern_ty)?;
 
                 return self.assign(*id, Type::Nil);
             }
             ast::Stmt::Assign(ast::AssignStmt { id, pattern, expr }) => {
-                let pattern_ty = self.infer_assign_pattern(env, pattern, constraints)?;
-                self.check_expr(env, expr, pattern_ty, constraints)?;
+                let pattern_ty = self.infer_assign_pattern(env, pattern)?;
+                self.check_expr(env, expr, pattern_ty)?;
 
                 return self.assign(*id, Type::Nil);
             }
             ast::Stmt::Expr(ast::ExprStmt { id, expr }) => {
-                let expr_ty = self.infer_expr(env, expr, constraints, use_result)?;
+                let expr_ty = self.infer_expr(env, expr, use_result)?;
 
                 return self.assign(*id, expr_ty);
             }
@@ -530,11 +523,10 @@ impl TypeCheckerCtx {
         &mut self,
         env: &mut Env,
         pattern: &ast::AssignPattern,
-        constraints: &mut Vec<Constraint>,
     ) -> Result<Type, TypeError> {
         match pattern {
             ast::AssignPattern::Single(ast::AssignSingle { id, loc }) => {
-                let loc_ty = self.infer_location(env, loc, constraints)?;
+                let loc_ty = self.infer_location(env, loc)?;
 
                 return self.assign(*id, loc_ty);
             }
@@ -547,13 +539,18 @@ impl TypeCheckerCtx {
                 let ty = Type::List(element_ty.clone().into());
 
                 for pat in elements {
-                    let pat_ty = self.infer_assign_pattern(env, pat, constraints)?;
-                    constraints.push(Constraint::TypeEqual(pat.id(), pat_ty, element_ty.clone()));
+                    let pat_ty = self.infer_assign_pattern(env, pat)?;
+                    self.constraints.push(Constraint::TypeEqual(
+                        pat.id(),
+                        pat_ty,
+                        element_ty.clone(),
+                    ));
                 }
 
                 if let Some(pat) = splat {
-                    let pat_ty = self.infer_assign_pattern(env, pat, constraints)?;
-                    constraints.push(Constraint::TypeEqual(pat.id(), pat_ty, ty.clone()));
+                    let pat_ty = self.infer_assign_pattern(env, pat)?;
+                    self.constraints
+                        .push(Constraint::TypeEqual(pat.id(), pat_ty, ty.clone()));
                 }
 
                 return self.assign(*id, ty);
@@ -567,8 +564,8 @@ impl TypeCheckerCtx {
                 let ty = Type::Tuple(element_types.clone());
 
                 for (i, el) in elements.into_iter().enumerate() {
-                    let decl_ty = self.infer_assign_pattern(env, el, constraints)?;
-                    constraints.push(Constraint::TypeEqual(
+                    let decl_ty = self.infer_assign_pattern(env, el)?;
+                    self.constraints.push(Constraint::TypeEqual(
                         el.id(),
                         decl_ty,
                         element_types[i].clone(),
@@ -580,12 +577,7 @@ impl TypeCheckerCtx {
         }
     }
 
-    fn infer_location(
-        &mut self,
-        env: &mut Env,
-        loc: &ast::AssignLoc,
-        constraints: &mut Vec<Constraint>,
-    ) -> Result<Type, TypeError> {
+    fn infer_location(&mut self, env: &mut Env, loc: &ast::AssignLoc) -> Result<Type, TypeError> {
         match loc {
             ast::AssignLoc::Var(ast::AssignLocVar { id, var }) => {
                 let ty = env.locals[var.as_str()].clone();
@@ -597,16 +589,16 @@ impl TypeCheckerCtx {
                 container,
                 index,
             }) => {
-                let container_ty = self.infer_location(env, container, constraints)?;
+                let container_ty = self.infer_location(env, container)?;
                 let element_ty = Type::TypeVar(self.fresh_ty_var());
 
-                constraints.push(Constraint::TypeEqual(
+                self.constraints.push(Constraint::TypeEqual(
                     *id,
                     container_ty,
                     Type::List(element_ty.clone().into()),
                 ));
 
-                self.check_expr(env, index, Type::Int, constraints)?;
+                self.check_expr(env, index, Type::Int)?;
 
                 self.assign(*id, element_ty)
             }
@@ -619,7 +611,6 @@ impl TypeCheckerCtx {
         env: &mut Env,
         pattern: &ast::DeclarePattern,
         // allow_guard
-        constraints: &mut Vec<Constraint>,
     ) -> Result<Type, TypeError> {
         match pattern {
             ast::DeclarePattern::Single(ast::DeclareSingle { id, guard, var, ty }) => {
@@ -642,8 +633,12 @@ impl TypeCheckerCtx {
                 let ty = Type::List(element_ty.clone().into());
 
                 for el in elements {
-                    let decl_ty = self.infer_declarable(env, el, constraints)?;
-                    constraints.push(Constraint::TypeEqual(el.id(), decl_ty, element_ty.clone()));
+                    let decl_ty = self.infer_declarable(env, el)?;
+                    self.constraints.push(Constraint::TypeEqual(
+                        el.id(),
+                        decl_ty,
+                        element_ty.clone(),
+                    ));
                 }
 
                 if let Some(ast::DeclareRest { id, var, ty }) = rest {
@@ -666,8 +661,8 @@ impl TypeCheckerCtx {
                 let ty = Type::Tuple(element_types.clone());
 
                 for (i, el) in elements.iter().enumerate() {
-                    let decl_ty = self.infer_declarable(env, el, constraints)?;
-                    constraints.push(Constraint::TypeEqual(
+                    let decl_ty = self.infer_declarable(env, el)?;
+                    self.constraints.push(Constraint::TypeEqual(
                         el.id(),
                         decl_ty,
                         element_types[i].clone(),
@@ -683,7 +678,6 @@ impl TypeCheckerCtx {
         &mut self,
         env: &mut Env,
         declarable: &ast::Declarable,
-        constraints: &mut Vec<Constraint>,
     ) -> Result<Type, TypeError> {
         let ast::Declarable {
             id,
@@ -691,10 +685,10 @@ impl TypeCheckerCtx {
             fallback,
         } = declarable;
 
-        let pattern_ty = self.infer_declare_pattern(env, pattern, constraints)?;
+        let pattern_ty = self.infer_declare_pattern(env, pattern)?;
 
         if let Some(expr) = fallback {
-            self.check_expr(env, expr, pattern_ty.clone(), constraints)?;
+            self.check_expr(env, expr, pattern_ty.clone())?;
         }
 
         self.assign(*id, pattern_ty)
@@ -704,7 +698,6 @@ impl TypeCheckerCtx {
         &mut self,
         env: &mut Env,
         expr: &ast::Expr,
-        constraints: &mut Vec<Constraint>,
         use_result: bool,
     ) -> Result<Type, TypeError> {
         match expr {
@@ -715,7 +708,7 @@ impl TypeCheckerCtx {
                             self.assign(*id, Type::Str)?;
                         }
                         ast::StrPiece::Interpolation(ast::StrPieceInterpolation { id, expr }) => {
-                            self.infer_expr(env, expr, constraints, true)?;
+                            self.infer_expr(env, expr, true)?;
                             self.assign(*id, Type::Str)?; // TODO actually this needs to be converted, but that's not here yet, but then does it make sense to assign this type?
                         }
                     }
@@ -750,7 +743,7 @@ impl TypeCheckerCtx {
                 return self.assign(*id, ty);
             }
             ast::Expr::Unary(ast::UnaryExpr { id, op, expr }) => {
-                let expr_ty = self.infer_expr(env, expr, constraints, true)?;
+                let expr_ty = self.infer_expr(env, expr, true)?;
 
                 return self.assign(*id, expr_ty.apply_unary_op(&op));
             }
@@ -760,8 +753,8 @@ impl TypeCheckerCtx {
                 op,
                 right,
             }) => {
-                let left_ty = self.infer_expr(env, left, constraints, true)?;
-                let right_ty = self.infer_expr(env, right, constraints, true)?;
+                let left_ty = self.infer_expr(env, left, true)?;
+                let right_ty = self.infer_expr(env, right, true)?;
 
                 return self.assign(*id, left_ty.apply_binary_op(&op, &right_ty));
             }
@@ -774,11 +767,11 @@ impl TypeCheckerCtx {
                 let list_ty = Type::List(element_ty.clone().into());
 
                 for el in elements {
-                    self.check_expr(env, el, element_ty.clone(), constraints)?;
+                    self.check_expr(env, el, element_ty.clone())?;
                 }
 
                 if let Some(splat) = splat {
-                    self.check_expr(env, splat, list_ty.clone(), constraints)?;
+                    self.check_expr(env, splat, list_ty.clone())?;
                 }
 
                 return self.assign(*id, list_ty);
@@ -786,7 +779,7 @@ impl TypeCheckerCtx {
             ast::Expr::Tuple(ast::TupleExpr { id, elements }) => {
                 let element_types = elements
                     .into_iter()
-                    .map(|expr| self.infer_expr(env, expr, constraints, true))
+                    .map(|expr| self.infer_expr(env, expr, true))
                     .try_collect::<Vec<_>>()?;
 
                 return self.assign(*id, Type::Tuple(element_types));
@@ -807,9 +800,9 @@ impl TypeCheckerCtx {
                 let element_ty = Type::TypeVar(self.fresh_ty_var());
                 let list_ty = Type::List(element_ty.clone().into());
 
-                let expr = self.check_expr(env, expr, list_ty, constraints)?;
+                let expr = self.check_expr(env, expr, list_ty)?;
 
-                let index = self.check_expr(env, index, Type::Int, constraints)?;
+                let index = self.check_expr(env, index, Type::Int)?;
 
                 return self.assign(*id, element_ty);
             }
@@ -827,7 +820,7 @@ impl TypeCheckerCtx {
                     todo!()
                 }
 
-                let f_ty = self.infer_expr(env, f, constraints, true)?;
+                let f_ty = self.infer_expr(env, f, true)?;
 
                 let f_ty = match f_ty {
                     Type::Fn(f_ty) => f_ty,
@@ -841,7 +834,7 @@ impl TypeCheckerCtx {
                             ret: Type::TypeVar(self.fresh_ty_var()).into(),
                         };
 
-                        constraints.push(Constraint::TypeEqual(
+                        self.constraints.push(Constraint::TypeEqual(
                             f.id(),
                             Type::TypeVar(v),
                             Type::Fn(f_ty.clone()),
@@ -868,8 +861,7 @@ impl TypeCheckerCtx {
                     .into_iter()
                     .enumerate()
                     .map(|(i, ast::Argument { id, name, expr })| {
-                        let expr_ty =
-                            self.check_expr(env, expr, f_ty.params[i].clone(), constraints)?;
+                        let expr_ty = self.check_expr(env, expr, f_ty.params[i].clone())?;
 
                         self.assign(*id, expr_ty)
                     })
@@ -880,13 +872,13 @@ impl TypeCheckerCtx {
             ast::Expr::AnonymousFn(ast::AnonymousFnExpr { id, params, body }) => {
                 let params = params
                     .into_iter()
-                    .map(|decl| self.infer_declarable(env, decl, constraints))
+                    .map(|decl| self.infer_declarable(env, decl))
                     .try_collect::<Vec<_>>()?;
 
                 let mut child_env = env.clone();
                 child_env.curr_loop = None;
                 child_env.loops = FxHashMap::default();
-                let body_ty = self.infer_block(env, body, constraints, true)?;
+                let body_ty = self.infer_block(env, body, true)?;
 
                 let ty = Type::Fn(FnType {
                     generics: vec![],
@@ -904,22 +896,22 @@ impl TypeCheckerCtx {
                 else_if,
                 else_then,
             }) => {
-                // let pattern = self.infer_declare_pattern(env, pattern, constraints)?;
-                // let expr = self.check_expr(env, *expr, pattern.ty(), constraints)?;
+                // let pattern = self.infer_declare_pattern(env, pattern)?;
+                // let expr = self.check_expr(env, *expr, pattern.ty())?;
 
                 // let mut then_branch_env = env.clone();
-                // let then = self.infer_block(&mut then_branch_env, then, constraints, true)?;
+                // let then = self.infer_block(&mut then_branch_env, then, true)?;
 
                 // let mut else_branch_env = env.clone();
                 // let els = els
-                //     .map(|els| self.infer_block(&mut else_branch_env, els, constraints, true))
+                //     .map(|els| self.infer_block(&mut else_branch_env, els, true))
                 //     .transpose()?;
 
                 // let ty = match (use_result, &els) {
                 //     (false, _) => Type::Nil,
                 //     (true, None) => Type::Nil,
                 //     (true, Some(els)) => {
-                //         constraints.push(Constraint::TypeEqual(els.id(), then.ty(), els.ty()));
+                //         self.constraints.push(Constraint::TypeEqual(els.id(), then.ty(), els.ty()));
                 //         els.ty()
                 //     }
                 // };
@@ -935,27 +927,22 @@ impl TypeCheckerCtx {
                 else_if,
                 else_then,
             }) => {
-                let cond_ty = self.check_expr(env, cond, Type::Bool, constraints)?;
+                let cond_ty = self.check_expr(env, cond, Type::Bool)?;
 
-                let then_ty = self.infer_block(&mut env.clone(), then, constraints, true)?;
+                let then_ty = self.infer_block(&mut env.clone(), then, true)?;
 
                 let mut els = None;
                 if let Some(expr) = else_if {
-                    els = Some((
-                        expr.id(),
-                        self.infer_expr(&mut env.clone(), expr, constraints, true)?,
-                    ));
+                    els = Some((expr.id(), self.infer_expr(&mut env.clone(), expr, true)?));
                 } else if let Some(block) = else_then {
-                    els = Some((
-                        expr.id(),
-                        self.infer_block(&mut env.clone(), block, constraints, true)?,
-                    ));
+                    els = Some((expr.id(), self.infer_block(&mut env.clone(), block, true)?));
                 }
 
                 let mut ty = Type::Nil;
                 if use_result && let Some((node_id, t)) = els {
                     ty = t.clone();
-                    constraints.push(Constraint::TypeEqual(node_id, then_ty.clone(), t));
+                    self.constraints
+                        .push(Constraint::TypeEqual(node_id, then_ty.clone(), t));
                 }
 
                 return self.assign(*id, ty);
@@ -981,7 +968,7 @@ impl TypeCheckerCtx {
                 let mut child_env = env.clone();
                 child_env.curr_loop = Some(label.clone());
 
-                let body_ty = self.infer_block(&mut child_env, body, constraints, false)?;
+                let body_ty = self.infer_block(&mut child_env, body, false)?;
 
                 let ty = child_env.loops.get(&label).cloned().unwrap_or(Type::Nil);
 
@@ -1020,18 +1007,13 @@ impl TypeCheckerCtx {
         }
     }
 
-    fn check_expr(
-        &mut self,
-        env: &mut Env,
-        expr: &ast::Expr,
-        ty: Type,
-        constraints: &mut Vec<Constraint>,
-    ) -> Result<Type, TypeError> {
+    fn check_expr(&mut self, env: &mut Env, expr: &ast::Expr, ty: Type) -> Result<Type, TypeError> {
         match (&expr, &ty) {
             // just a fallback for now
             (_, _) => {
-                let expr_ty = self.infer_expr(env, expr, constraints, true)?;
-                constraints.push(Constraint::TypeEqual(expr.id(), expr_ty, ty.clone()));
+                let expr_ty = self.infer_expr(env, expr, true)?;
+                self.constraints
+                    .push(Constraint::TypeEqual(expr.id(), expr_ty, ty.clone()));
                 Ok(ty)
             }
         }
