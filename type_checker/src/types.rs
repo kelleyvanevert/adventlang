@@ -17,6 +17,7 @@ pub enum Type {
     Tuple(Vec<Type>),
     Dict { key: Box<Type>, val: Box<Type> },
     Nullable { child: Box<Type> },
+    // NonNull { child: Box<Type> },
     TypeVar(TypeVar),
 }
 
@@ -45,6 +46,25 @@ impl Type {
             (Type::Int, "+", Type::Int) => Type::Int,
             // etc.
             _ => panic!("Cannot apply binary operator {op} to types {self:?} and {right:?}"),
+        }
+    }
+
+    pub fn is_concrete(&self, bound: &Vec<TypeVar>) -> bool {
+        match self {
+            Type::Nil | Type::Bool | Type::Str | Type::Int | Type::Float | Type::Regex => true,
+            Type::TypeVar(v) => false,
+            Type::Fn(FnType {
+                generics,
+                params,
+                ret,
+            }) => {
+                let bound = vec![bound.clone(), generics.clone()].concat();
+                params.iter().all(|p| p.is_concrete(&bound)) && ret.is_concrete(&bound)
+            }
+            Type::List(element_ty) => element_ty.is_concrete(bound),
+            Type::Tuple(elements) => elements.iter().all(|el| el.is_concrete(bound)),
+            Type::Dict { key, val } => key.is_concrete(bound) && val.is_concrete(bound),
+            Type::Nullable { child } => child.is_concrete(bound),
         }
     }
 
@@ -102,7 +122,7 @@ impl Type {
         /* unbound, */
         unification_table: &mut InPlaceUnificationTable<TypeVar>,
     ) {
-        println!("substituting at {:?}", self);
+        // println!("substituting at {:?}", self);
         // *self = Type::Bool;
 
         match self {
@@ -126,8 +146,8 @@ impl Type {
                         // unbound.insert(root);
                         // (unbound, Type::Var(root))
 
-                        println!("Replacing {:?}", self);
-                        println!("  with: {:?}", root);
+                        // println!("Replacing {:?}", self);
+                        // println!("  with: {:?}", root);
                         *self = Type::TypeVar(root);
                     }
                 }

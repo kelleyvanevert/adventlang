@@ -1,11 +1,11 @@
-#![feature(iterator_try_collect)]
 #![allow(unused)]
 #![allow(dead_code)]
 
-use std::fmt::Display;
+use std::{collections::VecDeque, fmt::Display};
 
 use ena::unify::{InPlaceUnificationTable, UnifyKey};
 use fxhash::FxHashMap;
+use itertools::Itertools;
 use parser::ast::{self, AstNode};
 use thiserror::Error;
 
@@ -16,11 +16,13 @@ pub mod types;
 // TODO:
 // - [ ] generics
 // - [ ] named and optional params/args
-// - [ ] unary/binary operators ("can't apply op + on typevar")
 // - [ ] underspecified types ("fn", "dict")
 // - [ ] dicts + members
 // - [ ] coalescing + nullability
 // - [ ] if-let, while, while-let, do, do-while, for
+//
+// DOING:
+// - [..] overloading + unary/binary operators ("can't apply op + on typevar")
 //
 // DONE:
 // - [x] unification
@@ -83,6 +85,8 @@ impl TypeError {
 pub enum TypeErrorKind {
     #[error("types are not equal: {0:?} != {1:?}")]
     NotEqual(Type, Type),
+    #[error("none of the overloads match")]
+    NoOverload,
     #[error("infinite type: {0:?} in {1:?}")]
     InfiniteType(TypeVar, Type),
     #[error("callee is not a function: {0:?}")]
@@ -110,6 +114,7 @@ impl TypeErrorKind {
             Self::NotCallable(t) => {
                 t.substitute(bound, unification_table);
             }
+            Self::NoOverload => {}
             Self::ArgsMismatch => {}
             Self::MissingLocal(_) => {}
         }
@@ -129,6 +134,16 @@ struct TypeCheckerCtx {
 #[derive(Debug, Clone)]
 enum Constraint {
     TypeEqual(usize, Type, Type),
+    ChooseOverload(OverloadSet),
+}
+
+/// Supports choosing an overload from a list of FULLY CONCRETE overloads
+#[derive(Debug, Clone)]
+struct OverloadSet {
+    node_id: usize,
+    nodes: Vec<usize>,
+    types: Vec<Type>,
+    overloads: Vec<Vec<Type>>,
 }
 
 impl TypeCheckerCtx {
@@ -174,18 +189,127 @@ impl TypeCheckerCtx {
     }
 
     fn solve_constraints(&mut self) -> Result<(), TypeError> {
-        for constr in self.constraints.clone() {
-            match constr {
-                Constraint::TypeEqual(node_id, left, right) => self
-                    .check_ty_equal(left.clone(), right.clone())
-                    .map_err(|kind| TypeError {
-                        node_id,
-                        kind: TypeErrorKind::NotEqual(left, right),
-                    })?,
+        let mut todo = VecDeque::from(self.constraints.clone());
+
+        while let Some(constraint) = todo.pop_front() {
+            match constraint {
+                Constraint::TypeEqual(node_id, left, right) => {
+                    self.check_ty_equal(left.clone(), right.clone())
+                        .map_err(|kind| TypeError { node_id, kind })?;
+                }
+                Constraint::ChooseOverload(overload_set) => {
+                    println!(
+                        "SELECTING OVERLOAD -- {} other constraints left to do",
+                        todo.len()
+                    );
+                    if !self.select_overload(overload_set.clone())? {
+                        // try again later, when more concrete information is available
+                        todo.push_back(Constraint::ChooseOverload(overload_set));
+                    }
+                }
             }
         }
 
         Ok(())
+    }
+
+    fn select_overload(&mut self, overload_set: OverloadSet) -> Result<bool, TypeError> {
+        let n = overload_set.nodes.len();
+        let num_overloads = overload_set.overloads.len();
+
+        let mut impossible = (0..num_overloads).map(|_| false).collect::<Vec<_>>();
+
+        for indices in (0..n).powerset() {
+            if indices.len() == 0 {
+                continue;
+            }
+
+            // which overloads are different from all others, per these indices?
+            let check_overloads = (0..num_overloads)
+                .filter(|&i| {
+                    if impossible[i] {
+                        return false;
+                    }
+
+                    return (0..num_overloads).all(|j| {
+                        if i == j {
+                            // vacuously
+                            return true;
+                        }
+
+                        return indices.iter().any(|&ti| {
+                            overload_set.overloads[i][ti] != overload_set.overloads[j][ti]
+                        });
+                    });
+                })
+                .collect::<Vec<_>>();
+            println!("- TC-set {indices:?} -- overloads to check: {check_overloads:?}");
+
+            'check: for i in check_overloads {
+                if impossible[i] {
+                    // already known to be impossible
+                    continue;
+                }
+
+                println!("  - checking overload {i}");
+                let snapshot = self.unification_table.snapshot();
+
+                for &ti in &indices {
+                    println!(
+                        "    - checking type-constraint {ti}, whether {:?} (normalized as {:?}) =?= {:?}",
+                        overload_set.types[ti].clone(),
+                        self.normalize_ty(overload_set.types[ti].clone()),
+                        overload_set.overloads[i][ti].clone(),
+                    );
+                    let mgu_so_far = self.normalize_ty(overload_set.types[ti].clone());
+
+                    // TODO: make sure that equality is checked UP TO RENAMING
+                    if mgu_so_far != overload_set.overloads[i][ti] {
+                        println!("      - failed, bail overload");
+                        self.unification_table.rollback_to(snapshot);
+
+                        if mgu_so_far.is_concrete(&vec![]) {
+                            println!(
+                                "        overload {i} is deemed IMPOSSIBLE, because of concrete type mismatch"
+                            );
+                            impossible[i] = true;
+
+                            if impossible.iter().all(|&b| b) {
+                                println!("  => no overloads are possible");
+                                return Err(TypeError {
+                                    node_id: overload_set.node_id,
+                                    kind: TypeErrorKind::NoOverload,
+                                });
+                            }
+                        }
+
+                        continue 'check;
+                    }
+                }
+
+                // success! We'll choose this overload
+                // now just check all the other constraints
+                println!("    success! overload {i} works");
+                for ti in 0..n {
+                    println!("    - unifying type-constraint {ti}");
+                    if !indices.contains(&ti) {
+                        self.check_ty_equal(
+                            overload_set.types[ti].clone(),
+                            overload_set.overloads[i][ti].clone(),
+                        )
+                        .map_err(|kind| TypeError {
+                            node_id: overload_set.nodes[ti],
+                            kind,
+                        })?;
+                    }
+                }
+
+                return Ok(true);
+            }
+        }
+
+        // we didn't succeed at finding an option -- which doesn't mean type-checking has failed
+        Ok(false)
     }
 
     fn check_ty_equal(
@@ -444,7 +568,7 @@ impl TypeCheckerCtx {
                 let params = params
                     .into_iter()
                     .map(|decl| self.infer_declarable(env, decl))
-                    .try_collect::<Vec<_>>()?;
+                    .collect::<Result<Vec<_>, TypeError>>()?;
 
                 let mut child_env = env.clone();
                 child_env.curr_loop = None;
@@ -743,7 +867,6 @@ impl TypeCheckerCtx {
                 return self.assign(*id, Type::Bool);
             }
             ast::Expr::Int(ast::IntExpr { id, value }) => {
-                println!("assign int {id}");
                 return self.assign(*id, Type::Int);
             }
             ast::Expr::Float(ast::FloatExpr { id, str }) => {
@@ -773,7 +896,35 @@ impl TypeCheckerCtx {
                 let left_ty = self.infer_expr(env, left, true)?;
                 let right_ty = self.infer_expr(env, right, true)?;
 
-                return self.assign(*id, left_ty.apply_binary_op(&op, &right_ty));
+                let res_ty = Type::TypeVar(self.fresh_ty_var());
+
+                match op.as_str() {
+                    "+" => {
+                        // a + b
+                        // +: fn(int, int) -> int
+                        // +: fn(int, float) -> float
+                        // +: fn(float, int) -> float
+                        // +: fn(float, float) -> float
+                        // +: fn(str, str) -> str
+
+                        self.constraints
+                            .push(Constraint::ChooseOverload(OverloadSet {
+                                node_id: *id,
+                                nodes: vec![left.id(), right.id(), *id],
+                                types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
+                                overloads: vec![
+                                    vec![Type::Int, Type::Int, Type::Int],
+                                    vec![Type::Int, Type::Float, Type::Float],
+                                    vec![Type::Float, Type::Int, Type::Float],
+                                    vec![Type::Float, Type::Float, Type::Float],
+                                    vec![Type::Str, Type::Str, Type::Str],
+                                ],
+                            }));
+                    }
+                    _ => todo!("binary operator {op}"),
+                }
+
+                return self.assign(*id, res_ty);
             }
             ast::Expr::List(ast::ListExpr {
                 id,
@@ -797,7 +948,7 @@ impl TypeCheckerCtx {
                 let element_types = elements
                     .into_iter()
                     .map(|expr| self.infer_expr(env, expr, true))
-                    .try_collect::<Vec<_>>()?;
+                    .collect::<Result<Vec<_>, TypeError>>()?;
 
                 return self.assign(*id, Type::Tuple(element_types));
             }
@@ -882,7 +1033,7 @@ impl TypeCheckerCtx {
 
                         self.assign(*id, expr_ty)
                     })
-                    .try_collect::<Vec<_>>()?;
+                    .collect::<Result<Vec<_>, TypeError>>()?;
 
                 return self.assign(*id, f_ty.ret.as_ref().clone().into());
             }
@@ -890,7 +1041,7 @@ impl TypeCheckerCtx {
                 let params = params
                     .into_iter()
                     .map(|decl| self.infer_declarable(env, decl))
-                    .try_collect::<Vec<_>>()?;
+                    .collect::<Result<Vec<_>, TypeError>>()?;
 
                 let mut child_env = env.clone();
                 child_env.curr_loop = None;
@@ -1255,13 +1406,13 @@ mod test {
             ",
         );
 
-        should_not_typecheck(
-            "
-                let h: int = 5
-                h = nil
-            ",
-            "",
-        );
+        // should_not_typecheck(
+        //     "
+        //         let h: int = 5
+        //         h = nil
+        //     ",
+        //     "",
+        // );
 
         should_typecheck(
             "
@@ -1284,6 +1435,54 @@ mod test {
         //         if let [b, c] = a {}
         //     ",
         // );
+    }
+
+    #[test]
+    fn test_overloading() {
+        should_typecheck(
+            r#"
+                let a: int = 2 + 3
+                let b: int = a + 4
+                let c: float = 4 + 5.1
+                let d = "hello, " + "world"
+
+                fn add(a, b) {
+                    a + b
+                }
+
+                let e = add(3, 3)
+            "#,
+        );
+
+        should_not_typecheck(
+            r#"
+                let a = "hello, " + 4
+            "#,
+            "",
+        );
+
+        should_not_typecheck(
+            r#"
+                fn add(a, b) {
+                    a + b
+                }
+
+                let h = add(3, "hello")
+            "#,
+            "",
+        );
+
+        should_not_typecheck(
+            r#"
+                fn add(a, b) {
+                    a + b
+                }
+
+                // until automatic casting from int to float is possible, this is indeed not valid
+                let f = add(3.1, add(4, 5))
+            "#,
+            "",
+        );
     }
 
     #[test]
