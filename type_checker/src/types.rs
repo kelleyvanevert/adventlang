@@ -1,4 +1,4 @@
-use ena::unify::{EqUnifyValue, InPlaceUnificationTable};
+use ena::unify::{EqUnifyValue, InPlaceUnificationTable, UnifyValue};
 use parser::ast;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
@@ -13,6 +13,7 @@ pub enum Type {
     Float,
     Regex,
     Fn(FnType),
+    NamedFn(Vec<FnType>),
     List(Box<Type>),
     Tuple(Vec<Type>),
     Dict { key: Box<Type>, val: Box<Type> },
@@ -28,6 +29,63 @@ pub struct FnType {
     pub generics: Vec<TypeVar>,
     pub params: Vec<Type>,
     pub ret: Box<Type>,
+}
+
+fn equal_bound_var(bound: &Vec<(TypeVar, TypeVar)>, x: TypeVar, y: TypeVar, i: usize) -> bool {
+    if i == bound.len() && x == y {
+        true
+    } else if bound[i] == (x, y) {
+        true
+    } else {
+        bound[i].0 != x && bound[i].1 != y && equal_bound_var(bound, x, y, i + 1)
+    }
+}
+
+impl FnType {
+    pub fn is_concrete(&self, bound: &Vec<TypeVar>) -> bool {
+        let bound = vec![bound.clone(), self.generics.clone()].concat();
+        self.params.iter().all(|p| p.is_concrete(&bound)) && self.ret.is_concrete(&bound)
+    }
+
+    // TODO test
+    pub fn alpha_eq(&self, other: &FnType, bound: &Vec<(TypeVar, TypeVar)>) -> bool {
+        if self.generics.len() != other.generics.len() || self.params.len() != other.params.len() {
+            return false;
+        }
+
+        let mut bound = bound.clone();
+        bound.extend((0..self.generics.len()).map(|i| (self.generics[i], other.generics[i])));
+
+        (0..self.params.len()).all(|i| self.params[i].alpha_eq(&other.params[i], &bound))
+            && self.ret.alpha_eq(&other.ret, &bound)
+    }
+
+    pub fn occurs_check(&self, var: TypeVar) -> Result<(), Type> {
+        if self.generics.contains(&var) {
+            // the variable is shadowed
+            return Ok(());
+        }
+
+        for p in &self.params {
+            p.occurs_check(var).map_err(|_| self.clone());
+        }
+        self.ret.occurs_check(var).map_err(|_| self.clone());
+        Ok(())
+    }
+
+    pub fn substitute(
+        &mut self,
+        bound: &mut Vec<TypeVar>,
+        /* unbound, */
+        unification_table: &mut InPlaceUnificationTable<TypeVar>,
+    ) {
+        bound.extend_from_slice(&mut self.generics);
+
+        for p in &mut self.params {
+            p.substitute(bound, unification_table);
+        }
+        self.ret.substitute(bound, unification_table);
+    }
 }
 
 impl Type {
@@ -49,18 +107,44 @@ impl Type {
         }
     }
 
+    pub fn alpha_eq(&self, other: &Type, bound: &Vec<(TypeVar, TypeVar)>) -> bool {
+        match (self, other) {
+            (
+                Type::Nil | Type::Bool | Type::Str | Type::Int | Type::Float | Type::Regex,
+                Type::Nil | Type::Bool | Type::Str | Type::Int | Type::Float | Type::Regex,
+            ) => self == other,
+            (Type::TypeVar(x), Type::TypeVar(y)) => equal_bound_var(bound, *x, *y, 0),
+            (Type::Fn(a), Type::Fn(b)) => a.alpha_eq(b, bound),
+            (Type::NamedFn(a), Type::NamedFn(b)) => {
+                a.len() == b.len() && (0..a.len()).all(|i| a[i].alpha_eq(&b[i], bound))
+            }
+            (Type::List(a), Type::List(b)) => a.alpha_eq(b, bound),
+            (Type::Tuple(a), Type::Tuple(b)) => {
+                a.len() == b.len() && (0..a.len()).all(|i| a[i].alpha_eq(&b[i], bound))
+            }
+            (
+                Type::Dict {
+                    key: a_key,
+                    val: a_val,
+                },
+                Type::Dict {
+                    key: b_key,
+                    val: b_val,
+                },
+            ) => a_key.alpha_eq(b_key, bound) && b_val.alpha_eq(b_val, bound),
+            (Type::Nullable { child: a_child }, Type::Nullable { child: b_child }) => {
+                a_child.alpha_eq(b_child, bound)
+            }
+            _ => false,
+        }
+    }
+
     pub fn is_concrete(&self, bound: &Vec<TypeVar>) -> bool {
         match self {
             Type::Nil | Type::Bool | Type::Str | Type::Int | Type::Float | Type::Regex => true,
             Type::TypeVar(v) => false,
-            Type::Fn(FnType {
-                generics,
-                params,
-                ret,
-            }) => {
-                let bound = vec![bound.clone(), generics.clone()].concat();
-                params.iter().all(|p| p.is_concrete(&bound)) && ret.is_concrete(&bound)
-            }
+            Type::Fn(def) => def.is_concrete(bound),
+            Type::NamedFn(defs) => defs.iter().all(|el| el.is_concrete(bound)),
             Type::List(element_ty) => element_ty.is_concrete(bound),
             Type::Tuple(elements) => elements.iter().all(|el| el.is_concrete(bound)),
             Type::Dict { key, val } => key.is_concrete(bound) && val.is_concrete(bound),
@@ -78,39 +162,30 @@ impl Type {
                     Ok(())
                 }
             }
-            Type::Fn(FnType {
-                generics,
-                params,
-                ret,
-            }) => {
-                if generics.contains(&var) {
-                    // the variable is shadowed
-                    return Ok(());
+            Type::Fn(def) => def.occurs_check(var),
+            Type::NamedFn(defs) => {
+                for def in defs {
+                    def.occurs_check(var).map_err(|_| self.clone())?;
                 }
-
-                for p in params {
-                    p.occurs_check(var).map_err(|_| self.clone());
-                }
-                (*ret).occurs_check(var).map_err(|_| self.clone());
                 Ok(())
             }
             Type::List(element_ty) => {
-                (*element_ty).occurs_check(var).map_err(|_| self.clone());
+                (*element_ty).occurs_check(var).map_err(|_| self.clone())?;
                 Ok(())
             }
             Type::Tuple(elements) => {
                 for el in elements {
-                    el.occurs_check(var).map_err(|_| self.clone());
+                    el.occurs_check(var).map_err(|_| self.clone())?;
                 }
                 Ok(())
             }
             Type::Dict { key, val } => {
-                (*key).occurs_check(var).map_err(|_| self.clone());
-                (*val).occurs_check(var).map_err(|_| self.clone());
+                (*key).occurs_check(var).map_err(|_| self.clone())?;
+                (*val).occurs_check(var).map_err(|_| self.clone())?;
                 Ok(())
             }
             Type::Nullable { child } => {
-                (*child).occurs_check(var).map_err(|_| self.clone());
+                (*child).occurs_check(var).map_err(|_| self.clone())?;
                 Ok(())
             }
         }
@@ -167,17 +242,13 @@ impl Type {
             Type::Nullable { child } => {
                 child.substitute(bound, unification_table);
             }
-            Type::Fn(FnType {
-                generics,
-                params,
-                ret,
-            }) => {
-                bound.extend_from_slice(generics);
-
-                for p in params {
-                    p.substitute(bound, unification_table);
+            Type::Fn(def) => {
+                def.substitute(bound, unification_table);
+            }
+            Type::NamedFn(defs) => {
+                for def in defs {
+                    def.substitute(bound, unification_table);
                 }
-                ret.substitute(bound, unification_table);
             }
         }
     }

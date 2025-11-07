@@ -33,6 +33,7 @@ pub mod types;
 
 #[derive(Debug, Clone)]
 struct Env {
+    typevars: FxHashMap<String, TypeVar>,
     locals: FxHashMap<String, Type>,
     loops: FxHashMap<String, Type>,
     curr_loop: Option<String>,
@@ -41,6 +42,7 @@ struct Env {
 impl Env {
     fn new() -> Self {
         Self {
+            typevars: FxHashMap::default(),
             locals: FxHashMap::default(),
             loops: FxHashMap::default(),
             curr_loop: None,
@@ -94,7 +96,9 @@ pub enum TypeErrorKind {
     #[error("arguments don't match up with callee")]
     ArgsMismatch,
     #[error("local not defined: {0}")]
-    MissingLocal(String),
+    UnknownLocal(String),
+    #[error("typevar not defined: {0}")]
+    UnknownTypeVar(String),
 }
 
 impl TypeErrorKind {
@@ -116,7 +120,8 @@ impl TypeErrorKind {
             }
             Self::NoOverload => {}
             Self::ArgsMismatch => {}
-            Self::MissingLocal(_) => {}
+            Self::UnknownLocal(_) => {}
+            Self::UnknownTypeVar(_) => {}
         }
     }
 }
@@ -283,8 +288,7 @@ impl TypeCheckerCtx {
                     );
                     let mgu_so_far = self.normalize_ty(overload_set.types[ti].clone());
 
-                    // TODO: make sure that equality is checked UP TO RENAMING
-                    if mgu_so_far != overload_set.overloads[i][ti] {
+                    if !mgu_so_far.alpha_eq(&overload_set.overloads[i][ti], &vec![]) {
                         println!("      - failed, bail overload");
                         self.unification_table.rollback_to(snapshot);
 
@@ -310,6 +314,10 @@ impl TypeCheckerCtx {
                 // success! We'll choose this overload
                 // now just check all the other constraints
                 println!("    success! overload {i} works");
+
+                // not sure if this is necessary
+                self.unification_table.commit(snapshot);
+
                 for ti in 0..n {
                     println!("    - unifying type-constraint {ti}");
                     if !indices.contains(&ti) {
@@ -332,13 +340,9 @@ impl TypeCheckerCtx {
         Ok(false)
     }
 
-    fn check_ty_equal(
-        &mut self,
-        unnorm_left: Type,
-        unnorm_right: Type,
-    ) -> Result<(), TypeErrorKind> {
-        let left = self.normalize_ty(unnorm_left);
-        let right = self.normalize_ty(unnorm_right);
+    fn check_ty_equal(&mut self, left: Type, right: Type) -> Result<(), TypeErrorKind> {
+        let left = self.normalize_ty(left);
+        let right = self.normalize_ty(right);
 
         match (left, right) {
             (Type::Nil, Type::Nil) => Ok(()),
@@ -425,19 +429,31 @@ impl TypeCheckerCtx {
         }
     }
 
+    fn normalize_fn_ty(
+        &mut self,
+        FnType {
+            generics,
+            params,
+            ret,
+        }: FnType,
+    ) -> FnType {
+        FnType {
+            generics,
+            params: params.into_iter().map(|ty| self.normalize_ty(ty)).collect(),
+            ret: self.normalize_ty(*ret).into(),
+        }
+    }
+
     // do something with double nullability?
     fn normalize_ty(&mut self, ty: Type) -> Type {
         match ty {
             Type::Nil | Type::Bool | Type::Str | Type::Int | Type::Float | Type::Regex => ty,
-            Type::Fn(FnType {
-                generics,
-                params,
-                ret,
-            }) => Type::Fn(FnType {
-                generics,
-                params: params.into_iter().map(|ty| self.normalize_ty(ty)).collect(),
-                ret: self.normalize_ty(*ret).into(),
-            }),
+            Type::Fn(def) => Type::Fn(self.normalize_fn_ty(def)),
+            Type::NamedFn(defs) => Type::NamedFn(
+                defs.into_iter()
+                    .map(|def| self.normalize_fn_ty(def))
+                    .collect(),
+            ),
             Type::List(ty) => Type::List(self.normalize_ty(*ty).into()),
             Type::Tuple(elements) => Type::Tuple(
                 elements
@@ -459,35 +475,58 @@ impl TypeCheckerCtx {
         }
     }
 
-    fn convert_hint_to_type(&mut self, ty: &ast::TypeHint) -> Type {
+    fn convert_hint_to_type(&mut self, env: &Env, ty: &ast::TypeHint) -> Result<Type, TypeError> {
         match ty {
-            ast::TypeHint::Bool(_) => Type::Bool,
-            ast::TypeHint::Int(_) => Type::Int,
-            ast::TypeHint::Float(_) => Type::Float,
-            ast::TypeHint::Regex(_) => Type::Regex,
-            ast::TypeHint::Str(_) => Type::Str,
-            ast::TypeHint::Nil(_) => Type::Nil,
+            ast::TypeHint::Bool(_) => Ok(Type::Bool),
+            ast::TypeHint::Int(_) => Ok(Type::Int),
+            ast::TypeHint::Float(_) => Ok(Type::Float),
+            ast::TypeHint::Regex(_) => Ok(Type::Regex),
+            ast::TypeHint::Str(_) => Ok(Type::Str),
+            ast::TypeHint::Nil(_) => Ok(Type::Nil),
             // ast::TypeHint::SomeFn(_) => Type::Nil, // TODO
-            ast::TypeHint::Nullable(t) => Type::Nullable {
-                child: self.convert_hint_to_type(&t.child).into(),
-            },
+            ast::TypeHint::Nullable(t) => Ok(Type::Nullable {
+                child: self.convert_hint_to_type(env, &t.child)?.into(),
+            }),
             ast::TypeHint::Fn(ast::FnTypeHint {
                 id,
                 generics,
                 params,
                 ret,
-            }) => Type::Fn(FnType {
-                generics: generics
+            }) => {
+                let mut typing_child_env = env.clone();
+
+                let generics = generics
                     .into_iter()
-                    // TODO somehow manage these
-                    .map(|var_hint| self.fresh_ty_var())
-                    .collect(),
-                params: params
-                    .into_iter()
-                    .map(|hint| self.convert_hint_to_type(hint))
-                    .collect(),
-                ret: self.convert_hint_to_type(&ret).into(),
-            }),
+                    .map(|var_hint| {
+                        let tv = self.fresh_ty_var();
+                        typing_child_env
+                            .typevars
+                            .insert(var_hint.var.as_str().to_string(), tv);
+
+                        tv
+                    })
+                    .collect::<Vec<_>>();
+
+                Ok(Type::Fn(FnType {
+                    generics,
+                    params: params
+                        .into_iter()
+                        .map(|hint| self.convert_hint_to_type(&mut typing_child_env, hint))
+                        .collect::<Result<Vec<_>, TypeError>>()?,
+                    ret: self
+                        .convert_hint_to_type(&mut typing_child_env, &ret)?
+                        .into(),
+                }))
+            }
+            ast::TypeHint::Var(ast::VarTypeHint { id, var }) => {
+                match env.typevars.get(var.as_str()).cloned() {
+                    Some(var) => Ok(Type::TypeVar(var)),
+                    None => Err(TypeError {
+                        node_id: *id,
+                        kind: TypeErrorKind::UnknownTypeVar(var.as_str().to_string()),
+                    }),
+                }
+            }
             ty => todo!("can't convert typehint to type: {:?}", ty),
         }
     }
@@ -566,6 +605,11 @@ impl TypeCheckerCtx {
                 ret,
                 body,
             }) => {
+                // allow overloads of named fns -> should end up in a single `Type::Namedfn(overloads)`
+                // if let Some(ty) = env.locals.get(&name.str).cloned() {
+                //     return ty;
+                // }
+
                 let placeholder_ty = Type::TypeVar(self.fresh_ty_var());
                 env.locals.insert(name.str.clone(), placeholder_ty.clone());
                 placeholder_ty
@@ -588,24 +632,31 @@ impl TypeCheckerCtx {
                 ret,
                 body,
             }) => {
-                let params = params
-                    .into_iter()
-                    .map(|decl| self.infer_declarable(env, decl))
-                    .collect::<Result<Vec<_>, TypeError>>()?;
-
-                let mut child_env = env.clone();
-                child_env.curr_loop = None;
-                child_env.loops = FxHashMap::default();
-                let body_ty = self.infer_block(env, body, true)?;
+                let mut typing_child_env = env.clone();
 
                 let generics = generics
                     .into_iter()
                     .map(|var_hint| {
-                        todo!("manage generics in scope");
-                        self.fresh_ty_var()
+                        let tv = self.fresh_ty_var();
+                        typing_child_env
+                            .typevars
+                            .insert(var_hint.var.as_str().to_string(), tv);
+
+                        tv
                     })
                     .collect::<Vec<_>>();
 
+                let params = params
+                    .into_iter()
+                    .map(|decl| self.infer_declarable(&mut typing_child_env, decl))
+                    .collect::<Result<Vec<_>, TypeError>>()?;
+
+                let mut child_env = typing_child_env.clone();
+                child_env.curr_loop = None;
+                child_env.loops = FxHashMap::default();
+                let body_ty = self.infer_block(&mut child_env, body, true)?;
+
+                // TODO -> NamedFn
                 let ty = Type::Fn(FnType {
                     generics: generics.clone(),
                     params: params.clone(),
@@ -785,7 +836,8 @@ impl TypeCheckerCtx {
 
                 let ty = ty
                     .clone()
-                    .map(|ty| self.convert_hint_to_type(&ty))
+                    .map(|ty| self.convert_hint_to_type(&*env, &ty))
+                    .transpose()?
                     .unwrap_or_else(|| Type::TypeVar(self.fresh_ty_var()));
 
                 env.locals.insert(var.as_str().to_string(), ty.clone());
@@ -808,7 +860,8 @@ impl TypeCheckerCtx {
                 if let Some(ast::DeclareRest { id, var, ty }) = rest {
                     let ty = ty
                         .clone()
-                        .map(|ty| self.convert_hint_to_type(&ty))
+                        .map(|ty| self.convert_hint_to_type(&*env, &ty))
+                        .transpose()?
                         .unwrap_or_else(|| Type::TypeVar(self.fresh_ty_var()));
 
                     self.assign(*id, ty)?;
@@ -899,7 +952,7 @@ impl TypeCheckerCtx {
                 let Some(ty) = env.locals.get(var.as_str()).cloned() else {
                     return Err(TypeError {
                         node_id: *id,
-                        kind: TypeErrorKind::MissingLocal(var.name.clone()),
+                        kind: TypeErrorKind::UnknownLocal(var.name.clone()),
                     });
                 };
 
@@ -1218,7 +1271,7 @@ mod test {
     use parser::{ParseResult, parse_document_ts, parse_type};
     use tree_sitter::{Node, Tree};
 
-    use crate::{TypeCheckerCtx, TypeError, TypeErrorKind, types::Type};
+    use crate::{Env, TypeCheckerCtx, TypeError, TypeErrorKind, types::Type};
 
     fn should_typecheck(source: &str) {
         let parse_result = parse_document_ts(source).expect("can parse");
@@ -1260,11 +1313,15 @@ mod test {
                     ("NoOverload", TypeErrorKind::NoOverload) => {}
                     ("ArgsMismatch", TypeErrorKind::ArgsMismatch) => {}
                     ("NotCallable", TypeErrorKind::NotCallable(_)) => {}
-                    ("MissingLocal", TypeErrorKind::MissingLocal(_)) => {}
+                    ("UnknownLocal", TypeErrorKind::UnknownLocal(_)) => {}
                     (diff, TypeErrorKind::NotEqual(le, ri)) if diff.contains(" != ") => {
                         let (a, b) = diff.split_once(" != ").unwrap();
-                        let a = ctx.convert_hint_to_type(&parse_type(a));
-                        let b = ctx.convert_hint_to_type(&parse_type(b));
+                        let a = ctx
+                            .convert_hint_to_type(&Env::new(), &parse_type(a))
+                            .unwrap();
+                        let b = ctx
+                            .convert_hint_to_type(&Env::new(), &parse_type(b))
+                            .unwrap();
                         if a == le && b == ri || a == ri && b == le {
                             // all good
                         } else {
@@ -1541,6 +1598,22 @@ mod test {
     }
 
     #[test]
+    fn generics() {
+        should_typecheck(
+            "
+                // typevar is brought into scope when parsing a named fn
+                fn bla<t>(a: t) {
+                    let b: t = a
+                }
+
+                // typevar is handled correctly when parsing a type hint
+                // TODO: actually type-checking it
+                // let g: fn<t>(t) -> t = |x| { x }
+            ",
+        );
+    }
+
+    #[test]
     fn if_let_branches() {
         // should_typecheck(
         //     "
@@ -1695,7 +1768,7 @@ mod test {
                 let b = |n: int| { a(true) }
                 let c = || { b(5) }
             ",
-            "MissingLocal",
+            "UnknownLocal",
         );
     }
 }
