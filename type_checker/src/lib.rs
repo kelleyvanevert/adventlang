@@ -93,6 +93,8 @@ pub enum TypeErrorKind {
     NotCallable(Type),
     #[error("arguments don't match up with callee")]
     ArgsMismatch,
+    #[error("max recursion reached")]
+    Recursion,
     #[error("local not defined: {0}")]
     MissingLocal(String),
 }
@@ -114,6 +116,7 @@ impl TypeErrorKind {
             Self::NotCallable(t) => {
                 t.substitute(bound, unification_table);
             }
+            Self::Recursion => {}
             Self::NoOverload => {}
             Self::ArgsMismatch => {}
             Self::MissingLocal(_) => {}
@@ -134,7 +137,10 @@ struct TypeCheckerCtx {
 #[derive(Debug, Clone)]
 enum Constraint {
     TypeEqual(usize, Type, Type),
-    ChooseOverload(OverloadSet),
+    ChooseOverload {
+        attempt: usize,
+        overload_set: OverloadSet,
+    },
 }
 
 /// Supports choosing an overload from a list of FULLY CONCRETE overloads
@@ -197,14 +203,23 @@ impl TypeCheckerCtx {
                     self.check_ty_equal(left.clone(), right.clone())
                         .map_err(|kind| TypeError { node_id, kind })?;
                 }
-                Constraint::ChooseOverload(overload_set) => {
-                    println!(
-                        "SELECTING OVERLOAD -- {} other constraints left to do",
-                        todo.len()
-                    );
+                Constraint::ChooseOverload {
+                    attempt,
+                    overload_set,
+                } => {
                     if !self.select_overload(overload_set.clone())? {
+                        if attempt > 10 {
+                            return Err(TypeError {
+                                node_id: overload_set.node_id,
+                                kind: TypeErrorKind::Recursion,
+                            });
+                        }
+
                         // try again later, when more concrete information is available
-                        todo.push_back(Constraint::ChooseOverload(overload_set));
+                        todo.push_back(Constraint::ChooseOverload {
+                            attempt: attempt + 1,
+                            overload_set,
+                        });
                     }
                 }
             }
@@ -218,6 +233,8 @@ impl TypeCheckerCtx {
         let num_overloads = overload_set.overloads.len();
 
         let mut impossible = (0..num_overloads).map(|_| false).collect::<Vec<_>>();
+
+        println!("SELECTING OVERLOAD");
 
         for indices in (0..n).powerset() {
             if indices.len() == 0 {
@@ -907,8 +924,9 @@ impl TypeCheckerCtx {
                         // +: fn(float, float) -> float
                         // +: fn(str, str) -> str
 
-                        self.constraints
-                            .push(Constraint::ChooseOverload(OverloadSet {
+                        self.constraints.push(Constraint::ChooseOverload {
+                            attempt: 0,
+                            overload_set: OverloadSet {
                                 node_id: *id,
                                 nodes: vec![left.id(), right.id(), *id],
                                 types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
@@ -919,7 +937,8 @@ impl TypeCheckerCtx {
                                     vec![Type::Float, Type::Float, Type::Float],
                                     vec![Type::Str, Type::Str, Type::Str],
                                 ],
-                            }));
+                            },
+                        });
                     }
                     _ => todo!("binary operator {op}"),
                 }
@@ -1232,6 +1251,7 @@ mod test {
                     ("", _) => {
                         // no expectations
                     }
+                    ("Recursion", TypeErrorKind::Recursion) => {}
                     ("ArgsMismatch", TypeErrorKind::ArgsMismatch) => {}
                     ("NotCallable", TypeErrorKind::NotCallable(_)) => {}
                     ("MissingLocal", TypeErrorKind::MissingLocal(_)) => {}
@@ -1472,6 +1492,12 @@ mod test {
             "",
         );
 
+        should_typecheck(
+            r#"
+                let a = 3.1 + (4 + 5)
+            "#,
+        );
+
         should_not_typecheck(
             r#"
                 fn add(a, b) {
@@ -1482,6 +1508,15 @@ mod test {
                 let f = add(3.1, add(4, 5))
             "#,
             "",
+        );
+
+        should_not_typecheck(
+            r#"
+                fn add(a, b) {
+                    a + b
+                }
+            "#,
+            "Recursion",
         );
     }
 
