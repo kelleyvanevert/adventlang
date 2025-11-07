@@ -1488,6 +1488,20 @@ mod test {
         );
 
         should_not_typecheck(
+            "
+                let arr = [1, 2, 3]
+                let a = arr[1 + 2.3]
+            ",
+            "",
+        );
+
+        should_typecheck(
+            "
+                [1,2,3][2] + [1.1,2.2,3.3][2]
+            ",
+        );
+
+        should_not_typecheck(
             r#"
                 fn add(a, b) {
                     a + b
