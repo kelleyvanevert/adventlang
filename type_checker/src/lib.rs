@@ -93,8 +93,6 @@ pub enum TypeErrorKind {
     NotCallable(Type),
     #[error("arguments don't match up with callee")]
     ArgsMismatch,
-    #[error("max recursion reached")]
-    Recursion,
     #[error("local not defined: {0}")]
     MissingLocal(String),
 }
@@ -116,7 +114,6 @@ impl TypeErrorKind {
             Self::NotCallable(t) => {
                 t.substitute(bound, unification_table);
             }
-            Self::Recursion => {}
             Self::NoOverload => {}
             Self::ArgsMismatch => {}
             Self::MissingLocal(_) => {}
@@ -129,6 +126,7 @@ struct TypeCheckerCtx {
     unification_table: InPlaceUnificationTable<TypeVar>,
     constraints: Vec<Constraint>,
     next_loop_id: usize,
+    progress: usize,
 
     // node id -> type
     types: FxHashMap<usize, Type>,
@@ -138,7 +136,7 @@ struct TypeCheckerCtx {
 enum Constraint {
     TypeEqual(usize, Type, Type),
     ChooseOverload {
-        attempt: usize,
+        last_checked: usize,
         overload_set: OverloadSet,
     },
 }
@@ -158,6 +156,7 @@ impl TypeCheckerCtx {
             unification_table: InPlaceUnificationTable::new(),
             constraints: vec![],
             next_loop_id: 0,
+            progress: 0,
             types: FxHashMap::default(),
         }
     }
@@ -197,6 +196,9 @@ impl TypeCheckerCtx {
     fn solve_constraints(&mut self) -> Result<(), TypeError> {
         let mut todo = VecDeque::from(self.constraints.clone());
 
+        // so that it's initially bigger than `last_progress`
+        self.progress = 1;
+
         while let Some(constraint) = todo.pop_front() {
             match constraint {
                 Constraint::TypeEqual(node_id, left, right) => {
@@ -204,20 +206,21 @@ impl TypeCheckerCtx {
                         .map_err(|kind| TypeError { node_id, kind })?;
                 }
                 Constraint::ChooseOverload {
-                    attempt,
+                    last_checked,
                     overload_set,
                 } => {
                     if !self.select_overload(overload_set.clone())? {
-                        if attempt > 10 {
+                        // if no progress was made, then the overload can't be chosen
+                        if last_checked >= self.progress {
                             return Err(TypeError {
                                 node_id: overload_set.node_id,
-                                kind: TypeErrorKind::Recursion,
+                                kind: TypeErrorKind::NoOverload,
                             });
                         }
 
                         // try again later, when more concrete information is available
                         todo.push_back(Constraint::ChooseOverload {
-                            attempt: attempt + 1,
+                            last_checked: self.progress,
                             overload_set,
                         });
                     }
@@ -401,16 +404,19 @@ impl TypeCheckerCtx {
             (a, Type::Nullable { child: b_child }) => self.check_ty_equal(a, *b_child),
             (Type::Nullable { child: a_child }, b) => self.check_ty_equal(*a_child, b),
 
-            (Type::TypeVar(a), Type::TypeVar(b)) => self
-                .unification_table
-                .unify_var_var(a, b)
-                .map_err(|(l, r)| TypeErrorKind::NotEqual(l, r)),
+            (Type::TypeVar(a), Type::TypeVar(b)) => {
+                self.progress += 1;
+                self.unification_table
+                    .unify_var_var(a, b)
+                    .map_err(|(l, r)| TypeErrorKind::NotEqual(l, r))
+            }
             (Type::TypeVar(v), ty) | (ty, Type::TypeVar(v)) => {
                 ty.occurs_check(v)
                     .map_err(|ty| TypeErrorKind::InfiniteType(v, ty))?;
 
                 // println!("unify {v:?} and {ty:?} succeeded");
 
+                self.progress += 1;
                 self.unification_table
                     .unify_var_value(v, Some(ty))
                     .map_err(|(l, r)| TypeErrorKind::NotEqual(l, r))
@@ -925,7 +931,7 @@ impl TypeCheckerCtx {
                         // +: fn(str, str) -> str
 
                         self.constraints.push(Constraint::ChooseOverload {
-                            attempt: 0,
+                            last_checked: 0,
                             overload_set: OverloadSet {
                                 node_id: *id,
                                 nodes: vec![left.id(), right.id(), *id],
@@ -1251,7 +1257,7 @@ mod test {
                     ("", _) => {
                         // no expectations
                     }
-                    ("Recursion", TypeErrorKind::Recursion) => {}
+                    ("NoOverload", TypeErrorKind::NoOverload) => {}
                     ("ArgsMismatch", TypeErrorKind::ArgsMismatch) => {}
                     ("NotCallable", TypeErrorKind::NotCallable(_)) => {}
                     ("MissingLocal", TypeErrorKind::MissingLocal(_)) => {}
@@ -1516,7 +1522,7 @@ mod test {
                     a + b
                 }
             "#,
-            "Recursion",
+            "NoOverload",
         );
     }
 
