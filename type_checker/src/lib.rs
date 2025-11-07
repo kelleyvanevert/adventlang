@@ -925,8 +925,8 @@ impl TypeCheckerCtx {
                             self.assign(*id, Type::Str)?;
                         }
                         ast::StrPiece::Interpolation(ast::StrPieceInterpolation { id, expr }) => {
-                            self.infer_expr(env, expr, true)?;
-                            self.assign(*id, Type::Str)?; // TODO actually this needs to be converted, but that's not here yet, but then does it make sense to assign this type?
+                            let ty = self.infer_expr(env, expr, true)?;
+                            self.assign(*id, ty)?;
                         }
                     }
                 }
