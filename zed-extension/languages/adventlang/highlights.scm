@@ -60,6 +60,7 @@
 "if" @keyword
 "in" @keyword
 "let" @keyword
+"const" @keyword
 "return" @keyword
 "while" @keyword
 "loop" @keyword

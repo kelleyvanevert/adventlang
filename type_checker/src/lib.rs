@@ -9,8 +9,12 @@ use itertools::Itertools;
 use parser::ast::{self, AstNode};
 use thiserror::Error;
 
-use crate::types::{FnType, Type, TypeVar};
+use crate::{
+    stdlib::add_stdlib_types,
+    types::{FnType, Type, TypeVar},
+};
 
+mod stdlib;
 pub mod types;
 
 // TODO:
@@ -185,7 +189,7 @@ impl TypeCheckerCtx {
         id
     }
 
-    fn fresh_ty_var(&mut self) -> TypeVar {
+    pub(crate) fn fresh_ty_var(&mut self) -> TypeVar {
         let v = self.unification_table.new_key(None);
         self.all_vars.push(v);
         v
@@ -200,6 +204,8 @@ impl TypeCheckerCtx {
 
     pub fn typecheck(&mut self, doc: &ast::Document) -> Result<(), TypeError> {
         let mut env = Env::new();
+        add_stdlib_types(&mut env, self);
+
         let mut typed_doc = self.infer_doc(&mut env, doc)?;
 
         // println!("\nCONSTRAINTS:");
@@ -741,7 +747,11 @@ impl TypeCheckerCtx {
         }
     }
 
-    fn convert_hint_to_type(&mut self, env: &Env, ty: &ast::TypeHint) -> Result<Type, TypeError> {
+    pub(crate) fn convert_hint_to_type(
+        &mut self,
+        env: &Env,
+        ty: &ast::TypeHint,
+    ) -> Result<Type, TypeError> {
         match ty {
             ast::TypeHint::Bool(_) => Ok(Type::Bool),
             ast::TypeHint::Int(_) => Ok(Type::Int),
@@ -2031,6 +2041,7 @@ mod test {
     run_test_cases_in_file!(operator_overloading);
     run_test_cases_in_file!(generics);
     run_test_cases_in_file!(function_calls);
+    run_test_cases_in_file!(aoc_examples);
 
     // #[test]
     // fn nullability() {

@@ -1,11 +1,15 @@
+// ======
+// 2023 day 1
+// ok
+// ======
 
-const digits = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+let digits = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
 
 fn is_digit(s) {
   s :in digits
 }
 
-const nums = [
+let nums = [
   ("0", "0"),
   ("1", "1"),
   ("2", "2"),
@@ -64,16 +68,3 @@ fn bonus(input: str) {
 
   values :sum
 }
-
-assert(solve("1abc2
-pqr3stu8vwx
-a1b2c3d4e5f
-treb7uchet") == 142)
-
-assert(bonus("two1nine
-eightwothree
-abcone2threexyz
-xtwone3four
-4nineeightseven2
-zoneight234
-7pqrstsixteen") == 281)

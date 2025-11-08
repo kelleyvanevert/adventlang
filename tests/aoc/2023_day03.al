@@ -1,5 +1,5 @@
 
-let example_input = "
+const example_input = "
 467..114..
 ...*......
 ..35..633.

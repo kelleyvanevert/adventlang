@@ -1,6 +1,6 @@
 // al run day01/al/main.al < inputs/input_01.txt
 
-let example = "
+const example = "
 3   4
 4   3
 2   5

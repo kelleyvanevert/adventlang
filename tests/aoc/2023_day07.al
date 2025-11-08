@@ -1,5 +1,5 @@
 
-let example_input = "
+const example_input = "
 32T3K 765
 T55J5 684
 KK677 28
@@ -7,13 +7,13 @@ KTJJT 220
 QQQJA 483
 "
 
-let five_of_a_kind = 6
-let four_of_a_kind = 5
-let full_house = 4
-let three_of_a_kind = 3
-let two_pair = 2
-let one_pair = 1
-let high_card = 0
+const five_of_a_kind = 6
+const four_of_a_kind = 5
+const full_house = 4
+const three_of_a_kind = 3
+const two_pair = 2
+const one_pair = 1
+const high_card = 0
 
 fn solve(input: str) {
   let digits = @{

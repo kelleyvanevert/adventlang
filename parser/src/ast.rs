@@ -507,8 +507,14 @@ ast_nodes! {
         body: Block,
     }
 
+    struct ConstItem {
+        name: Identifier,
+        expr: Expr,
+    }
+
     enum Item {
         NamedFn(NamedFnItem),
+        ConstItem(ConstItem),
     }
 
     struct BreakStmt {

@@ -92,7 +92,8 @@ fn var(s: State) -> ParseResult<State, Var> {
     map(
         check(raw_identifier, |id| {
             ![
-                "fn", "if", "else", "then", "while", "do", "for", "let", "loop", "true", "false",
+                "fn", "if", "else", "then", "while", "do", "for", "let", "const", "loop", "true",
+                "false",
             ]
             .contains(&id.as_str())
         }),
@@ -1414,8 +1415,17 @@ fn named_fn_item(s: State) -> ParseResult<State, NamedFnItem> {
     .parse(s)
 }
 
+fn const_item(s: State) -> ParseResult<State, ConstItem> {
+    map(
+        seq((tag("const"), ws0, identifier, ws0, tag("="), ws0, expr)),
+        |(_, _, name, _, _, _, expr)| ConstItem::new_simple(name, expr),
+    )
+    .parse(s)
+}
+
 fn item(s: State) -> ParseResult<State, Item> {
     alt((
+        map(const_item, Item::ConstItem),
         map(named_fn_item, Item::NamedFn),
         // declare_stmt,
         // assign_stmt,

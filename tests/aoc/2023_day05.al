@@ -1,5 +1,5 @@
 
-let example_input = "
+const example_input = "
 seeds: 79 14 55 13
 
 seed-to-soil map:

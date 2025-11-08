@@ -137,7 +137,7 @@ impl<'a> Converter<'a> {
 
         for child in node.children(&mut node.walk()) {
             match child.kind() {
-                "named_fn_item" => block.items.push(self.as_item(child)),
+                "named_fn_item" | "const_item" => block.items.push(self.as_item(child)),
                 "{" | "}" => {}
                 "line_comment" => {}
                 _ => block.stmts.push(self.as_stmt(child)),
@@ -652,6 +652,11 @@ impl<'a> Converter<'a> {
                 ret: node.map_opt_child("return", |node| self.as_type(node)),
                 params: node.map_children("param", |node| self.as_declarable(node)),
                 body: node.map_child("body", |node| self.as_block(node)),
+            }),
+            "const_item" => Item::ConstItem(ConstItem {
+                id: self.fresh_ast_node_id(node),
+                name: node.map_child("name", |node| self.as_identifier(node)),
+                expr: node.map_child("expr", |node| self.as_expr(node)),
             }),
             _ => panic!("can't interpret as item: {:?}", node),
         }
