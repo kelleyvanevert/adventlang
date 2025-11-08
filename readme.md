@@ -71,6 +71,8 @@ I'm a bit ashamed how much effort this took, given that I literally did my maste
 
 - **Bidirectional type checking is essential for elided generics (parametric polymorphism).** Bidirectional type checking is specifically very useful for type checking operations that are otherwise very hard to generalize, for example elided generics (parametric polymorphism) in lambda expressions. Because checking a lambda against a generic signature is easy, whereas inferring a non- or possibly-generic type from it and then having to deal with it ... I wouldn't know how to start solving that.
 
+- Google Gemini is actually quite good at prividing help 😅 In research mode, the stuff it says is quite useful and well thought through.
+
 ## Issues encountered while creating the Tree-sitter parser
 
 ### `postfix_call_expr` precedence issue
