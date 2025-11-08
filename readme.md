@@ -61,6 +61,16 @@ Status:
 
 ![](./assets/adventlang_example_1.png)
 
+## Things learned while creating the type checker / inferencer
+
+I'm a bit ashamed how much effort this took, given that I literally did my masters' on these topics 😅 But here's some concrete things I learned:
+
+- "Hindley-Milner type checking" is just the typical unification thing, and it's quite easy. Fix the constraints at the end, or during the tree walking, whatever. **"You can't miss te MGU."** You also don't need bidirectional type checking for this.
+
+- **Overloading doesn't work well with Hindley-Milner type checking.** So, as I understand it for now, at least, is that you need to resort to hacks. The hack I used was to create a new type of constraint `ChooseOverload`, which can either succeed at selecting the only possible overload, or fail to have enough information as of yet, in which case I just bump it back to the end of the list of constraints. If at some point we don't make any progress any more and it can also not be solved, then the inferencer just quits. (Also, in order to work out `ChooseOverload`, you need to hypothesize and try around for a bit, so snapshot-and-rollback functionality is needed for your unification table.)
+
+- **Bidirectional type checking is essential for elided generics (parametric polymorphism).** Bidirectional type checking is specifically very useful for type checking operations that are otherwise very hard to generalize, for example elided generics (parametric polymorphism) in lambda expressions. Because checking a lambda against a generic signature is easy, whereas inferring a non- or possibly-generic type from it and then having to deal with it ... I wouldn't know how to start solving that.
+
 ## Issues encountered while creating the Tree-sitter parser
 
 ### `postfix_call_expr` precedence issue
