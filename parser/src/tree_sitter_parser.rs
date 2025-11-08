@@ -486,12 +486,22 @@ impl<'a> Converter<'a> {
                 params: node.map_children("param", |node| self.as_declarable(node)),
                 body: node.map_child("body", |node| self.as_block(node)),
             }),
-            "do_while_expr" => Expr::DoWhile(DoWhileExpr {
-                id: self.fresh_ast_node_id(node),
-                label: node.map_opt_child("label", |node| self.as_label(node)),
-                body: node.map_child("body", |node| self.as_block(node)),
-                cond: node.map_child("cond", |node| self.as_expr(node).into()),
-            }),
+            "do_while_expr" => {
+                let id = self.fresh_ast_node_id(node);
+                let label = node.map_opt_child("label", |node| self.as_label(node));
+                let body = node.map_child("body", |node| self.as_block(node));
+                let cond = node.map_opt_child("cond", |node| self.as_expr(node));
+
+                match cond {
+                    None => Expr::Do(DoExpr { id, label, body }),
+                    Some(cond) => Expr::DoWhile(DoWhileExpr {
+                        id,
+                        label,
+                        body,
+                        cond: cond.into(),
+                    }),
+                }
+            }
             "while_expr" => {
                 let label = node.map_opt_child("label", |node| self.as_label(node));
                 let cond = node.map_child("cond", |node| self.as_expr(node).into());

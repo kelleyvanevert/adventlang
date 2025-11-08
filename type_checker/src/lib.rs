@@ -20,6 +20,7 @@ pub mod types;
 // - [ ] dicts + members
 // - [ ] coalescing + nullability
 // - [ ] if-let, while, while-let, do, do-while, for
+// - [ ] choose either `do-expr` or `block-expr`, not both
 //
 // DOING:
 // - [..] overloading + unary/binary operators ("can't apply op + on typevar")
@@ -29,6 +30,7 @@ pub mod types;
 // - [x] loops, labels, breaking, typing blocks
 // - [x] functions
 // - [x] pretty error messages around source code
+// - [x] tests in separate test case files
 // - [x] 80%
 
 #[derive(Debug, Clone)]
@@ -95,6 +97,8 @@ pub enum TypeErrorKind {
     NotCallable(Type),
     #[error("arguments don't match up with callee")]
     ArgsMismatch,
+    #[error("use of break statement outside loop")]
+    BreakOutsideLoop,
     #[error("local not defined: {0}")]
     UnknownLocal(String),
     #[error("typevar not defined: {0}")]
@@ -119,6 +123,7 @@ impl TypeErrorKind {
                 t.substitute(bound, unification_table);
             }
             Self::NoOverload => {}
+            Self::BreakOutsideLoop => {}
             Self::ArgsMismatch => {}
             Self::UnknownLocal(_) => {}
             Self::UnknownTypeVar(_) => {}
@@ -685,14 +690,17 @@ impl TypeCheckerCtx {
                     .transpose()?
                     .unwrap_or(Type::Nil);
 
+                let Some(curr_loop_label) = env.curr_loop.clone() else {
+                    return Err(TypeError {
+                        node_id: *id,
+                        kind: TypeErrorKind::BreakOutsideLoop,
+                    });
+                };
+
                 let label = label
                     .clone()
                     .map(|ast::Label { id, str }| str)
-                    .unwrap_or_else(|| {
-                        env.curr_loop
-                            .clone()
-                            .expect("break can only be used inside a loop")
-                    });
+                    .unwrap_or(curr_loop_label);
 
                 // Enforce the surrounding loop (or the ancestor with the given label) to have the given type
                 if let Some(prev_loop_type) = env.loops.insert(label.clone(), expr_ty.clone()) {
@@ -1175,7 +1183,7 @@ impl TypeCheckerCtx {
             }) => {
                 let cond_ty = self.check_expr(env, cond, Type::Bool)?;
 
-                let then_ty = self.infer_block(&mut env.clone(), then, true)?;
+                let then_ty = self.infer_block(&mut env.clone(), then, use_result)?;
 
                 let mut els = None;
                 if let Some(expr) = else_if {
@@ -1193,14 +1201,55 @@ impl TypeCheckerCtx {
 
                 return self.assign(*id, ty);
             }
-            ast::Expr::While(_) => {
-                todo!()
+            ast::Expr::While(ast::WhileExpr {
+                id,
+                label,
+                cond,
+                body,
+            }) => {
+                let cond_ty = self.check_expr(env, cond, Type::Bool)?;
+
+                let label = label
+                    .clone()
+                    .map(|l| l.str)
+                    .unwrap_or_else(|| self.fresh_loop_label());
+
+                let mut child_env = env.clone();
+                child_env.curr_loop = Some(label.clone());
+
+                self.infer_block(&mut env.clone(), body, false)?;
+
+                let ty = child_env.loops.get(&label).cloned().unwrap_or(Type::Nil);
+
+                return self.assign(*id, ty);
             }
             ast::Expr::WhileLet(_) => {
                 todo!()
             }
             ast::Expr::Do(ast::DoExpr { id, label, body }) => {
-                todo!()
+                let label = label
+                    .clone()
+                    .map(|l| l.str)
+                    .unwrap_or_else(|| self.fresh_loop_label());
+
+                let mut child_env = env.clone();
+                child_env.curr_loop = Some(label.clone());
+
+                let body_ty = self.infer_block(&mut child_env, body, use_result)?;
+
+                if let Some(break_expr_ty) = child_env.loops.get(&label).cloned() {
+                    if use_result {
+                        self.constraints.push(Constraint::TypeEqual(
+                            *id,
+                            body_ty.clone(),
+                            break_expr_ty.clone(),
+                        ));
+                    } else {
+                        // noop
+                    }
+                }
+
+                return self.assign(*id, body_ty);
             }
             ast::Expr::DoWhile(_) => {
                 todo!()
@@ -1214,7 +1263,7 @@ impl TypeCheckerCtx {
                 let mut child_env = env.clone();
                 child_env.curr_loop = Some(label.clone());
 
-                let body_ty = self.infer_block(&mut child_env, body, false)?;
+                self.infer_block(&mut child_env, body, false)?;
 
                 let ty = child_env.loops.get(&label).cloned().unwrap_or(Type::Nil);
 
@@ -1268,6 +1317,7 @@ impl TypeCheckerCtx {
 
 #[cfg(test)]
 mod test {
+    use itertools::Itertools;
     use parser::{ParseResult, parse_document_ts, parse_type};
     use tree_sitter::{Node, Tree};
 
@@ -1289,8 +1339,25 @@ mod test {
         }
     }
 
-    fn should_not_typecheck(source: &str, expected_err: &str) {
-        let parse_result = parse_document_ts(source).expect("can parse");
+    fn should_not_typecheck(source: &str) {
+        let mut expected_err = None;
+
+        let source = source
+            .lines()
+            .enumerate()
+            .filter(|(row, line)| {
+                if let Some((ws, rest)) = line.split_once("^ERR:") {
+                    let col = ws.len();
+                    expected_err = Some((*row, col, rest.trim().to_string()));
+                    false
+                } else {
+                    true
+                }
+            })
+            .map(|(_, line)| line)
+            .join("\n");
+
+        let parse_result = parse_document_ts(&source).expect("can parse");
 
         let mut ctx = TypeCheckerCtx::new();
         match ctx.typecheck(&parse_result.document) {
@@ -1298,18 +1365,20 @@ mod test {
                 println!("");
                 println!("Document should not type-check, but did");
                 println!("====================");
-                println!("- expected: {expected_err}");
+                if let Some((_, _, expected_err)) = expected_err {
+                    println!("- expected: {expected_err}");
+                }
                 println!("{source}");
                 panic!();
                 // println!("\nTYPED DOCUMENT (after substitution):\n{typed_doc:#?}");
             }
             Err(err) => {
-                // return; // for now
+                let Some((row, col, expected_err)) = expected_err else {
+                    // no expectations
+                    return;
+                };
 
-                match (expected_err, err.kind.clone()) {
-                    ("", _) => {
-                        // no expectations
-                    }
+                match (&expected_err[0..], err.kind.clone()) {
                     ("NoOverload", TypeErrorKind::NoOverload) => {}
                     ("ArgsMismatch", TypeErrorKind::ArgsMismatch) => {}
                     ("NotCallable", TypeErrorKind::NotCallable(_)) => {}
@@ -1350,11 +1419,100 @@ mod test {
         }
     }
 
-    fn print_type_error(parse_result: ParseResult, err: TypeError) {
-        println!("");
-        println!("Type-checking failed");
-        println!("====================");
+    fn run_test_case(
+        test_file_name: &str,
+        lineno: usize,
+        description: &str,
+        expectation: &str,
+        error_location: Option<(usize, usize)>,
+        source: &str,
+    ) {
+        let Some(parse_result) = parse_document_ts(&source) else {
+            panic!("Can't parse test case source, file: `{test_file_name}`, line {lineno}");
+        };
 
+        let mut ctx = TypeCheckerCtx::new();
+        match ctx.typecheck(&parse_result.document) {
+            Ok(typed_doc) => {
+                if expectation != "ok" {
+                    println!("");
+                    println!("====================");
+                    println!("Document should not type-check, but did");
+                    println!("- test case: `{test_file_name}`, line {lineno}");
+                    println!("- description: {description}");
+                    println!("- expectation: {expectation}");
+                    println!("====================");
+                    println!("{source}");
+                    panic!();
+                }
+            }
+            Err(err) => {
+                if expectation == "ok" {
+                    println!("");
+                    println!("====================");
+                    println!("Document should type-check, but didn't");
+                    println!("- test case: `{test_file_name}`, line {lineno}");
+                    println!("- description: {description}");
+                    println!("====================");
+                    print_type_error(parse_result, err);
+                    panic!();
+                }
+
+                if expectation == "err" {
+                    // no expectations
+                    return;
+                }
+
+                let expected_err = expectation.trim_start_matches("err:").trim();
+
+                match (expected_err, err.kind.clone()) {
+                    ("NoOverload", TypeErrorKind::NoOverload) => {}
+                    ("ArgsMismatch", TypeErrorKind::ArgsMismatch) => {}
+                    ("NotCallable", TypeErrorKind::NotCallable(_)) => {}
+                    ("UnknownLocal", TypeErrorKind::UnknownLocal(_)) => {}
+                    (diff, TypeErrorKind::NotEqual(le, ri)) if diff.contains(" != ") => {
+                        let (a, b) = diff.split_once(" != ").unwrap();
+                        let a = ctx
+                            .convert_hint_to_type(&Env::new(), &parse_type(a))
+                            .unwrap();
+                        let b = ctx
+                            .convert_hint_to_type(&Env::new(), &parse_type(b))
+                            .unwrap();
+                        if a == le && b == ri || a == ri && b == le {
+                            // all good
+                        } else {
+                            println!("====================");
+                            println!(
+                                "Document correctly failed at type-check, but with unexpected error"
+                            );
+                            println!("- test case: `{test_file_name}`, line {lineno}");
+                            println!("- description: {description}");
+                            println!("- expected: {:?} != {:?}", a, b);
+                            println!("- encountered: {:?} != {:?}", le, ri);
+                            println!("====================");
+                            print_type_error(parse_result, err);
+                            panic!();
+                        }
+                    }
+                    (_, kind) => {
+                        println!("====================");
+                        println!(
+                            "Document correctly failed at type-check, but with unexpected error"
+                        );
+                        println!("- test case: `{test_file_name}`, line {lineno}");
+                        println!("- description: {description}");
+                        println!("- expected: {expected_err}");
+                        println!("- encountered: {kind:?}");
+                        println!("====================");
+                        print_type_error(parse_result, err);
+                        panic!()
+                    }
+                }
+            }
+        }
+    }
+
+    fn print_type_error(parse_result: ParseResult, err: TypeError) {
         let error_node = parse_result.find_cst_node(err.node_id);
 
         let start_byte = error_node.start_byte();
@@ -1393,92 +1551,98 @@ mod test {
         }
     }
 
-    #[test]
-    fn declarations_and_assignments() {
-        should_typecheck("let h = 5");
+    macro_rules! run_test_cases_in_file {
+        ($filename:ident) => {
+            #[test]
+            fn $filename() {
+                let filename = concat!(stringify!($filename), ".al");
+                let contents = include_str!(concat!("../tests/", stringify!($filename), ".al"));
+                let lines = contents.lines();
+                let mut test_cases = vec![];
 
-        should_typecheck("let [c] = [4]; c = 3");
+                let mut status = "test";
+                let mut lineno = 0;
+                let mut description = "";
+                let mut expectation = "";
+                let mut error_location = None;
+                let mut test_lines = vec![];
 
-        should_not_typecheck("let [c] = [4]; c = true", "");
+                for (i, line) in lines.enumerate() {
+                    if status == "test" && line.starts_with("// ======") {
+                        if expectation.len() > 0 {
+                            test_cases.push((
+                                description,
+                                lineno,
+                                expectation,
+                                error_location.clone(),
+                                test_lines.join("\n"),
+                            ));
+                        }
+                        status = "meta";
+                        lineno = i;
+                        description = "";
+                        expectation = "";
+                        error_location = None;
+                        test_lines = vec![];
+                        // println!("line {i} -> start meta");
+                    } else if status == "meta" && line.starts_with("// ok") {
+                        expectation = "ok";
+                        // println!("line {i} -> expect ok");
+                    } else if status == "meta" && line.starts_with("// err") {
+                        expectation = &line[2..].trim();
+                        // println!("line {i} -> expect err");
+                    } else if status == "meta" && line.starts_with("// ======") {
+                        // println!("line {i} -> begin test");
+                        if expectation.len() == 0 {
+                            panic!("No expectation for test, file `{filename}`, line {i}");
+                        }
+                        status = "test";
+                    } else if status == "meta" && line.starts_with("//") {
+                        description = &line[2..].trim();
+                        // println!("line {i} -> read description");
+                    } else if status == "meta" {
+                        panic!("Can't parse line in meta block, file `{filename}`, line {i}");
+                    } else if status == "test"
+                        && let Some((before, after)) = line.split_once("^here")
+                    {
+                        error_location = Some((test_lines.len(), before.len()));
+                    } else if status == "test" {
+                        test_lines.push(line);
+                    } else {
+                        panic!("Can't parse line in test, file `{filename}`, line {i}");
+                    }
+                }
 
-        should_not_typecheck("let [c] = 4", "");
+                if expectation.len() > 0 {
+                    test_cases.push((
+                        description,
+                        lineno,
+                        expectation,
+                        error_location.clone(),
+                        test_lines.join("\n"),
+                    ));
+                }
 
-        should_not_typecheck("let h: bool = 5", "int != bool");
-
-        should_typecheck(
-            "
-                let c = [true]
-                let f = [2]
-                let (a, [b]) = (3, c)
-                b = false
-                b = c[0]
-            ",
-        );
-
-        should_not_typecheck(
-            "
-                let c = [true]
-                let f = [2]
-                let (a, [b]) = (3, c)
-                b = false
-                b = f[0]
-            ",
-            "int != bool",
-        );
+                for (description, lineno, expectation, error_location, source) in test_cases {
+                    run_test_case(
+                        filename,
+                        lineno,
+                        description,
+                        expectation,
+                        error_location,
+                        &source,
+                    );
+                }
+            }
+        };
     }
 
-    #[test]
-    fn if_branches() {
-        should_typecheck(
-            "
-                // result isn't used, so branches are allowed to diverge in type
-                if true {
-                    5
-                } else {
-                    true
-                }
-            ",
-        );
-
-        should_not_typecheck(
-            "
-                // result IS used, so this causes a type-error
-                let res = if true {
-                    5
-                } else {
-                    true
-                }
-            ",
-            "int != bool",
-        );
-
-        should_not_typecheck(
-            "
-                // result IS used, so this causes a type-error
-                let res = if true {
-                    5
-                } else if true {
-                    3
-                } else {
-                    false
-                }
-            ",
-            "int != bool",
-        );
-
-        should_typecheck(
-            "
-                // result IS used, so this causes a type-error
-                let res = if true {
-                    5
-                } else if true {
-                    3
-                } else {
-                    3
-                }
-            ",
-        );
-    }
+    run_test_cases_in_file!(looping_and_breaking);
+    run_test_cases_in_file!(if_branches);
+    run_test_cases_in_file!(declarations_and_assignments);
+    run_test_cases_in_file!(operator_overloading);
+    run_test_cases_in_file!(generics);
+    run_test_cases_in_file!(function_calls);
 
     #[test]
     fn nullability() {
@@ -1521,99 +1685,6 @@ mod test {
     }
 
     #[test]
-    fn test_overloading() {
-        should_typecheck(
-            r#"
-                let a: int = 2 + 3
-                let b: int = a + 4
-                let c: float = 4 + 5.1
-                let d = "hello, " + "world"
-
-                fn add(a, b) {
-                    a + b
-                }
-
-                let e = add(3, 3)
-            "#,
-        );
-
-        should_not_typecheck(
-            r#"
-                let a = "hello, " + 4
-            "#,
-            "",
-        );
-
-        should_not_typecheck(
-            "
-                let arr = [1, 2, 3]
-                let a = arr[1 + 2.3]
-            ",
-            "",
-        );
-
-        should_typecheck(
-            "
-                [1,2,3][2] + [1.1,2.2,3.3][2]
-            ",
-        );
-
-        should_not_typecheck(
-            r#"
-                fn add(a, b) {
-                    a + b
-                }
-
-                let h = add(3, "hello")
-            "#,
-            "",
-        );
-
-        should_typecheck(
-            r#"
-                let a = 3.1 + (4 + 5)
-            "#,
-        );
-
-        should_not_typecheck(
-            r#"
-                fn add(a, b) {
-                    a + b
-                }
-
-                // until automatic casting from int to float is possible, this is indeed not valid
-                let f = add(3.1, add(4, 5))
-            "#,
-            "",
-        );
-
-        should_not_typecheck(
-            r#"
-                fn add(a, b) {
-                    a + b
-                }
-            "#,
-            "NoOverload",
-        );
-    }
-
-    #[test]
-    fn generics() {
-        should_typecheck(
-            "
-                // typevar is brought into scope when parsing a named fn
-                fn bla<t>(a: t) {
-                    let b: t = a
-                }
-
-                // typevar is handled correctly when parsing a type hint
-                // TODO: actually type-checking it
-                // let g: fn<t>(t) -> t = |x| { x }
-            ",
-        );
-    }
-
-    #[test]
     fn if_let_branches() {
         // should_typecheck(
         //     "
@@ -1635,140 +1706,5 @@ mod test {
         //         if let [b, c] = a {}
         //     ",
         // );
-    }
-
-    #[test]
-    fn looping_and_breaking() {
-        should_not_typecheck(
-            "
-                let r = 4
-                r = loop {
-                    break with true
-                }
-            ",
-            "bool != int",
-        );
-
-        should_typecheck(
-            "
-                let r = 4
-                r = loop {
-                    let h = 7
-                    break with 5
-                }
-                r = 'a: loop {
-                    let h = 7
-                    break 'a with 5
-                }
-                r = 'a: loop {
-                    let h = 7
-                    break with 5
-                }
-            ",
-        );
-
-        should_not_typecheck(
-            "
-                let r = 4
-                r = loop {
-                    break with 5
-                    break with true
-                }
-            ",
-            "bool != int",
-        );
-
-        // should_not_typecheck(
-        //     "
-        //         loop {
-        //             let h = 7
-        //             break
-        //             break with true
-        //         }
-        //     ",
-        //     "bool != nil",
-        // );
-
-        // should_not_typecheck(
-        //     "
-        //         loop {
-        //             let h = 7
-        //             break
-        //             break with true
-        //         }
-        //     ",
-        //     "bool != nil",
-        // );
-    }
-
-    #[test]
-    fn function_calls() {
-        // a hack to check the type of the fn
-        should_not_typecheck("let h = || { 3 }; h = 6", "int != fn() -> int");
-
-        should_not_typecheck(
-            "(|| { 3 })(4)",
-            "", // ArgsMismatch
-        );
-
-        should_not_typecheck(
-            "
-                let h = 6
-                h(true)
-            ",
-            "",
-        );
-
-        should_typecheck("(|g| { 3 })(4)");
-
-        should_typecheck(
-            "
-                let f = |a, b| { a }
-                f(5, 3)
-            ",
-        );
-
-        should_not_typecheck(
-            "
-                let f = |a, b| { a }
-                f(5, 3)
-                f(5, true)
-            ",
-            "int != bool",
-        );
-
-        should_typecheck(
-            "
-                let f1 = |a, b| { a }
-                fn f2(a, b) { a }
-
-                f2(5, f1(5, f2(5, 3)))
-            ",
-        );
-
-        should_not_typecheck(
-            "
-                fn a() { b(5) }
-                fn b() { a() }
-            ",
-            "",
-        );
-
-        should_typecheck(
-            "
-                fn a(x: bool) { c() }
-                fn b(n: int) { a(true) }
-                fn c() { b(5) }
-            ",
-        );
-
-        should_not_typecheck(
-            "
-                let a = |x: bool| { c() }
-                let b = |n: int| { a(true) }
-                let c = || { b(5) }
-            ",
-            "UnknownLocal",
-        );
     }
 }
