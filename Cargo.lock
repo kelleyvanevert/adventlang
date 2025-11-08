@@ -139,6 +139,7 @@ name = "parser"
 version = "0.1.0"
 dependencies = [
  "either",
+ "fxhash",
  "parser_combinators",
  "regex",
  "tree-sitter",

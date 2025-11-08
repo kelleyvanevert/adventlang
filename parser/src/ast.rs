@@ -1,5 +1,87 @@
+use fxhash::FxHashMap;
+
+pub struct SExpPrintJob<'a, A: std::fmt::Debug> {
+    pub document: &'a Document,
+    pub annotations: FxHashMap<usize, A>,
+}
+
 pub trait AstNode {
     fn id(&self) -> usize;
+}
+
+impl<'a, A: std::fmt::Debug> std::fmt::Display for SExpPrintJob<'a, A> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.document.s_expr_print(f, 0, &self)
+    }
+}
+
+pub trait SExpPrint {
+    fn s_expr_print<A: std::fmt::Debug>(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+        indent: usize,
+        cfg: &SExpPrintJob<A>,
+    ) -> std::fmt::Result;
+}
+
+impl<T: SExpPrint> SExpPrint for Option<T> {
+    fn s_expr_print<A: std::fmt::Debug>(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+        indent: usize,
+        cfg: &SExpPrintJob<A>,
+    ) -> std::fmt::Result {
+        match self {
+            None => write!(f, "(none)"),
+            Some(inner) => inner.s_expr_print(f, indent, cfg),
+        }
+    }
+}
+
+impl<T: SExpPrint> SExpPrint for Vec<T> {
+    fn s_expr_print<A: std::fmt::Debug>(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+        indent: usize,
+        cfg: &SExpPrintJob<A>,
+    ) -> std::fmt::Result {
+        if self.len() == 0 {
+            return write!(f, "[]");
+        }
+
+        write!(f, "[\n{}", "  ".repeat(indent + 1))?;
+        let mut first = true;
+        for item in self {
+            if !first {
+                write!(f, ",\n{}", "  ".repeat(indent + 1))?;
+            }
+            item.s_expr_print(f, indent + 1, cfg)?;
+            first = false;
+        }
+        write!(f, "\n{}]", "  ".repeat(indent))?;
+        Ok(())
+    }
+}
+
+impl<T: SExpPrint> SExpPrint for Box<T> {
+    fn s_expr_print<A: std::fmt::Debug>(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+        indent: usize,
+        cfg: &SExpPrintJob<A>,
+    ) -> std::fmt::Result {
+        self.as_ref().s_expr_print(f, indent, cfg)
+    }
+}
+
+macro_rules! s_expr_print_fields {
+    ($self:ident, $field:ident, $f:expr, $indent:expr, $cfg:expr, $skip:lifetime,) => {};
+    ($self:ident, $field:ident, $f:expr, $indent:expr, $cfg:expr,) => {
+        write!($f, "\n{}", "  ".repeat($indent))?;
+        write!($f, stringify!($field))?;
+        write!($f, ": ")?;
+        $self.$field.s_expr_print($f, $indent, $cfg)?;
+    };
 }
 
 pub trait StripIds {
@@ -29,7 +111,7 @@ impl<T: StripIds> StripIds for Box<T> {
 }
 
 macro_rules! strip_ids_of_fields {
-    ($self:ident, $field:ident, $skip_strip_id:lifetime,) => {};
+    ($self:ident, $field:ident, $skip:lifetime,) => {};
     ($self:ident, $field:ident,) => {
         $self.$field.strip_ids();
     };
@@ -40,7 +122,7 @@ macro_rules! ast_nodes {
 
     (
         struct $name:ident {
-            $($($skip_strip_id:lifetime)? $field:ident: $field_ty:ty,)*
+            $($($skip:lifetime)? $field:ident: $field_ty:ty,)*
         }
         $($rest:tt)*
     ) => {
@@ -65,11 +147,34 @@ macro_rules! ast_nodes {
             }
         }
 
+        #[allow(unused_variables)]
+        impl SExpPrint for $name {
+            fn s_expr_print<A: std::fmt::Debug>(
+                &self,
+                f: &mut std::fmt::Formatter<'_>,
+                indent: usize,
+                cfg: &SExpPrintJob<A>,
+            ) -> std::fmt::Result {
+                write!(f, stringify!($name))?;
+                // write!(f, " {{")?;
+                if let Some(annotation) = cfg.annotations.get(&self.id) {
+                    write!(f, "  -- {:?}", annotation)?;
+                } else {
+                    write!(f, "  -- ?")?;
+                }
+                $(
+                    s_expr_print_fields!(self, $field, f, indent + 1, cfg, $($skip,)?);
+                )*
+                // write!(f, "}}")?;
+                Ok(())
+            }
+        }
+
         impl StripIds for $name {
             fn strip_ids(&mut self) {
                 self.id = 0;
                 $(
-                    strip_ids_of_fields!(self, $field, $($skip_strip_id,)?);
+                    strip_ids_of_fields!(self, $field, $($skip,)?);
                 )*
             }
         }
@@ -93,6 +198,21 @@ macro_rules! ast_nodes {
                 match self {
                     $(
                         $name::$variant(inner) => inner.id(),
+                    )*
+                }
+            }
+        }
+
+        impl SExpPrint for $name {
+            fn s_expr_print<A: std::fmt::Debug>(
+                &self,
+                f: &mut std::fmt::Formatter<'_>,
+                indent: usize,
+                cfg: &SExpPrintJob<A>,
+            ) -> std::fmt::Result {
+                match self {
+                    $(
+                        $name::$variant(inner) => inner.s_expr_print(f, indent, cfg),
                     )*
                 }
             }

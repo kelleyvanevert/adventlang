@@ -1,10 +1,19 @@
+use std::fmt::Debug;
+
 use ena::unify::{EqUnifyValue, InPlaceUnificationTable, UnifyValue};
 use parser::ast;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
+#[derive(Clone, PartialEq, Eq, Hash, Copy)]
 pub struct TypeVar(pub u32);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+impl Debug for TypeVar {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "t{}", self.0);
+        Ok(())
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     Nil,
     Bool,
@@ -24,11 +33,60 @@ pub enum Type {
 
 impl EqUnifyValue for Type {}
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+// impl UnifyValue for Type {
+//     type Error = (Type, Type);
+
+//     fn unify_values(a: &Self, b: &Self) -> Result<Self, Self::Error> {
+//         match (a, b) {
+//             (Type::TypeVar(x), b) => Ok(b.clone()),
+//             (a, Type::TypeVar(y)) => Ok(a.clone()),
+//             (a, b) => {
+//                 if a == b {
+//                     Ok(a.clone())
+//                 } else {
+//                     Err((a.clone(), b.clone()))
+//                 }
+//             }
+//         }
+//     }
+// }
+
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct FnType {
     pub generics: Vec<TypeVar>,
     pub params: Vec<Type>,
     pub ret: Box<Type>,
+}
+
+impl Debug for FnType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "fn")?;
+        if self.generics.len() > 0 {
+            write!(f, "<")?;
+            let mut first = true;
+            for v in &self.generics {
+                if !first {
+                    write!(f, ", ")?;
+                }
+                first = false;
+                write!(f, "{v:?}")?;
+            }
+            write!(f, ">")?;
+        }
+        write!(f, "(")?;
+        {
+            let mut first = true;
+            for p in &self.params {
+                if !first {
+                    write!(f, ", ")?;
+                }
+                first = false;
+                write!(f, "{p:?}")?;
+            }
+        }
+        write!(f, ") -> {:?}", self.ret.as_ref())?;
+        Ok(())
+    }
 }
 
 fn equal_bound_var(bound: &Vec<(TypeVar, TypeVar)>, x: TypeVar, y: TypeVar, i: usize) -> bool {
@@ -210,8 +268,7 @@ impl Type {
                 let root = unification_table.find(*v);
                 match unification_table.probe_value(root) {
                     Some(mut ty) => {
-                        //
-                        println!("  probed to be {:?}", ty);
+                        // println!("  {v:?} probed to be {:?}", ty);
                         ty.substitute(bound, unification_table);
 
                         *self = ty; // (!)
@@ -250,6 +307,26 @@ impl Type {
                     def.substitute(bound, unification_table);
                 }
             }
+        }
+    }
+}
+
+impl Debug for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Type::Nil => write!(f, "nil"),
+            Type::Bool => write!(f, "bool"),
+            Type::Str => write!(f, "str"),
+            Type::Int => write!(f, "int"),
+            Type::Float => write!(f, "float"),
+            Type::Regex => write!(f, "regex"),
+            Type::TypeVar(v) => write!(f, "{v:?}"),
+            Type::Fn(def) => write!(f, "{def:?}"),
+            Type::NamedFn(defs) => write!(f, "TODO"),
+            Type::List(element_ty) => write!(f, "[{element_ty:?}]"),
+            Type::Tuple(elements) => write!(f, "TODO"),
+            Type::Dict { key, val } => write!(f, "dict[{key:?}, {val:?}]"),
+            Type::Nullable { child } => write!(f, "?{child:?}"),
         }
     }
 }

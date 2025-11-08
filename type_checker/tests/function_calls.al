@@ -81,3 +81,14 @@ fn b() { a() }
 let a = |x: bool| { c() }
 let b = |n: int| { a(true) }
 let c = || { b(5) }
+
+
+// ======
+// err
+// ======
+
+fn bla() -> int {
+    let b = true
+}
+
+let a: int = bla()

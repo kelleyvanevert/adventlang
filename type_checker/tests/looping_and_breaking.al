@@ -41,7 +41,7 @@ r = loop {
 
 
 // ======
-// ok
+// err: nil != bool
 // ======
 
 loop {
@@ -57,9 +57,17 @@ loop {
 // ======
 
 let a: int = do { 4 }
+let a: int = do { break with 4; 4 }
+let a: int = 'bla: do { break with 4; 4 }
+let a: int = 'bla: do { break 'bla with 4; 4 }
+
+
+// ======
+// body type does not concur with break-stmt type
+// err
+// ======
+
 let a: int = do { break with 4 }
-let a: int = 'bla: do { break with 4 }
-let a: int = 'bla: do { break 'bla with 4 }
 
 
 // ======

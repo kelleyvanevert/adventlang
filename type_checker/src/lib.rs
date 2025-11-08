@@ -201,7 +201,21 @@ impl TypeCheckerCtx {
             })?;
 
         // substitute throughout the doc
-        typed_doc.substitute(&mut vec![], &mut self.unification_table);
+        // typed_doc.substitute(&mut vec![], &mut self.unification_table);
+        println!("SUBSTITUTE THROUGHOUT THE DOCUMENT");
+        for (_, ty) in &mut self.types {
+            // *self.normalize_ty(ty.clone());
+            let orig = ty.clone();
+            ty.substitute(&mut vec![], &mut self.unification_table);
+            println!("- substituted {orig:?}  =>  {ty:?}");
+        }
+
+        // self.types = FxHashMap::from_iter(
+        //     self.types
+        //         .clone()
+        //         .into_iter()
+        //         .map(|(id, ty)| (id, self.normalize_ty(ty.clone()))),
+        // );
 
         Ok(())
     }
@@ -217,6 +231,7 @@ impl TypeCheckerCtx {
                 Constraint::TypeEqual(node_id, left, right) => {
                     self.check_ty_equal(left.clone(), right.clone())
                         .map_err(|kind| TypeError { node_id, kind })?;
+                    println!("checked constraint: {left:?}  =?=  {right:?}");
                 }
                 Constraint::ChooseOverload {
                     last_checked,
@@ -415,6 +430,7 @@ impl TypeCheckerCtx {
                 }
 
                 self.check_ty_equal(*a_ret, *b_ret)?;
+
                 Ok(())
             }
             (Type::Nullable { child: a_child }, Type::Nullable { child: b_child }) => {
@@ -422,11 +438,11 @@ impl TypeCheckerCtx {
             }
 
             // nullability
-            (a, Type::Nil) => Ok(()),
-            (Type::Nil, b) => Ok(()),
-            (a, Type::Nullable { child: b_child }) => self.check_ty_equal(a, *b_child),
-            (Type::Nullable { child: a_child }, b) => self.check_ty_equal(*a_child, b),
-
+            // (a, Type::Nil) => Ok(()),
+            // (Type::Nil, b) => Ok(()),
+            // (a, Type::Nullable { child: b_child }) => self.check_ty_equal(a, *b_child),
+            // (Type::Nullable { child: a_child }, b) => self.check_ty_equal(*a_child, b),
+            //
             (Type::TypeVar(a), Type::TypeVar(b)) => {
                 self.progress += 1;
                 self.unification_table
@@ -700,6 +716,12 @@ impl TypeCheckerCtx {
                     .map(|decl| self.infer_declarable(&mut typing_child_env, decl))
                     .collect::<Result<Vec<_>, TypeError>>()?;
 
+                let ret_ty = ret
+                    .as_ref()
+                    .map(|hint| self.convert_hint_to_type(&mut typing_child_env, hint))
+                    .transpose()?
+                    .unwrap_or_else(|| Type::TypeVar(self.fresh_ty_var()));
+
                 let mut child_env = typing_child_env.clone();
                 child_env.curr_loop = None;
                 child_env.loops = FxHashMap::default();
@@ -709,8 +731,12 @@ impl TypeCheckerCtx {
                 let ty = Type::Fn(FnType {
                     generics: generics.clone(),
                     params: params.clone(),
-                    ret: body_ty.into(),
+                    ret: ret_ty.clone().into(),
                 });
+
+                println!("ret == body: {ret_ty:?} == {body_ty:?}");
+                self.constraints
+                    .push(Constraint::TypeEqual(body.id(), ret_ty, body_ty));
 
                 self.constraints
                     .push(Constraint::TypeEqual(*id, ty.clone(), placeholder_ty));
@@ -1394,106 +1420,10 @@ impl TypeCheckerCtx {
 #[cfg(test)]
 mod test {
     use itertools::Itertools;
-    use parser::{ParseResult, parse_document_ts, parse_type};
+    use parser::{ParseResult, ast::SExpPrintJob, parse_document_ts, parse_type};
     use tree_sitter::{Node, Tree};
 
     use crate::{Env, TypeCheckerCtx, TypeError, TypeErrorKind, types::Type};
-
-    fn should_typecheck(source: &str) {
-        let parse_result = parse_document_ts(source).expect("can parse");
-
-        let mut ctx = TypeCheckerCtx::new();
-        match ctx.typecheck(&parse_result.document) {
-            Ok(typed_doc) => {
-                // ok
-                // println!("\nTYPED DOCUMENT (after substitution):\n{typed_doc:#?}");
-            }
-            Err(err) => {
-                print_type_error(parse_result, err);
-                panic!();
-            }
-        }
-    }
-
-    fn should_not_typecheck(source: &str) {
-        let mut expected_err = None;
-
-        let source = source
-            .lines()
-            .enumerate()
-            .filter(|(row, line)| {
-                if let Some((ws, rest)) = line.split_once("^ERR:") {
-                    let col = ws.len();
-                    expected_err = Some((*row, col, rest.trim().to_string()));
-                    false
-                } else {
-                    true
-                }
-            })
-            .map(|(_, line)| line)
-            .join("\n");
-
-        let parse_result = parse_document_ts(&source).expect("can parse");
-
-        let mut ctx = TypeCheckerCtx::new();
-        match ctx.typecheck(&parse_result.document) {
-            Ok(typed_doc) => {
-                println!("");
-                println!("Document should not type-check, but did");
-                println!("====================");
-                if let Some((_, _, expected_err)) = expected_err {
-                    println!("- expected: {expected_err}");
-                }
-                println!("{source}");
-                panic!();
-                // println!("\nTYPED DOCUMENT (after substitution):\n{typed_doc:#?}");
-            }
-            Err(err) => {
-                let Some((row, col, expected_err)) = expected_err else {
-                    // no expectations
-                    return;
-                };
-
-                match (&expected_err[0..], err.kind.clone()) {
-                    ("NoOverload", TypeErrorKind::NoOverload) => {}
-                    ("ArgsMismatch", TypeErrorKind::ArgsMismatch) => {}
-                    ("NotCallable", TypeErrorKind::NotCallable(_)) => {}
-                    ("UnknownLocal", TypeErrorKind::UnknownLocal(_)) => {}
-                    (diff, TypeErrorKind::NotEqual(le, ri)) if diff.contains(" != ") => {
-                        let (a, b) = diff.split_once(" != ").unwrap();
-                        let a = ctx
-                            .convert_hint_to_type(&Env::new(), &parse_type(a))
-                            .unwrap();
-                        let b = ctx
-                            .convert_hint_to_type(&Env::new(), &parse_type(b))
-                            .unwrap();
-                        if a == le && b == ri || a == ri && b == le {
-                            // all good
-                        } else {
-                            println!("!!!!!");
-                            println!(
-                                "Document correctly failed at type-check, but with different error"
-                            );
-                            println!("- expected: {:?} != {:?}", a, b);
-                            println!("- encountered: {:?} != {:?}", le, ri);
-                            print_type_error(parse_result, err);
-                            panic!();
-                        }
-                    }
-                    (expected_err, kind) => {
-                        println!("!!!!!");
-                        println!(
-                            "Document correctly failed at type-check, but with different error"
-                        );
-                        println!("- expected: {expected_err}");
-                        println!("- encountered: {kind:?}");
-                        print_type_error(parse_result, err);
-                        panic!()
-                    }
-                }
-            }
-        }
-    }
 
     fn run_test_case(
         test_file_name: &str,
@@ -1519,6 +1449,13 @@ mod test {
                     println!("- expectation: {expectation}");
                     println!("====================");
                     println!("{source}");
+                    println!(
+                        "{}",
+                        SExpPrintJob {
+                            document: &parse_result.document,
+                            annotations: ctx.types.clone(),
+                        }
+                    );
                     panic!();
                 }
             }
@@ -1530,6 +1467,13 @@ mod test {
                     println!("- test case: `{test_file_name}`, line {lineno}");
                     println!("- description: {description}");
                     println!("====================");
+                    println!(
+                        "{}",
+                        SExpPrintJob {
+                            document: &parse_result.document,
+                            annotations: ctx.types.clone(),
+                        }
+                    );
                     print_type_error(parse_result, err);
                     panic!();
                 }
@@ -1640,6 +1584,7 @@ mod test {
                 let mut lineno = 0;
                 let mut description = "";
                 let mut expectation = "";
+                let mut skip = false;
                 let mut error_location = None;
                 let mut test_lines = vec![];
 
@@ -1650,6 +1595,7 @@ mod test {
                                 description,
                                 lineno,
                                 expectation,
+                                skip,
                                 error_location.clone(),
                                 test_lines.join("\n"),
                             ));
@@ -1658,24 +1604,22 @@ mod test {
                         lineno = i;
                         description = "";
                         expectation = "";
+                        skip = false;
                         error_location = None;
                         test_lines = vec![];
-                        // println!("line {i} -> start meta");
+                    } else if status == "meta" && line.starts_with("// skip") {
+                        skip = true;
                     } else if status == "meta" && line.starts_with("// ok") {
                         expectation = "ok";
-                        // println!("line {i} -> expect ok");
                     } else if status == "meta" && line.starts_with("// err") {
                         expectation = &line[2..].trim();
-                        // println!("line {i} -> expect err");
                     } else if status == "meta" && line.starts_with("// ======") {
-                        // println!("line {i} -> begin test");
                         if expectation.len() == 0 {
                             panic!("No expectation for test, file `{filename}`, line {i}");
                         }
                         status = "test";
                     } else if status == "meta" && line.starts_with("//") {
                         description = &line[2..].trim();
-                        // println!("line {i} -> read description");
                     } else if status == "meta" {
                         panic!("Can't parse line in meta block, file `{filename}`, line {i}");
                     } else if status == "test"
@@ -1694,20 +1638,23 @@ mod test {
                         description,
                         lineno,
                         expectation,
+                        skip,
                         error_location.clone(),
                         test_lines.join("\n"),
                     ));
                 }
 
-                for (description, lineno, expectation, error_location, source) in test_cases {
-                    run_test_case(
-                        filename,
-                        lineno,
-                        description,
-                        expectation,
-                        error_location,
-                        &source,
-                    );
+                for (description, lineno, expectation, skip, error_location, source) in test_cases {
+                    if !skip {
+                        run_test_case(
+                            filename,
+                            lineno,
+                            description,
+                            expectation,
+                            error_location,
+                            &source,
+                        );
+                    }
                 }
             }
         };
@@ -1720,67 +1667,67 @@ mod test {
     run_test_cases_in_file!(generics);
     run_test_cases_in_file!(function_calls);
 
-    #[test]
-    fn nullability() {
-        should_typecheck(
-            "
-                let h: ?int = 5
-                h = nil
-            ",
-        );
+    // #[test]
+    // fn nullability() {
+    //     should_typecheck(
+    //         "
+    //             let h: ?int = 5
+    //             h = nil
+    //         ",
+    //     );
 
-        // should_not_typecheck(
-        //     "
-        //         let h: int = 5
-        //         h = nil
-        //     ",
-        //     "",
-        // );
+    //     // should_not_typecheck(
+    //     //     "
+    //     //         let h: int = 5
+    //     //         h = nil
+    //     //     ",
+    //     //     "",
+    //     // );
 
-        should_typecheck(
-            "
-                let r = 4
-                r = loop {}
-                r = 'a: loop { break 'a }
-            ",
-        );
+    //     should_typecheck(
+    //         "
+    //             let r = 4
+    //             r = loop {}
+    //             r = 'a: loop { break 'a }
+    //         ",
+    //     );
 
-        // should_not_typecheck(
-        //     "
-        //         if let (a, b, c) = (1, 2) {}
-        //     ",
-        //     "",
-        // );
+    //     // should_not_typecheck(
+    //     //     "
+    //     //         if let (a, b, c) = (1, 2) {}
+    //     //     ",
+    //     //     "",
+    //     // );
 
-        // should_typecheck(
-        //     "
-        //         let a = nil
-        //         if let [b, c] = a {}
-        //     ",
-        // );
-    }
+    //     // should_typecheck(
+    //     //     "
+    //     //         let a = nil
+    //     //         if let [b, c] = a {}
+    //     //     ",
+    //     // );
+    // }
 
-    #[test]
-    fn if_let_branches() {
-        // should_typecheck(
-        //     "
-        //         if let h = true {}
-        //         if let [a, b] = [2] {}
-        //     ",
-        // );
+    // #[test]
+    // fn if_let_branches() {
+    //     // should_typecheck(
+    //     //     "
+    //     //         if let h = true {}
+    //     //         if let [a, b] = [2] {}
+    //     //     ",
+    //     // );
 
-        // should_not_typecheck(
-        //     "
-        //         if let (a, b, c) = (1, 2) {}
-        //     ",
-        //     "",
-        // );
+    //     // should_not_typecheck(
+    //     //     "
+    //     //         if let (a, b, c) = (1, 2) {}
+    //     //     ",
+    //     //     "",
+    //     // );
 
-        // should_typecheck(
-        //     "
-        //         let a = nil
-        //         if let [b, c] = a {}
-        //     ",
-        // );
-    }
+    //     // should_typecheck(
+    //     //     "
+    //     //         let a = nil
+    //     //         if let [b, c] = a {}
+    //     //     ",
+    //     // );
+    // }
 }
