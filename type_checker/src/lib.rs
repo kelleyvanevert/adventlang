@@ -95,6 +95,8 @@ pub enum TypeErrorKind {
     InfiniteType(TypeVar, Type),
     #[error("callee is not a function: {0:?}")]
     NotCallable(Type),
+    #[error("generics don't match up equally")]
+    GenericsMismatch,
     #[error("arguments don't match up with callee")]
     ArgsMismatch,
     #[error("use of break statement outside loop")]
@@ -124,6 +126,7 @@ impl TypeErrorKind {
             }
             Self::NoOverload => {}
             Self::BreakOutsideLoop => {}
+            Self::GenericsMismatch => {}
             Self::ArgsMismatch => {}
             Self::UnknownLocal(_) => {}
             Self::UnknownTypeVar(_) => {}
@@ -388,8 +391,19 @@ impl TypeCheckerCtx {
                     ret: b_ret,
                 }),
             ) => {
-                if a_generics.len() > 0 || b_generics.len() > 0 {
-                    todo!()
+                // fn map<T>(arr: [T]) -> int { ... }
+
+                // forward declaration:  fn<A>(B) -> D
+                // infer named fn item:  fn<T>([T]) -> int
+
+                // unify:
+                // A = T
+                // B = [C]
+                // C = T
+                // D = int
+
+                if a_generics.len() != b_generics.len() {
+                    return Err(TypeErrorKind::GenericsMismatch);
                 }
 
                 if a_params.len() != b_params.len() {
@@ -532,6 +546,9 @@ impl TypeCheckerCtx {
                     }),
                 }
             }
+            ast::TypeHint::List(t) => Ok(Type::List(
+                self.convert_hint_to_type(env, &t.elements_ty)?.into(),
+            )),
             ty => todo!("can't convert typehint to type: {:?}", ty),
         }
     }
@@ -581,11 +598,11 @@ impl TypeCheckerCtx {
 
         let mut item_placeholder_types = vec![];
         for item in &block.items {
-            item_placeholder_types.push(self.prepare_item(env, item));
+            item_placeholder_types.push(self.forward_declare_item(env, item)?);
         }
 
         for (i, item) in block.items.iter().enumerate() {
-            let typed_item = self.infer_item(env, item, item_placeholder_types[i].clone())?;
+            self.infer_item(env, item, item_placeholder_types[i].clone())?;
         }
 
         let num_stmts = block.stmts.len();
@@ -600,7 +617,7 @@ impl TypeCheckerCtx {
         self.assign(block.id(), ty)
     }
 
-    fn prepare_item(&mut self, env: &mut Env, item: &ast::Item) -> Type {
+    fn forward_declare_item(&mut self, env: &mut Env, item: &ast::Item) -> Result<Type, TypeError> {
         match item {
             ast::Item::NamedFn(ast::NamedFnItem {
                 id,
@@ -615,9 +632,36 @@ impl TypeCheckerCtx {
                 //     return ty;
                 // }
 
-                let placeholder_ty = Type::TypeVar(self.fresh_ty_var());
+                let mut typing_child_env = env.clone();
+
+                let generics = generics
+                    .into_iter()
+                    .map(|var_hint| {
+                        let tv = self.fresh_ty_var();
+                        typing_child_env
+                            .typevars
+                            .insert(var_hint.var.as_str().to_string(), tv);
+
+                        tv
+                    })
+                    .collect::<Vec<_>>();
+
+                let params = params
+                    .iter()
+                    // .map(|param| self.forward_declare_declarable(&mut typing_child_env, param))
+                    .map(|_| Ok(Type::TypeVar(self.fresh_ty_var())))
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                let ret = Type::TypeVar(self.fresh_ty_var());
+
+                let placeholder_ty = Type::Fn(FnType {
+                    generics,
+                    params,
+                    ret: ret.into(),
+                });
+
                 env.locals.insert(name.str.clone(), placeholder_ty.clone());
-                placeholder_ty
+                Ok(placeholder_ty)
             }
         }
     }
@@ -898,6 +942,38 @@ impl TypeCheckerCtx {
             }
         }
     }
+
+    // fn forward_declare_declarable(
+    //     &mut self,
+    //     env: &mut Env,
+    //     declarable: &ast::Declarable,
+    // ) -> Result<Type, TypeError> {
+    //     return self.forward_declare_declare_pattern(env, &declarable.pattern);
+    // }
+
+    // fn forward_declare_declare_pattern(
+    //     &mut self,
+    //     env: &mut Env,
+    //     pattern: &ast::DeclarePattern,
+    // ) -> Result<Type, TypeError> {
+    //     match pattern {
+    //         ast::DeclarePattern::Single(single) => Ok(single
+    //             .ty
+    //             .map(|ty| self.convert_hint_to_type(env, &ty))
+    //             .transpose()?
+    //             .unwrap_or_else(|| Type::TypeVar(self.fresh_ty_var()))),
+    //         ast::DeclarePattern::List(list) => {
+    //             let elements = list
+    //                 .elements
+    //                 .iter()
+    //                 .map(|el| self.forward_declare_declarable(env, el))
+    //                 .collect::<Result<Vec<_>, _>>()?;
+
+    //             todo!()
+    //         }
+    //         ast::DeclarePattern::Tuple(sdf) => {}
+    //     }
+    // }
 
     fn infer_declarable(
         &mut self,

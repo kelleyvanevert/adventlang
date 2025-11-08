@@ -3,8 +3,8 @@
 // ok
 // ======
 
-fn bla<t>(a: t) {
-    let b: t = a
+fn bla<t>(a: [t]) -> int {
+    let b: [t] = a
 }
 
 // ======
