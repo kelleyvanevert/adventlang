@@ -226,12 +226,14 @@ impl TypeCheckerCtx {
         // so that it's initially bigger than `last_progress`
         self.progress = 1;
 
+        println!("num constraints to check: {}", todo.len());
+
         while let Some(constraint) = todo.pop_front() {
             match constraint {
                 Constraint::TypeEqual(node_id, left, right) => {
+                    println!("checking constraint: {left:?}  =?=  {right:?} ...");
                     self.check_ty_equal(left.clone(), right.clone())
                         .map_err(|kind| TypeError { node_id, kind })?;
-                    println!("checked constraint: {left:?}  =?=  {right:?}");
                 }
                 Constraint::ChooseOverload {
                     last_checked,
@@ -416,6 +418,10 @@ impl TypeCheckerCtx {
                 // B = [C]
                 // C = T
                 // D = int
+
+                // ====
+
+                // let g: (fn<t>(t) -> t) = |x| { x }
 
                 if a_generics.len() != b_generics.len() {
                     return Err(TypeErrorKind::GenericsMismatch);
@@ -734,7 +740,6 @@ impl TypeCheckerCtx {
                     ret: ret_ty.clone().into(),
                 });
 
-                println!("ret == body: {ret_ty:?} == {body_ty:?}");
                 self.constraints
                     .push(Constraint::TypeEqual(body.id(), ret_ty, body_ty));
 
@@ -1488,6 +1493,7 @@ mod test {
                 match (expected_err, err.kind.clone()) {
                     ("NoOverload", TypeErrorKind::NoOverload) => {}
                     ("ArgsMismatch", TypeErrorKind::ArgsMismatch) => {}
+                    ("InfiniteType", TypeErrorKind::InfiniteType(_, _)) => {}
                     ("NotCallable", TypeErrorKind::NotCallable(_)) => {}
                     ("UnknownLocal", TypeErrorKind::UnknownLocal(_)) => {}
                     (diff, TypeErrorKind::NotEqual(le, ri)) if diff.contains(" != ") => {
@@ -1660,6 +1666,7 @@ mod test {
         };
     }
 
+    run_test_cases_in_file!(misc);
     run_test_cases_in_file!(looping_and_breaking);
     run_test_cases_in_file!(if_branches);
     run_test_cases_in_file!(declarations_and_assignments);
