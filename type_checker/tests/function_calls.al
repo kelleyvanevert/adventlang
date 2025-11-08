@@ -92,3 +92,12 @@ fn bla() -> int {
 }
 
 let a: int = bla()
+
+
+// ======
+// err
+// ======
+
+fn bla(a: int, b: bool) {}
+
+bla(6, 2)

@@ -1,6 +1,7 @@
 use std::fmt::Debug;
 
 use ena::unify::{EqUnifyValue, InPlaceUnificationTable, UnifyValue};
+use fxhash::FxHashMap;
 use parser::ast;
 
 #[derive(Clone, PartialEq, Eq, Hash, Copy)]
@@ -131,6 +132,17 @@ impl FnType {
         Ok(())
     }
 
+    pub fn substitute_vars(&mut self, sub: &FxHashMap<TypeVar, TypeVar>) {
+        let mut new_sub = sub.clone();
+        for v in &self.generics {
+            new_sub.remove(v);
+        }
+        for param in &mut self.params {
+            param.substitute_vars(&new_sub);
+        }
+        self.ret.substitute_vars(&new_sub);
+    }
+
     pub fn substitute(
         &mut self,
         bound: &mut Vec<TypeVar>,
@@ -245,6 +257,40 @@ impl Type {
             Type::Nullable { child } => {
                 (*child).occurs_check(var).map_err(|_| self.clone())?;
                 Ok(())
+            }
+        }
+    }
+
+    pub fn substitute_vars(&mut self, sub: &FxHashMap<TypeVar, TypeVar>) {
+        match self {
+            Type::Bool | Type::Int | Type::Float | Type::Regex | Type::Str | Type::Nil => {}
+            Type::TypeVar(v) => {
+                if let Some(new_v) = sub.get(v).cloned() {
+                    *self = Type::TypeVar(new_v);
+                }
+            }
+            Type::Fn(def) => {
+                def.substitute_vars(sub);
+            }
+            Type::NamedFn(defs) => {
+                for def in defs {
+                    def.substitute_vars(sub);
+                }
+            }
+            Type::List(element_ty) => {
+                element_ty.substitute_vars(sub);
+            }
+            Type::Tuple(elements) => {
+                for el in elements {
+                    el.substitute_vars(sub);
+                }
+            }
+            Type::Dict { key, val } => {
+                key.substitute_vars(sub);
+                val.substitute_vars(sub);
+            }
+            Type::Nullable { child } => {
+                child.substitute_vars(sub);
             }
         }
     }
