@@ -10,163 +10,56 @@ I must say, it's a bit insulting that GitHub thinks Adventlang most resembles Pe
 
 ![](./assets/github-perl-2.png)
 
-## Grammar
+## Concept
 
-It's a C-style (or more like, just basically Rust) syntax. There's parentheses, you can omit semicolons at the end of lines, most everything is an expression, etc., and then _one thing_: function application can be done infix and postfix with the ":apply syntax", which makes the language fun and easy to use for AdventOfCode problem solving. Like a swiss army knife of data transformations! For example:
+The concept came about while I was learning Rust for the first time while doing Advent of Code 2022. I loved Rust's syntax so much, even separately from the _other cool thing_ about Rust (its innovative typing system that allows it to eliminate garbage collection while staying low-level), that I wanted to create a language with that kind of syntax, but even easier to use. For example for solving Advent of Code challenges. What especially stood out, is that I'd often be writing code like this:
+
+```rust
+let total = input.trim().lines().map(|line| {
+    line.split("-").map(|s| s.parse::<usize>().unwrap()).sum::<usize>()
+}).sum::<usize>()
+```
+
+I figured, I'd create a language, that combines the syntax of Rust, but adding a new special syntax element for applying data transformations in a postfix/infix style easily:
 
 ```al
 let total = input :trim :lines :map |line| { line :split "-" :map int :sum } :sum
 ```
 
-The formal grammar is _approximately_ like this:
+The idea is that you can take any function
 
-```ebnf
-keyword ::= "any" | "nil" | "bool" | "str" | "int" | "float" | "num" | "regex" | "tuple" | "list"
-
-identifier ::= ? something like js identifiers ?
-
-type-var ::= ? any identifier excl. keywords ?
-
-list-elements(t) ::= [ t [ { "," t } [","] ] ]
-
-type ::=
-  | "nil"
-  | "bool"
-  | "str"
-  | "int"
-  | "float"
-  | "num"
-  | "regex"
-  | "list"
-  | "[" type "]"
-  | "tuple"
-  | "(" list-elements(type) ")"
-  | "fn"
-    [
-      [ "<" list-elements(type-var) ">" ]
-      "(" list-elements(type) ")"
-    ]
-    [ "->" type ]
-  | "dict"
-  | "?" type
-  | "(" type ")"
-
-block-contents ::= { (stmt | item) [ ";" ] }
-
-item ::= named-fn
-
-named-fn ::=
-  "fn" identifier
-  [ "<" list-elements(type-var) ">" ]
-  "(" list-elements(declarable) ")"
-  [ "->" type ]
-  "{" block-contents "}"
-
-declarable ::= declare-pattern [ "=" expr ]
-
-declare-pattern ::=
-  | [ "some" ] identifier [ ":" type ]
-  | "[" list-elements(declarable) [ ".." identifier [ ":" type ] ] "]"
-  | "(" list-elements(declarable) [ ".." identifier [ ":" type ] ] ")"
-
-expr ::=
-  | "true"
-  | "false"
-  | "nil"
-  | raw-str-literal
-  | str-literal
-  | float
-  | int
-  | regex
-  | do-while-expr
-  | while-expr
-  | loop-expr
-  | for-expr
-  | identifier
-  | anonymous-fn
-  | "(" list-elements(expr) [ ".." expr ] ")"
-  | "[" list-elements(expr) [ ".." expr ] "]"
-  | expr [ "?" ] "[" expr "]"
-  | expr [ "?" ] "." identifier
-  | expr "(" list-elements(argument) ")" [ anonymous-fn ]
-  | expr anonymous-fn
-  | expr postfix-op
-  | expr [ "?" ] ":" "[" expr "]"
-  | expr [ "?" ] ":" identifier [ expr ] { "'" identifier expr }
-  | expr infix-op expr
-  | "(" expr ")"
-
-argument ::= [ identifier "=" ] expr
-
-postfix-op ::= "!"
-
-infix-op ::= "*" | "/" | "%" | "+" | "-" | "<<" | ">>" | "!=" | "==" | "<=" | ">=" | "<" | ">" | "^" | "&&" | "||" | "??"
-
-raw-str-literal ::= "r\"" text-content "\""
-
-str-literal ::= "\"" { text-content | str-interpolation } "\""
-
-str-interpolation ::= "{" expr "}"
-
-text-content ::= ? textual content without " (unless escaped) ?
-
-do-while-expr ::=
-  [ "'" identifier ":" ]
-  "do"
-  "{" block-contents "}"
-  [ "while" expr ]
-
-while-expr ::=
-  [ "'" identifier ":" ]
-  "while" maybe-parenthesized([ "let" declare-pattern "=" ] expr)
-  "{" block-contents "}"
-
-loop-expr ::=
-  [ "'" identifier ":" ]
-  "loop"
-  "{" block-contents "}"
-
-for-expr ::=
-  [ "'" identifier ":" ]
-  "for" maybe-parenthesized("let" declare-pattern "in" expr)
-  "{" block-contents "}"
-
-maybe-parenthesized(t) ::= t | "(" t ")"
-
-anonymous-fn ::=
-  "|" list-elements(declarable) "|"
-  "{" block-contents "}"
-
-stmt ::=
-  | continue-stmt
-  | break-stmt
-  | return-stmt
-  | declare-stmt
-  | assign-stmt
-  | expr
-
-continue-stmt ::= "continue" [ "'" identifier ]
-
-break-stmt ::= "break" [ "'" identifier ] [ "with" expr ]
-
-return-stmt ::= "return" [ expr ]
-
-declare-stmt ::= "let" declare-pattern "=" expr
-
-assign-stmt ::= assign-pattern assign-op expr
-
-assign-op ::= "=" | "+=" | "*=" | "^=" | "-=" | "/=" | "%=" | "<<=" | "??=" | "[]="
-
-assign-pattern ::=
-  | assign-location
-  | "[" list-elements(assign-pattern) [ ".." assign-pattern ] "]"
-  | "(" list-elements(assign-pattern) [ ".." assign-pattern ] ")"
-
-assign-location ::=
-  | identifier
-  | expr "[" expr "]"
-  | expr "." identifier
+```al
+fn map<A, B>(arr: [A], f: fn(A) -> B): [B] {
+  // ...
+}
 ```
+
+and apply it as a postfix or infix operator, like `a :map f`.
+
+So, the next year, 2023, I did Advent of Code while creating an interpreted language "on the go". Every next day, I'd add whatever features the language needed, in order to solve the challenge of that particular day. I was able to get to ± day 17 in this way, until performance became a problem and I switched back to solving the challenges (only) in Rust.
+
+My plans were to create a compile language for the next year. But because that's just so much harder, you really need to prepare in advance and can't "wing it" like I did with the interpreted version of 2023, I didn't get around to it.
+
+But, 2025 might be the year! In April and May I spent some time investigating and creating some minimal proof-of-concepts with LLVM, as well as thinking a lot about the type system. One crucial big missing feature is a type checker, which I started working on in October. (I was also convined by Blaž to use Zed, which meant I needed to first create a new Tree-sitter parser as well, so as to allow Zed syntax highlighting.) With some effort and luck, I might be able to participate in Advent of Code 2025 with a compiled version of Adventlang! 🤘
+
+Status:
+
+- [x] 100% create a new parser using Tree-sitter (it's 150x as fast!)
+- [ ] 60% create a type checker
+  - [x] basic unification setup
+  - [x] loops, labels, breaking, typing blocks
+  - [x] function definitions and calls
+  - [ ] named and optional arguments for functions
+  - [x] pretty error messages and good testing infrastructure
+  - [ ] generics (parametric polymorphism)
+  - [x] operator overloading (ad-hoc polymorphism)
+  - [ ] named fn overloading (ad-hoc polymorphism)
+  - [ ] coalescing, nullability
+- [ ] 0% create a compiler using LLVM
+
+## Example (Advent of Code 2023, day 4)
+
+![](./assets/adventlang_example_1.png)
 
 ## Issues encountered while creating the Tree-sitter parser
 
