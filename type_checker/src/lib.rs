@@ -105,8 +105,8 @@ pub enum TypeErrorKind {
     NotCallable(Type),
     #[error("generics don't match up equally")]
     GenericsMismatch,
-    #[error("arguments don't match up with callee")]
-    ArgsMismatch,
+    #[error("arguments don't match up with callee:\n{0:?} != {1:?}")]
+    ArgsMismatch(Vec<String>, Vec<String>),
     #[error("use of break statement outside loop")]
     BreakOutsideLoop,
     #[error("local not defined: {0}")]
@@ -135,7 +135,7 @@ impl TypeErrorKind {
             Self::NoOverload => {}
             Self::BreakOutsideLoop => {}
             Self::GenericsMismatch => {}
-            Self::ArgsMismatch => {}
+            Self::ArgsMismatch(_, _) => {}
             Self::UnknownLocal(_) => {}
             Self::UnknownTypeVar(_) => {}
         }
@@ -643,7 +643,10 @@ impl TypeCheckerCtx {
                 // TODO actually check generics -- ??
 
                 if a_params.len() != b_params.len() {
-                    return Err(TypeErrorKind::ArgsMismatch);
+                    return Err(TypeErrorKind::ArgsMismatch(
+                        a_params.into_iter().map(|ty| format!("{ty:?}")).collect(),
+                        b_params.into_iter().map(|ty| format!("{ty:?}")).collect(),
+                    ));
                 }
 
                 for (a, b) in a_params.into_iter().zip(b_params) {
@@ -845,14 +848,6 @@ impl TypeCheckerCtx {
         Ok(ty)
     }
 
-    fn get_ty(&self, id: usize) -> Type {
-        let Some(ty) = self.types.get(&id).cloned() else {
-            panic!("Node {id} was not yet assigned a type");
-        };
-
-        ty
-    }
-
     fn infer_doc(&mut self, env: &mut Env, doc: &ast::Document) -> Result<Type, TypeError> {
         self.infer_block(env, &doc.body, false)?;
 
@@ -879,9 +874,9 @@ impl TypeCheckerCtx {
         let num_stmts = block.stmts.len();
         for (i, stmt) in block.stmts.iter().enumerate() {
             let is_last = i + 1 == num_stmts;
-            self.infer_stmt(env, stmt, use_result && is_last)?;
+            let stmt_ty = self.infer_stmt(env, stmt, use_result && is_last)?;
             if is_last && use_result {
-                ty = self.get_ty(stmt.id());
+                ty = stmt_ty;
             }
         }
 
@@ -1007,6 +1002,14 @@ impl TypeCheckerCtx {
                 child_env.loops = FxHashMap::default();
                 let body_ty = self.infer_block(&mut child_env, body, true)?;
 
+                // if let Some(explicit_return_ty) = child_env.ret {
+                //     self.add_constraint(Constraint::TypeEqual(
+                //         body.id(),
+                //         ret_ty.clone(),
+                //         explicit_return_ty,
+                //     ))?;
+                // }
+
                 // TODO -> NamedFn
                 let ty = Type::Fn(FnType {
                     generics: generics.clone(),
@@ -1061,10 +1064,18 @@ impl TypeCheckerCtx {
                 return self.assign(*id, Type::Nil);
             }
             ast::Stmt::Return(ast::ReturnStmt { id, expr }) => {
-                let expr = expr
+                let expr_ty = expr
                     .as_ref()
                     .map(|expr| self.infer_expr(env, expr, true))
-                    .transpose()?;
+                    .transpose()?
+                    .unwrap_or(Type::Nil);
+
+                // // TODO
+                // // Enforce the function return value to have the given type
+                // if let Some(prev_loop_type) = env.ret.replace(expr_ty.clone()) {
+                //     // If the function return value already has been typed, add a type constraint
+                //     self.add_constraint(Constraint::TypeEqual(*id, prev_loop_type, expr_ty))?;
+                // }
 
                 return self.assign(*id, Type::Nil);
             }
@@ -1236,6 +1247,19 @@ impl TypeCheckerCtx {
                         .map(|ty| self.convert_hint_to_type(&*env, &ty))
                         .transpose()?
                         .unwrap_or_else(|| Type::TypeVar(self.fresh_ty_var()));
+
+                    if let Some(_) = declare_locals.insert(var.as_str().to_string(), ty.clone()) {
+                        panic!(
+                            "double declared variable in same declaration: {:?}",
+                            declare_locals
+                        );
+                        // println!(
+                        //     "SHADOWED var {} to {:?} -- was previously {:?}",
+                        //     var.as_str(),
+                        //     ty,
+                        //     prev_ty
+                        // ); // allowed
+                    }
 
                     self.assign(*id, ty)?;
                 }
@@ -1414,7 +1438,7 @@ impl TypeCheckerCtx {
                             },
                         })?;
                     }
-                    ">" | "<" => {
+                    ">" | "<" | "<=" | ">=" => {
                         self.add_constraint(Constraint::ChooseOverload {
                             last_checked: 0,
                             overload_set: OverloadSet {
@@ -1565,12 +1589,16 @@ impl TypeCheckerCtx {
                     }
                 };
 
-                println!("F_TY: {f_ty:?}");
-
                 if f_ty.params.len() != args.len() {
                     return Err(TypeError {
-                        node_id: *id,
-                        kind: TypeErrorKind::ArgsMismatch,
+                        node_id: f.id(),
+                        kind: TypeErrorKind::ArgsMismatch(
+                            f_ty.params.iter().map(|ty| format!("{ty:?}")).collect(),
+                            args.iter()
+                                .enumerate()
+                                .map(|(i, arg)| format!("arg#{i}"))
+                                .collect(),
+                        ),
                     });
                 }
 
@@ -1847,7 +1875,10 @@ impl TypeCheckerCtx {
                 if fn_ty.params.len() != params.len() {
                     return Err(TypeError {
                         node_id: *id,
-                        kind: TypeErrorKind::ArgsMismatch,
+                        kind: TypeErrorKind::ArgsMismatch(
+                            fn_ty.params.iter().map(|ty| format!("{ty:?}")).collect(),
+                            params.into_iter().map(|arg| format!("{arg:?}")).collect(),
+                        ),
                     });
                 }
 
@@ -2011,7 +2042,7 @@ mod test {
 
                 match (expected_err, err.kind.clone()) {
                     ("NoOverload", TypeErrorKind::NoOverload) => {}
-                    ("ArgsMismatch", TypeErrorKind::ArgsMismatch) => {}
+                    ("ArgsMismatch", TypeErrorKind::ArgsMismatch(_, _)) => {}
                     ("InfiniteType", TypeErrorKind::InfiniteType(_, _)) => {}
                     ("NotCallable", TypeErrorKind::NotCallable(_)) => {}
                     ("GenericsMismatch", TypeErrorKind::GenericsMismatch) => {}
