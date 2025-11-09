@@ -56,6 +56,7 @@
 "continue" @keyword
 "else" @keyword
 "fn" @keyword
+"do" @keyword
 "for" @keyword
 "if" @keyword
 "in" @keyword
