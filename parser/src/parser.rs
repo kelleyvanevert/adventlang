@@ -92,8 +92,8 @@ fn var(s: State) -> ParseResult<State, Var> {
     map(
         check(raw_identifier, |id| {
             ![
-                "fn", "if", "else", "then", "while", "do", "for", "let", "const", "loop", "true",
-                "false",
+                "fn", "if", "else", "then", "while", "with", "do", "for", "let", "const", "loop",
+                "true", "false",
             ]
             .contains(&id.as_str())
         }),

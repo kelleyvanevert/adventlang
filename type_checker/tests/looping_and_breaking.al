@@ -31,13 +31,14 @@ r = 'a: loop {
 // ======
 // example that loops need to be bookkept differently
 // ok
-// skip
 // ======
 
 let r: int = 'a: loop {
   let h = 7
   do {
-    break 'a with 5
+    do {
+      break 'a with 5
+    }
   }
   true
 }
@@ -48,10 +49,10 @@ let r: int = 'a: loop {
 // ======
 
 let r = 4
-r = loop {
-    break with 5
-    break with true
-//             ^here
+r = 'a: loop {
+  break 'a with 5
+  do { break 'a with true }
+//                   ^here
 }
 
 

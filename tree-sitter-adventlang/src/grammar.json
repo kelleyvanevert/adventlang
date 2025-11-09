@@ -4004,26 +4004,11 @@
     }
   ],
   "conflicts": [
-    [
-      "_lookup",
-      "_expr"
-    ],
-    [
-      "while_expr",
-      "parenthesized_expr"
-    ],
-    [
-      "if_expr",
-      "parenthesized_expr"
-    ],
-    [
-      "do_while_expr",
-      "parenthesized_expr"
-    ],
-    [
-      "assign_list",
-      "list_expr"
-    ]
+    ["_lookup", "_expr"],
+    ["while_expr", "parenthesized_expr"],
+    ["if_expr", "parenthesized_expr"],
+    ["do_while_expr", "parenthesized_expr"],
+    ["assign_list", "list_expr"]
   ],
   "precedences": [],
   "externals": [

@@ -62,6 +62,7 @@
 "in" @keyword
 "let" @keyword
 "const" @keyword
+"with" @keyword
 "return" @keyword
 "while" @keyword
 "loop" @keyword

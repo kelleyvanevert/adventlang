@@ -41,7 +41,7 @@ pub mod types;
 struct Env {
     typevars: FxHashMap<String, TypeVar>,
     locals: FxHashMap<String, Type>,
-    loops: FxHashMap<String, Type>,
+    loops: FxHashMap<String, usize>, // label -> loop node id
     curr_loop: Option<String>,
 }
 
@@ -57,6 +57,16 @@ impl Env {
 
     fn add_locals(&mut self, new_locals: FxHashMap<String, Type>) {
         self.locals.extend(new_locals);
+    }
+
+    /// Create a new subscope to be used for a function body
+    ///  (resets loop bookkeeping)
+    fn new_child_fn_scope(&self, declare_locals: FxHashMap<String, Type>) -> Env {
+        let mut child_env = self.clone();
+        child_env.add_locals(declare_locals);
+        child_env.curr_loop = None;
+        child_env.loops = FxHashMap::default();
+        child_env
     }
 }
 
@@ -996,10 +1006,7 @@ impl TypeCheckerCtx {
                     .transpose()?
                     .unwrap_or_else(|| Type::TypeVar(self.fresh_ty_var()));
 
-                let mut child_env = typing_child_env.clone();
-                child_env.add_locals(declare_locals);
-                child_env.curr_loop = None;
-                child_env.loops = FxHashMap::default();
+                let mut child_env = typing_child_env.new_child_fn_scope(declare_locals);
                 let body_ty = self.infer_block(&mut child_env, body, true)?;
 
                 // if let Some(explicit_return_ty) = child_env.ret {
@@ -1052,8 +1059,10 @@ impl TypeCheckerCtx {
                     .map(|ast::Label { id, str }| str)
                     .unwrap_or(curr_loop_label);
 
+                let loop_node_id = *env.loops.get(&label).expect("loop to be known");
+
                 // Enforce the surrounding loop (or the ancestor with the given label) to have the given type
-                if let Some(prev_loop_type) = env.loops.insert(label.clone(), expr_ty.clone()) {
+                if let Some(prev_loop_type) = self.types.insert(loop_node_id, expr_ty.clone()) {
                     // If that loop already has been typed, add a type constraint
                     self.add_constraint(Constraint::TypeEqual(*id, prev_loop_type, expr_ty))?;
                 }
@@ -1623,10 +1632,7 @@ impl TypeCheckerCtx {
                     .map(|decl| self.infer_declarable(env, decl, &mut declare_locals))
                     .collect::<Result<Vec<_>, TypeError>>()?;
 
-                let mut child_env = env.clone();
-                child_env.add_locals(declare_locals);
-                child_env.curr_loop = None;
-                child_env.loops = FxHashMap::default();
+                let mut child_env = env.new_child_fn_scope(declare_locals);
                 let body_ty = self.infer_block(&mut child_env, body, true)?;
 
                 let ty = Type::Fn(FnType {
@@ -1713,9 +1719,8 @@ impl TypeCheckerCtx {
 
                 self.infer_block(&mut env.clone(), body, false)?;
 
-                let ty = child_env.loops.get(&label).cloned().unwrap_or(Type::Nil);
-
-                return self.assign(*id, ty);
+                let break_expr_ty = self.types.entry(*id).or_insert(Type::Nil).clone();
+                Ok(break_expr_ty)
             }
             ast::Expr::WhileLet(_) => {
                 todo!()
@@ -1728,10 +1733,11 @@ impl TypeCheckerCtx {
 
                 let mut child_env = env.clone();
                 child_env.curr_loop = Some(label.clone());
+                child_env.loops.insert(label, *id);
 
                 let body_ty = self.infer_block(&mut child_env, body, use_result)?;
 
-                if let Some(break_expr_ty) = child_env.loops.get(&label).cloned() {
+                if let Some(break_expr_ty) = self.types.get(id).cloned() {
                     if use_result {
                         self.add_constraint(Constraint::TypeEqual(
                             *id,
@@ -1741,9 +1747,11 @@ impl TypeCheckerCtx {
                     } else {
                         // noop
                     }
-                }
 
-                return self.assign(*id, body_ty);
+                    return Ok(break_expr_ty);
+                } else {
+                    return self.assign(*id, if use_result { body_ty } else { Type::Nil });
+                }
             }
             ast::Expr::DoWhile(_) => {
                 todo!()
@@ -1756,39 +1764,12 @@ impl TypeCheckerCtx {
 
                 let mut child_env = env.clone();
                 child_env.curr_loop = Some(label.clone());
+                child_env.loops.insert(label, *id);
 
                 self.infer_block(&mut child_env, body, false)?;
 
-                let ty = child_env.loops.get(&label).cloned().unwrap_or(Type::Nil);
-
-                /*
-
-                // 'find :: nil
-                let h = 'find: loop {
-                    ...
-                }
-
-                // 'find :: bool
-                let h = 'find: loop {
-                    break 'find with false
-                }
-
-                // outer 'find :: nil
-                // inner 'find :: bool
-                let h = 'find: loop {
-                    'find: loop {
-                        break 'find with false
-                    }
-                }
-
-                // do-expr :: int
-                let h = do {
-                    4
-                }
-
-                */
-
-                return self.assign(*id, ty);
+                let break_expr_ty = self.types.entry(*id).or_insert(Type::Nil).clone();
+                Ok(break_expr_ty)
             }
             ast::Expr::For(ast::ForExpr {
                 id,
@@ -1810,10 +1791,11 @@ impl TypeCheckerCtx {
                 let mut child_env = env.clone();
                 child_env.add_locals(declare_locals);
                 child_env.curr_loop = Some(label.clone());
+                child_env.loops.insert(label, *id);
 
                 let body_ty = self.infer_block(&mut child_env, body, use_result)?;
 
-                if let Some(break_expr_ty) = child_env.loops.get(&label).cloned() {
+                if let Some(break_expr_ty) = self.types.get(id).cloned() {
                     if use_result {
                         self.add_constraint(Constraint::TypeEqual(
                             *id,
@@ -1823,9 +1805,11 @@ impl TypeCheckerCtx {
                     } else {
                         // noop
                     }
-                }
 
-                return self.assign(*id, body_ty);
+                    return Ok(break_expr_ty);
+                } else {
+                    return self.assign(*id, if use_result { body_ty } else { Type::Nil });
+                }
             }
         }
     }
@@ -1897,10 +1881,7 @@ impl TypeCheckerCtx {
                     self.add_constraint(Constraint::TypeEqual(param.id(), param_ty, sk_param))?;
                 }
 
-                let mut child_env = env.clone();
-                child_env.add_locals(declare_locals);
-                child_env.curr_loop = None;
-                child_env.loops = FxHashMap::default();
+                let mut child_env = env.new_child_fn_scope(declare_locals);
                 let body_ty = self.infer_block(&mut child_env, body, true)?;
 
                 // TODO: check block, instead of infer + unify
