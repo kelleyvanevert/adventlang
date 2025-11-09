@@ -26,13 +26,40 @@ a += 10
 
 
 // ======
-// certain return
-// ok
-// skip
+// uncertain return
+// err: int != nil
 // ======
 
-fn make_fn() {
-  return 42
+fn fun() {
+  if true {
+    return 42
+  }
 }
 
-let a: fn() -> int = make_fn
+let a: fn() -> int = fun
+
+
+// ======
+// certain return
+// ok
+// ======
+
+fn fun() {
+  return 42
+}
+let a: fn() -> int = fun
+
+fn fun_2() {
+  if true {
+    return 42
+  } else {
+    return 1
+  }
+}
+let a: fn() -> int = fun_2
+
+let a: fn() -> int = || { return 42 }
+
+fn bla(f: fn() -> int) {}
+
+bla(|| { return 42 })
