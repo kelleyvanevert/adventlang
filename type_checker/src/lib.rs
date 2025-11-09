@@ -18,18 +18,21 @@ mod stdlib;
 pub mod types;
 
 // TODO:
-// - [ ] generics
 // - [ ] named and optional params/args
 // - [ ] underspecified types ("fn", "dict")
 // - [ ] dicts + members
 // - [ ] coalescing + nullability
 // - [ ] if-let, while, while-let, do, do-while, for
 // - [ ] choose either `do-expr` or `block-expr`, not both
+// - [ ] indexing tuples
+// - [ ] allowing non-bools in if conditions (-> automatic conversions)
 //
 // DOING:
 // - [..] overloading + unary/binary operators ("can't apply op + on typevar")
 //
 // DONE:
+// - [x] certain return analysis
+// - [x] generics
 // - [x] unification
 // - [x] loops, labels, breaking, typing blocks
 // - [x] functions

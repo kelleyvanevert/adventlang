@@ -51,10 +51,11 @@ Status:
   - [x] function definitions and calls
   - [ ] named and optional arguments for functions
   - [x] pretty error messages and good testing infrastructure
-  - [ ] generics (parametric polymorphism)
+  - [x] generics (parametric polymorphism)
   - [x] operator overloading (ad-hoc polymorphism)
   - [ ] named fn overloading (ad-hoc polymorphism)
   - [ ] coalescing, nullability
+  - [ ] automatic conversions (?) / allowing non-bools in conditions
 - [ ] 0% create a compiler using LLVM
 
 ## Example (Advent of Code 2023, day 4)
