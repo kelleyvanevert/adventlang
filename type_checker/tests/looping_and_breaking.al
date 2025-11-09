@@ -29,6 +29,21 @@ r = 'a: loop {
 
 
 // ======
+// example that loops need to be bookkept differently
+// ok
+// skip
+// ======
+
+let r: int = 'a: loop {
+  let h = 7
+  do {
+    break 'a with 5
+  }
+  true
+}
+
+
+// ======
 // err: bool != int
 // ======
 
