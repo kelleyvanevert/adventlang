@@ -713,37 +713,6 @@ impl Into<Var> for Identifier {
     }
 }
 
-// This is used in the parser for assign-in-place stmts like `a.b += 4`,
-//  which desugar immediately to `a.b = a.b + 4`, so we have to turn the
-//  location into an expression.
-impl From<AssignLoc> for Expr {
-    fn from(loc: AssignLoc) -> Self {
-        match loc {
-            AssignLoc::Var(AssignLocVar { id, var }) => Expr::Var(VarExpr { id, var }),
-            AssignLoc::Index(AssignLocIndex {
-                id,
-                container,
-                index,
-            }) => Expr::Index(IndexExpr {
-                id,
-                expr: Expr::from(*container).into(),
-                coalesce: false,
-                index: index.into(),
-            }),
-            AssignLoc::Member(AssignLocMember {
-                id,
-                container,
-                member,
-            }) => Expr::Member(MemberExpr {
-                id,
-                expr: Expr::from(*container).into(),
-                coalesce: false,
-                member,
-            }),
-        }
-    }
-}
-
 // This is used in the parser combinator parser, as a shortcut to parse expression statements
 //  and assign statements simultaneously, deciding which one it is when it either ends,
 //  or an `=` is encountered, at which point the expression needs to be converted to a location.

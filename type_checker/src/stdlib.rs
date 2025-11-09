@@ -22,8 +22,13 @@ pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
         range: fn(int, int) -> [int]
         len: fn<A>(A) -> int                             // TODO: split into overloads when supported
         starts_with: fn(str, str) -> bool
-        slice: fn(str, int) -> str
+        slice: fn<A>(str, A) -> str                      // TODO: split into overloads when supported
         bool: fn<A>(A) -> bool                           // TODO: just a hack, remove later
+        match: fn(str, regex) -> [str]                   // ... was previously `(str...)`, but I don't think that's possible any more, which is fine
+        match_all: fn(str, regex) -> [[str]]             // ... was previously `[(str...)]`, but I don't think that's possible any more, which is fine
+        max: fn(int, int) -> int
+        enumerate: fn<T>([T]) -> [(int, T)]
+        assert: fn(bool) -> nil
     ";
 
     for line in stdlib.trim().lines() {

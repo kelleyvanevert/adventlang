@@ -602,6 +602,52 @@ impl<'a> Converter<'a> {
         }
     }
 
+    // This is used in the parser for assign-in-place stmts like `a.b += 4`,
+    //  which desugar immediately to `a.b = a.b + 4`, so we have to turn the
+    //  location into an expression.
+    fn as_expr_from_assign_pattern(&mut self, node: Node) -> Expr {
+        match node.kind() {
+            "assign_location" => self.as_expr_from_assign_loc(node.child(0).unwrap()),
+            _ => panic!(
+                "can't interpret assign pattern as expr (in update-assign-stmt): {:?}\n\n{}",
+                node,
+                self.as_str(node)
+            ),
+        }
+    }
+
+    // This is used in the parser for assign-in-place stmts like `a.b += 4`,
+    //  which desugar immediately to `a.b = a.b + 4`, so we have to turn the
+    //  location into an expression.
+    fn as_expr_from_assign_loc(&mut self, node: Node) -> Expr {
+        match node.kind() {
+            "identifier" => Expr::Var(VarExpr {
+                id: self.fresh_ast_node_id(node),
+                var: self.as_var(node),
+            }),
+            "index_lookup" => Expr::Index(IndexExpr {
+                id: self.fresh_ast_node_id(node),
+                expr: node.map_child("container", |node| {
+                    self.as_expr_from_assign_loc(node).into()
+                }),
+                coalesce: false,
+                index: node.map_child("index", |node| self.as_expr(node).into()),
+            }),
+            "member_lookup" => Expr::Member(MemberExpr {
+                id: self.fresh_ast_node_id(node),
+                expr: node.map_child("container", |node| {
+                    self.as_expr_from_assign_loc(node).into()
+                }),
+                coalesce: false,
+                member: node.map_child("member", |node| self.as_identifier(node)),
+            }),
+            _ => panic!(
+                "can't interpret as expr from assign loc (in update-assign-stmt): {:?}",
+                node
+            ),
+        }
+    }
+
     fn as_declare_pattern(&mut self, node: Node) -> DeclarePattern {
         match node.kind() {
             "declare_var" => DeclarePattern::Single(DeclareSingle {
@@ -699,10 +745,8 @@ impl<'a> Converter<'a> {
                     });
                 }
 
-                let lefthand_expr = match &pattern {
-                    AssignPattern::Single(AssignSingle { loc, .. }) => Expr::from(loc.clone()),
-                    _ => panic!("can't op-assign or push-assign to list or tuple pattern"),
-                };
+                let lefthand_expr =
+                    node.map_child("pattern", |node| self.as_expr_from_assign_pattern(node));
 
                 // if op == "[]=" {
                 //     return Stmt::Expr {

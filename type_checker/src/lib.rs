@@ -1151,7 +1151,12 @@ impl TypeCheckerCtx {
     fn infer_location(&mut self, env: &mut Env, loc: &ast::AssignLoc) -> Result<Type, TypeError> {
         match loc {
             ast::AssignLoc::Var(ast::AssignLocVar { id, var }) => {
-                let ty = env.locals[var.as_str()].clone();
+                let Some(ty) = env.locals.get(var.as_str()).cloned() else {
+                    return Err(TypeError {
+                        node_id: *id,
+                        kind: TypeErrorKind::UnknownLocal(var.name.clone()),
+                    });
+                };
 
                 self.assign(*id, ty)
             }
@@ -1395,7 +1400,7 @@ impl TypeCheckerCtx {
                             },
                         })?;
                     }
-                    "&&" => {
+                    "&&" | "||" => {
                         self.add_constraint(Constraint::ChooseOverload {
                             last_checked: 0,
                             overload_set: OverloadSet {
@@ -1409,21 +1414,7 @@ impl TypeCheckerCtx {
                             },
                         })?;
                     }
-                    "||" => {
-                        self.add_constraint(Constraint::ChooseOverload {
-                            last_checked: 0,
-                            overload_set: OverloadSet {
-                                node_id: *id,
-                                nodes: vec![left.id(), right.id(), *id],
-                                types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
-                                overloads: vec![
-                                    //
-                                    vec![Type::Bool, Type::Bool, Type::Bool],
-                                ],
-                            },
-                        })?;
-                    }
-                    ">" => {
+                    ">" | "<" => {
                         self.add_constraint(Constraint::ChooseOverload {
                             last_checked: 0,
                             overload_set: OverloadSet {
@@ -1437,7 +1428,7 @@ impl TypeCheckerCtx {
                             },
                         })?;
                     }
-                    "+" => {
+                    "+" | "^" => {
                         // a + b
                         // +: fn(int, int) -> int
                         // +: fn(int, float) -> float
@@ -1457,6 +1448,22 @@ impl TypeCheckerCtx {
                                     vec![Type::Float, Type::Int, Type::Float],
                                     vec![Type::Float, Type::Float, Type::Float],
                                     vec![Type::Str, Type::Str, Type::Str],
+                                ],
+                            },
+                        })?;
+                    }
+                    "-" => {
+                        self.add_constraint(Constraint::ChooseOverload {
+                            last_checked: 0,
+                            overload_set: OverloadSet {
+                                node_id: *id,
+                                nodes: vec![left.id(), right.id(), *id],
+                                types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
+                                overloads: vec![
+                                    vec![Type::Int, Type::Int, Type::Int],
+                                    vec![Type::Int, Type::Float, Type::Float],
+                                    vec![Type::Float, Type::Int, Type::Float],
+                                    vec![Type::Float, Type::Float, Type::Float],
                                 ],
                             },
                         })?;
@@ -1755,8 +1762,42 @@ impl TypeCheckerCtx {
 
                 return self.assign(*id, ty);
             }
-            ast::Expr::For(_) => {
-                todo!()
+            ast::Expr::For(ast::ForExpr {
+                id,
+                label,
+                pattern,
+                range,
+                body,
+            }) => {
+                let label = label
+                    .clone()
+                    .map(|l| l.str)
+                    .unwrap_or_else(|| self.fresh_loop_label());
+
+                let mut declare_locals = FxHashMap::default();
+                let pattern_ty = self.infer_declare_pattern(env, pattern, &mut declare_locals)?;
+
+                self.check_expr(env, range, Type::List(pattern_ty.into()))?;
+
+                let mut child_env = env.clone();
+                child_env.add_locals(declare_locals);
+                child_env.curr_loop = Some(label.clone());
+
+                let body_ty = self.infer_block(&mut child_env, body, use_result)?;
+
+                if let Some(break_expr_ty) = child_env.loops.get(&label).cloned() {
+                    if use_result {
+                        self.add_constraint(Constraint::TypeEqual(
+                            *id,
+                            body_ty.clone(),
+                            break_expr_ty.clone(),
+                        ))?;
+                    } else {
+                        // noop
+                    }
+                }
+
+                return self.assign(*id, body_ty);
             }
         }
     }
@@ -2115,7 +2156,7 @@ mod test {
                         }
                         status = "test";
                     } else if status == "meta" && line.starts_with("//") {
-                        description.push(&line[3..]);
+                        description.push(&line[3.min(line.len())..]);
                     } else if status == "meta" {
                         panic!("Can't parse line in meta block, file `{filename}`, line {i}");
                     } else if status == "test"

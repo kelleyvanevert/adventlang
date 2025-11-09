@@ -15,3 +15,11 @@ fn bla<t>(a: [t]) {
 fn bla<t>(a: fn(t) -> t) {
     let b: t = a
 }
+
+
+// ======
+// ok
+// ======
+
+let a = 5
+a += 10

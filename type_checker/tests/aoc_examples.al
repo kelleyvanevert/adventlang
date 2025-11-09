@@ -1,5 +1,8 @@
 // ======
-// 2023 day 1
+// 2023 day 13
+// TODO:
+// - [ ] indexing tuples (-> overloading with generic functions)
+//
 // ok
 // ======
 
@@ -72,7 +75,10 @@ fn bonus(input: str) {
 
 
 // ======
-// 2023 day 2
+// 2023 day 23
+// TODO:
+// - [ ] allowing non-bools in if conditions (-> automatic conversions)
+//
 // ok
 // ======
 
@@ -111,3 +117,125 @@ fn solve(input, red, green, blue) {
     }
     :sum
 }
+
+
+// ======
+// 2023 day 3
+// TODO:
+// - [ ] typing if-let-expr (-> nullability)
+// - [ ] allowing non-bools in if conditions (-> automatic conversions)
+//
+// ok
+// ======
+
+const example_input = "
+467..114..
+...*......
+..35..633.
+......#...
+617*......
+.....+.58.
+..592.....
+......755.
+...$.*....
+.664.598..
+"
+
+fn solve(input) {
+  let schematic = input :trim :lines
+  let total = 0
+
+  let should_include = |y: int, x: int, l: int| {
+    // check previous row
+    if y > 0 && schematic[y - 1] :slice (max(x-1, 0), x+l+1) :match /[-!@^&*#+%$=\/]/ :bool {
+      return true
+    }
+
+    // check current row
+    if schematic[y] :slice (max(x-1, 0), x+l+1) :match /[-!@^&*#+%$=\/]/ :bool {
+      return true
+    }
+
+    // check next row
+    if y < schematic:len - 1 && schematic[y + 1] :slice (max(x-1, 0), x+l+1) :match /[-!@^&*#+%$=\/]/ :bool {
+      return true
+    }
+
+    false
+  }
+
+  for let (y, line) in schematic:enumerate {
+    let x = 0
+    while x < line:len {
+      // // TODO if-let-expr
+      // if let some m = line :slice x :match /^[0-9]+/ {
+      //   if should_include(y, x, m[0]:len) {
+      //     total = total + int(m[0])
+      //   }
+      //   x += m[0]:len
+      // } else {
+      //   x += 1
+      // }
+    }
+  }
+
+  total
+}
+
+
+// ======
+// 2023 day 4
+// ok
+// ======
+
+const example_input = "
+Card 1: 41 48 83 86 17 | 83 86  6 31 17  9 48 53
+Card 2: 13 32 20 16 61 | 61 30 68 82 17 32 24 19
+Card 3:  1 21 53 59 44 | 69 82 63 72 16 21 14  1
+Card 4: 41 92 73 84 69 | 59 84 76 51 58  5 54 83
+Card 5: 87 83 26 28 32 | 88 30 70 12 93 22 82 36
+Card 6: 31 18 13 56 72 | 74 77 10 23 35 67 36 11
+"
+
+fn solve(input: str) {
+  input
+    :trim
+    :lines
+    :map |line: str| {
+      let [_, rest] = line :split ":"
+      let [winning, yours] = rest :split "|" :map |seg| {
+        seg :match_all /[0-9]+/ :map |t| { t[0]:int }
+      }
+      let wins = yours :filter |n| { n :in winning } :len
+
+      if (wins > 0) {
+        2 ^ (wins - 1)
+      } else {
+        0
+      }
+    }
+    :sum
+}
+
+fn bonus(input: str) {
+  let card_wins = input :trim :lines :map |line: str| {
+    let [_, rest] = line :split ":"
+    let [winning, yours] = rest :split "|" :map |seg| {
+      seg :match_all /[0-9]+/ :map |t| { t[0]:int }
+    }
+    yours :filter |n| { n :in winning } :len
+  }
+
+  let copies = card_wins :map |_| { 1 }
+
+  for let i in range(0, card_wins:len) {
+    for let w in range(1, card_wins[i] + 1) {
+      copies[i + w] += copies[i]
+    }
+  }
+
+  copies:sum
+}
+
+assert(solve(example_input) == 13)
+assert(bonus(example_input) == 30)
