@@ -2035,17 +2035,17 @@ mod test {
 
                 let mut status = "test";
                 let mut lineno = 0;
-                let mut description = "";
+                let mut description: Vec<&str> = vec![];
                 let mut expectation = "";
                 let mut skip = false;
                 let mut error_location = None;
-                let mut test_lines = vec![];
+                let mut test_lines: Vec<&str> = vec![];
 
                 for (i, line) in lines.enumerate() {
                     if status == "test" && line.starts_with("// ======") {
                         if expectation.len() > 0 {
                             test_cases.push((
-                                description,
+                                description.join("\n"),
                                 lineno,
                                 expectation,
                                 skip,
@@ -2055,7 +2055,7 @@ mod test {
                         }
                         status = "meta";
                         lineno = i;
-                        description = "";
+                        description = vec![];
                         expectation = "";
                         skip = false;
                         error_location = None;
@@ -2065,14 +2065,14 @@ mod test {
                     } else if status == "meta" && line.starts_with("// ok") {
                         expectation = "ok";
                     } else if status == "meta" && line.starts_with("// err") {
-                        expectation = &line[2..].trim();
+                        expectation = &line[3..].trim();
                     } else if status == "meta" && line.starts_with("// ======") {
                         if expectation.len() == 0 {
                             panic!("No expectation for test, file `{filename}`, line {i}");
                         }
                         status = "test";
                     } else if status == "meta" && line.starts_with("//") {
-                        description = &line[2..].trim();
+                        description.push(&line[3..]);
                     } else if status == "meta" {
                         panic!("Can't parse line in meta block, file `{filename}`, line {i}");
                     } else if status == "test"
@@ -2088,7 +2088,7 @@ mod test {
 
                 if expectation.len() > 0 {
                     test_cases.push((
-                        description,
+                        description.join("\n"),
                         lineno,
                         expectation,
                         skip,
@@ -2102,7 +2102,7 @@ mod test {
                         run_test_case(
                             filename,
                             lineno,
-                            description,
+                            &description,
                             expectation,
                             error_location,
                             &source,

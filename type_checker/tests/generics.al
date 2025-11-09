@@ -28,9 +28,12 @@ some_fn(my_len_fn)
 
 
 // ======
-// generic named fns that were not annotated as such
-// ok
-// skip -- this doesn't work yet
+// generic named fns need to be annotated as generic
+// - bidirectional typing can only lift lambdas to be generic because
+//    it types them in a `check` call, whereas for named fns like this,
+//    it seeems the only way would be to try to generalize them off the
+//    bat, which is way trickier
+// err
 // ======
 
 fn some_fn(len: fn<T>([T]) -> bool) -> bool {
