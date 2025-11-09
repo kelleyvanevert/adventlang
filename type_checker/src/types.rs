@@ -370,7 +370,19 @@ impl Debug for Type {
             Type::Fn(def) => write!(f, "{def:?}"),
             Type::NamedFn(defs) => write!(f, "TODO"),
             Type::List(element_ty) => write!(f, "[{element_ty:?}]"),
-            Type::Tuple(elements) => write!(f, "TODO"),
+            Type::Tuple(elements) => {
+                write!(f, "(")?;
+                for (i, el) in elements.into_iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{el:?}");
+                }
+                if elements.len() == 1 {
+                    write!(f, ",")?;
+                }
+                write!(f, ")")
+            }
             Type::Dict { key, val } => write!(f, "dict[{key:?}, {val:?}]"),
             Type::Nullable { child } => write!(f, "?{child:?}"),
         }

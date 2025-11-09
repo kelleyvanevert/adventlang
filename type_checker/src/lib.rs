@@ -788,7 +788,7 @@ impl TypeCheckerCtx {
                     params: params
                         .into_iter()
                         .map(|hint| self.convert_hint_to_type(&mut typing_child_env, hint))
-                        .collect::<Result<Vec<_>, TypeError>>()?,
+                        .collect::<Result<Vec<_>, _>>()?,
                     ret: self
                         .convert_hint_to_type(&mut typing_child_env, &ret)?
                         .into(),
@@ -805,6 +805,12 @@ impl TypeCheckerCtx {
             }
             ast::TypeHint::List(t) => Ok(Type::List(
                 self.convert_hint_to_type(env, &t.elements_ty)?.into(),
+            )),
+            ast::TypeHint::Tuple(t) => Ok(Type::Tuple(
+                t.element_types
+                    .iter()
+                    .map(|hint| self.convert_hint_to_type(env, hint))
+                    .collect::<Result<Vec<_>, _>>()?,
             )),
             ty => todo!("can't convert typehint to type: {:?}", ty),
         }
@@ -880,6 +886,12 @@ impl TypeCheckerCtx {
 
     fn forward_declare_item(&mut self, env: &mut Env, item: &ast::Item) -> Result<Type, TypeError> {
         match item {
+            ast::Item::ConstItem(ast::ConstItem { id, name, expr }) => {
+                let placeholder_ty = Type::TypeVar(self.fresh_ty_var());
+
+                env.locals.insert(name.str.clone(), placeholder_ty.clone());
+                Ok(placeholder_ty)
+            }
             ast::Item::NamedFn(ast::NamedFnItem {
                 id,
                 name,
@@ -941,6 +953,13 @@ impl TypeCheckerCtx {
         placeholder_ty: Type,
     ) -> Result<Type, TypeError> {
         match item {
+            ast::Item::ConstItem(ast::ConstItem { id, name, expr }) => {
+                let ty = self.infer_expr(env, expr, true)?;
+
+                self.add_constraint(Constraint::TypeEqual(*id, ty.clone(), placeholder_ty))?;
+
+                self.assign(*id, ty)
+            }
             ast::Item::NamedFn(ast::NamedFnItem {
                 id,
                 name,
@@ -1165,7 +1184,9 @@ impl TypeCheckerCtx {
                     .transpose()?
                     .unwrap_or_else(|| Type::TypeVar(self.fresh_ty_var()));
 
-                env.locals.insert(var.as_str().to_string(), ty.clone());
+                if let Some(prev_ty) = env.locals.insert(var.as_str().to_string(), ty.clone()) {
+                    // println!("SHADOWED {prev_ty:?}"); // allowed
+                }
 
                 self.assign(*id, ty)
             }
@@ -1333,6 +1354,64 @@ impl TypeCheckerCtx {
                 let res_ty = Type::TypeVar(self.fresh_ty_var());
 
                 match op.as_str() {
+                    "==" => {
+                        self.add_constraint(Constraint::ChooseOverload {
+                            last_checked: 0,
+                            overload_set: OverloadSet {
+                                node_id: *id,
+                                nodes: vec![left.id(), right.id(), *id],
+                                types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
+                                overloads: vec![
+                                    vec![Type::Str, Type::Str, Type::Bool],
+                                    vec![Type::Int, Type::Int, Type::Bool],
+                                    vec![Type::Float, Type::Float, Type::Bool],
+                                    vec![Type::Bool, Type::Bool, Type::Bool],
+                                ],
+                            },
+                        })?;
+                    }
+                    "&&" => {
+                        self.add_constraint(Constraint::ChooseOverload {
+                            last_checked: 0,
+                            overload_set: OverloadSet {
+                                node_id: *id,
+                                nodes: vec![left.id(), right.id(), *id],
+                                types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
+                                overloads: vec![
+                                    //
+                                    vec![Type::Bool, Type::Bool, Type::Bool],
+                                ],
+                            },
+                        })?;
+                    }
+                    "||" => {
+                        self.add_constraint(Constraint::ChooseOverload {
+                            last_checked: 0,
+                            overload_set: OverloadSet {
+                                node_id: *id,
+                                nodes: vec![left.id(), right.id(), *id],
+                                types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
+                                overloads: vec![
+                                    //
+                                    vec![Type::Bool, Type::Bool, Type::Bool],
+                                ],
+                            },
+                        })?;
+                    }
+                    ">" => {
+                        self.add_constraint(Constraint::ChooseOverload {
+                            last_checked: 0,
+                            overload_set: OverloadSet {
+                                node_id: *id,
+                                nodes: vec![left.id(), right.id(), *id],
+                                types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
+                                overloads: vec![
+                                    vec![Type::Int, Type::Int, Type::Bool],
+                                    vec![Type::Float, Type::Float, Type::Bool],
+                                ],
+                            },
+                        })?;
+                    }
                     "+" => {
                         // a + b
                         // +: fn(int, int) -> int

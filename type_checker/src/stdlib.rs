@@ -5,17 +5,25 @@ use crate::{Env, TypeCheckerCtx};
 pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
     let stdlib = "
         in: fn<A>(A, [A]) -> bool
+        trim: fn(str) -> str
+        split: fn(str, str) -> [str]
+        replace: fn(str, (str, str)) -> str
         lines: fn(str) -> [str]
         chars: fn(str) -> [str]
         is_digit: fn(str) -> bool
         int: fn(str) -> int
-        map: fn<A, B>([A], fn(A) -> B) -> [B]
         filter: fn<A, B>([A], fn(A) -> bool) -> [A]
-        filter_map: fn<A, B>([A], fn(A) -> B) -> [B]     // todo improve after adding nullable types
-        find_map: fn<A, B>([A], fn(A) -> B) -> B     // todo improve after adding nullable types
+        map: fn<A, B>([A], fn(A) -> B) -> [B]
+        flat_map: fn<A, B>([A], fn(A) -> [B]) -> [B]
+        filter_map: fn<A, B>([A], fn(A) -> B) -> [B]     // TODO: improve after adding nullable types
+        find_map: fn<A, B>([A], fn(A) -> B) -> B         // TODO: improve after adding nullable types
+        find: fn<A>([A], fn(A) -> bool) -> A             // TODO: improve after adding nullable types
         sum: fn([int]) -> int
         range: fn(int, int) -> [int]
-        len: fn<A>(A) -> int
+        len: fn<A>(A) -> int                             // TODO: split into overloads when supported
+        starts_with: fn(str, str) -> bool
+        slice: fn(str, int) -> str
+        bool: fn<A>(A) -> bool                           // TODO: just a hack, remove later
     ";
 
     for line in stdlib.trim().lines() {
