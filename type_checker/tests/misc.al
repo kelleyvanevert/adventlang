@@ -63,3 +63,13 @@ let a: fn() -> int = || { return 42 }
 fn bla(f: fn() -> int) {}
 
 bla(|| { return 42 })
+
+
+// ======
+// there was a bug where the interpolations would have the same AST nodes as the parent
+// ok
+// ======
+
+let a = 42
+print("a {a}")
+let b = a + 4

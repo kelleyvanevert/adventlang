@@ -32,6 +32,11 @@ pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
             min_arr: fn([int]) -> int
         enumerate: fn<T>([T]) -> [(int, T)]
         assert: fn(bool) -> nil
+        sort_by_key: fn<T, K>([T], fn(T) -> K) -> [T]
+        chunks: fn<T>([T], int) -> [[T]]
+        print: fn(str) -> nil
+        fst: fn<A, B>((A, B)) -> A
+        snd: fn<A, B>((A, B)) -> B
     ";
 
     for line in stdlib.trim().lines() {

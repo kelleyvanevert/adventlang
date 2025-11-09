@@ -243,7 +243,7 @@ assert(bonus(example_input) == 30)
 // ======
 // 2023 day 5
 // TODO:
-// - [ ] return ty analysis of function body
+// - [ ] nullable types
 //
 // ok
 // ======
@@ -295,8 +295,7 @@ fn construct_mapper(input: str) {
         return dest + (n - source)
       }
     }
-    // return n // TODO
-    4
+    return n
   }
 }
 
@@ -315,55 +314,57 @@ fn solve(input: str) {
     :min_arr
 }
 
-// fn construct_smart_mapper(input: str) {
-//   let rules = input :trim :lines :slice_arr 1
-//     :map |line| {
-//       line :split " " :map int
-//     }
-//     :sort_by_key |rule| {
-//       rule[1]
-//     }
+fn construct_smart_mapper(input: str) {
+  let rules = input :trim :lines :slice_arr 1
+    :map |line| {
+      line :split " " :map int
+    }
+    :sort_by_key |rule| {
+      rule[1]
+    }
 
-//   |n: int| {
-//     for let [dest, source, num] in rules {
-//       if n < source {
-//         return (n, source - n)
-//       }
-//       if n >= source && n < source + num {
-//         return (dest + (n - source), source + num - n)
-//       }
-//     }
+  |n: int| {
+    for let [dest, source, num] in rules {
+      if n < source {
+        return (n, source - n)
+      }
+      if n >= source && n < source + num {
+        return (dest + (n - source), source + num - n)
+      }
+    }
 
-//     return (n, 999999999)
-//   }
-// }
+    return (n, 999999999)
+  }
+}
 
-// fn bonus(input: str) {
-//   let [seeds, ..rest] = input :trim :split "\n\n"
-//   let seeds = seeds :replace ("seeds: ", "") :split " " :map int
-//   let mappers = rest :map construct_smart_mapper
+fn bonus(input: str) {
+  let [seeds, ..rest] = input :trim :split "\n\n"
+  let seeds = seeds :replace ("seeds: ", "") :split " " :map int
+  let mappers = rest :map construct_smart_mapper
 
-//   let loc = nil
+  let loc = nil
 
-//   for let [seed, num] in seeds :chunks 2 {
-//     print("seed {seed}")
-//     let end = seed + num
-//     while seed < end {
-//       let n = seed
-//       let skip = nil
-//       for let m in mappers {
-//         let t = m(n)
-//         n = t[0]
-//         skip = t[1] :min skip
-//       }
+  for let [seed, num] in seeds :chunks 2 {
+    // print("seed {seed}")
+    let end = seed + num
+    while seed < end {
+      // let n = seed
+      // let skip = nil // TODO nullable types
+      // for let m in mappers {
+      //   let t = m(n)
+      //   // n = t[0] // TODO tuple indexing
+      //   n = t :fst
+      //   // skip = t[1] :min skip // TODO tuple indexing
+      //   skip = t :snd :min skip
+      // }
 
-//       loc = loc :min n
-//       seed += skip
-//     }
-//   }
+      // loc = loc :min n
+      // seed += skip
+    }
+  }
 
-//   loc
-// }
+  loc
+}
 
-// assert(solve(example_input) == 35)
-// assert(bonus(example_input) == 46)
+assert(solve(example_input) == 35)
+// assert(bonus(example_input) == 46) // TODO nullable types

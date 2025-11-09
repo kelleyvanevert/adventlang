@@ -380,14 +380,14 @@ impl<'a> Converter<'a> {
                             "string_interpolation" => {
                                 if str.len() > 0 {
                                     pieces.push(StrPiece::Fragment(StrPieceFragment {
-                                        id: child.id(), // todo check if correct
+                                        id: self.fresh_ast_node_id(child),
                                         str,
                                     }));
                                     str = "".to_string();
                                 }
 
                                 pieces.push(StrPiece::Interpolation(StrPieceInterpolation {
-                                    id: child.id(), // todo check if correct
+                                    id: self.fresh_ast_node_id(child),
                                     expr: child
                                         .map_child("interpolation", |node| self.as_expr(node)),
                                 }));
