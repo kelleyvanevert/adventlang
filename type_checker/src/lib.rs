@@ -43,6 +43,7 @@ struct Env {
     locals: FxHashMap<String, Type>,
     loops: FxHashMap<String, usize>, // label -> loop node id
     curr_loop: Option<String>,
+    curr_fn: Option<usize>,
 }
 
 impl Env {
@@ -52,6 +53,7 @@ impl Env {
             locals: FxHashMap::default(),
             loops: FxHashMap::default(),
             curr_loop: None,
+            curr_fn: None,
         }
     }
 
@@ -61,11 +63,12 @@ impl Env {
 
     /// Create a new subscope to be used for a function body
     ///  (resets loop bookkeeping)
-    fn new_child_fn_scope(&self, declare_locals: FxHashMap<String, Type>) -> Env {
+    fn new_child_fn_scope(&self, node_id: usize, declare_locals: FxHashMap<String, Type>) -> Env {
         let mut child_env = self.clone();
         child_env.add_locals(declare_locals);
         child_env.curr_loop = None;
         child_env.loops = FxHashMap::default();
+        child_env.curr_fn = Some(node_id);
         child_env
     }
 }
@@ -119,6 +122,8 @@ pub enum TypeErrorKind {
     ArgsMismatch(Vec<String>, Vec<String>),
     #[error("use of break statement outside loop")]
     BreakOutsideLoop,
+    #[error("use of return statement outside function body")]
+    ReturnOutsideFn,
     #[error("local not defined: {0}")]
     UnknownLocal(String),
     #[error("typevar not defined: {0}")]
@@ -144,25 +149,13 @@ impl TypeErrorKind {
             }
             Self::NoOverload => {}
             Self::BreakOutsideLoop => {}
+            Self::ReturnOutsideFn => {}
             Self::GenericsMismatch => {}
             Self::ArgsMismatch(_, _) => {}
             Self::UnknownLocal(_) => {}
             Self::UnknownTypeVar(_) => {}
         }
     }
-}
-
-#[derive(Debug)]
-struct TypeCheckerCtx {
-    unification_table: InPlaceUnificationTable<TypeVar>,
-    constraints: Vec<Constraint>,
-    next_loop_id: usize,
-    progress: usize,
-
-    // node id -> type
-    types: FxHashMap<usize, Type>,
-    all_vars: Vec<TypeVar>,
-    rigid_vars: FxHashSet<TypeVar>, // skolemization
 }
 
 #[derive(Debug, Clone)]
@@ -184,6 +177,20 @@ struct OverloadSet {
     overloads: Vec<Vec<Type>>,
 }
 
+#[derive(Debug)]
+struct TypeCheckerCtx {
+    unification_table: InPlaceUnificationTable<TypeVar>,
+    constraints: Vec<Constraint>,
+    next_loop_id: usize,
+    progress: usize,
+
+    // node id -> type
+    types: FxHashMap<usize, Type>,
+    all_vars: Vec<TypeVar>,
+    rigid_vars: FxHashSet<TypeVar>, // skolemization
+    fn_return_ty: FxHashMap<usize, Type>,
+}
+
 impl TypeCheckerCtx {
     pub fn new() -> Self {
         Self {
@@ -194,6 +201,7 @@ impl TypeCheckerCtx {
             types: FxHashMap::default(),
             all_vars: vec![],
             rigid_vars: FxHashSet::default(),
+            fn_return_ty: FxHashMap::default(),
         }
     }
 
@@ -409,60 +417,6 @@ impl TypeCheckerCtx {
             ret,
         }
     }
-
-    // fn sub_skolemize_fn_ty(&mut self, vars_to_skolemize: &Vec<TypeVar>, fn_ty: &FnType) -> FnType {
-    //     let vars_to_skolemize = vars_to_skolemize
-    //         .iter()
-    //         .cloned()
-    //         .filter(|v| !fn_ty.generics.contains(v))
-    //         .collect::<Vec<_>>();
-
-    //     FnType {
-    //         generics: fn_ty.generics.clone(),
-    //         params: fn_ty
-    //             .params
-    //             .iter()
-    //             .map(|param| self.sub_skolemize_ty(&vars_to_skolemize, param))
-    //             .collect(),
-    //         ret: self
-    //             .sub_skolemize_ty(&vars_to_skolemize, fn_ty.ret.as_ref())
-    //             .into(),
-    //     }
-    // }
-
-    // fn sub_skolemize_ty(&mut self, vars_to_skolemize: &Vec<TypeVar>, ty: &Type) -> Type {
-    //     match ty {
-    //         Type::Nil | Type::Bool | Type::Str | Type::Int | Type::Float | Type::Regex => {
-    //             ty.clone()
-    //         }
-    //         Type::TypeVar(v) if vars_to_skolemize.contains(v) => {
-    //             Type::TypeVar(self.fresh_skolemized_ty_var())
-    //         }
-    //         Type::TypeVar(v) => Type::TypeVar(*v),
-    //         Type::Fn(def) => Type::Fn(self.sub_skolemize_fn_ty(vars_to_skolemize, def)),
-    //         Type::NamedFn(defs) => Type::NamedFn(
-    //             defs.iter()
-    //                 .map(|def| self.sub_skolemize_fn_ty(vars_to_skolemize, def))
-    //                 .collect(),
-    //         ),
-    //         Type::List(element_ty) => {
-    //             Type::List(self.sub_skolemize_ty(vars_to_skolemize, element_ty).into())
-    //         }
-    //         Type::Tuple(elements) => Type::Tuple(
-    //             elements
-    //                 .iter()
-    //                 .map(|el| self.sub_skolemize_ty(vars_to_skolemize, el))
-    //                 .collect(),
-    //         ),
-    //         Type::Dict { key, val } => Type::Dict {
-    //             key: self.sub_skolemize_ty(vars_to_skolemize, key).into(),
-    //             val: self.sub_skolemize_ty(vars_to_skolemize, val).into(),
-    //         },
-    //         Type::Nullable { child } => Type::Nullable {
-    //             child: self.sub_skolemize_ty(vars_to_skolemize, child).into(),
-    //         },
-    //     }
-    // }
 
     fn select_overload(&mut self, overload_set: OverloadSet) -> Result<bool, TypeError> {
         let n = overload_set.nodes.len();
@@ -1006,7 +960,7 @@ impl TypeCheckerCtx {
                     .transpose()?
                     .unwrap_or_else(|| Type::TypeVar(self.fresh_ty_var()));
 
-                let mut child_env = typing_child_env.new_child_fn_scope(declare_locals);
+                let mut child_env = typing_child_env.new_child_fn_scope(*id, declare_locals);
                 let body_ty = self.infer_block(&mut child_env, body, true)?;
 
                 // if let Some(explicit_return_ty) = child_env.ret {
@@ -1062,9 +1016,9 @@ impl TypeCheckerCtx {
                 let loop_node_id = *env.loops.get(&label).expect("loop to be known");
 
                 // Enforce the surrounding loop (or the ancestor with the given label) to have the given type
-                if let Some(prev_loop_type) = self.types.insert(loop_node_id, expr_ty.clone()) {
+                if let Some(prev_ty) = self.types.insert(loop_node_id, expr_ty.clone()) {
                     // If that loop already has been typed, add a type constraint
-                    self.add_constraint(Constraint::TypeEqual(*id, prev_loop_type, expr_ty))?;
+                    self.add_constraint(Constraint::TypeEqual(*id, prev_ty, expr_ty))?;
                 }
 
                 return self.assign(*id, Type::Nil);
@@ -1079,12 +1033,18 @@ impl TypeCheckerCtx {
                     .transpose()?
                     .unwrap_or(Type::Nil);
 
-                // // TODO
-                // // Enforce the function return value to have the given type
-                // if let Some(prev_loop_type) = env.ret.replace(expr_ty.clone()) {
-                //     // If the function return value already has been typed, add a type constraint
-                //     self.add_constraint(Constraint::TypeEqual(*id, prev_loop_type, expr_ty))?;
-                // }
+                let Some(fn_node_id) = env.curr_fn else {
+                    return Err(TypeError {
+                        node_id: *id,
+                        kind: TypeErrorKind::ReturnOutsideFn,
+                    });
+                };
+
+                // Enforce the function return value to have the given type
+                if let Some(prev_ty) = self.fn_return_ty.insert(fn_node_id, expr_ty.clone()) {
+                    // If the function return value already has been typed, add a type constraint
+                    self.add_constraint(Constraint::TypeEqual(*id, prev_ty, expr_ty))?;
+                }
 
                 return self.assign(*id, Type::Nil);
             }
@@ -1632,7 +1592,7 @@ impl TypeCheckerCtx {
                     .map(|decl| self.infer_declarable(env, decl, &mut declare_locals))
                     .collect::<Result<Vec<_>, TypeError>>()?;
 
-                let mut child_env = env.new_child_fn_scope(declare_locals);
+                let mut child_env = env.new_child_fn_scope(*id, declare_locals);
                 let body_ty = self.infer_block(&mut child_env, body, true)?;
 
                 let ty = Type::Fn(FnType {
@@ -1881,7 +1841,7 @@ impl TypeCheckerCtx {
                     self.add_constraint(Constraint::TypeEqual(param.id(), param_ty, sk_param))?;
                 }
 
-                let mut child_env = env.new_child_fn_scope(declare_locals);
+                let mut child_env = env.new_child_fn_scope(*id, declare_locals);
                 let body_ty = self.infer_block(&mut child_env, body, true)?;
 
                 // TODO: check block, instead of infer + unify
