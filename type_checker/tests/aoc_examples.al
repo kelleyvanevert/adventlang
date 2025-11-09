@@ -90,7 +90,7 @@ fn solve(input, red, green, blue) {
     :lines
     :map |game| {
       let [id, sets] = game :split ": "
-      let id2 = id :replace ("Game ", "") :int // TODO allow `id` to be re-declared
+      let id = id :replace ("Game ", "") :int
       let invalid = sets :split "; "
         :flat_map |set| { set :split ", " }
         :map |draw| {
@@ -106,7 +106,7 @@ fn solve(input, red, green, blue) {
       if invalid :bool { // TODO remove necessity for explicit conversions
         0
       } else {
-        id2
+        id
       }
     }
     :sum

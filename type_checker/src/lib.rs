@@ -54,6 +54,10 @@ impl Env {
             curr_loop: None,
         }
     }
+
+    fn add_locals(&mut self, new_locals: FxHashMap<String, Type>) {
+        self.locals.extend(new_locals);
+    }
 }
 
 impl UnifyKey for TypeVar {
@@ -982,9 +986,13 @@ impl TypeCheckerCtx {
                     })
                     .collect::<Vec<_>>();
 
+                let mut declare_locals = FxHashMap::default();
+
                 let params = params
                     .into_iter()
-                    .map(|decl| self.infer_declarable(&mut typing_child_env, decl))
+                    .map(|decl| {
+                        self.infer_declarable(&mut typing_child_env, decl, &mut declare_locals)
+                    })
                     .collect::<Result<Vec<_>, TypeError>>()?;
 
                 let ret_ty = ret
@@ -994,6 +1002,7 @@ impl TypeCheckerCtx {
                     .unwrap_or_else(|| Type::TypeVar(self.fresh_ty_var()));
 
                 let mut child_env = typing_child_env.clone();
+                child_env.add_locals(declare_locals);
                 child_env.curr_loop = None;
                 child_env.loops = FxHashMap::default();
                 let body_ty = self.infer_block(&mut child_env, body, true)?;
@@ -1060,8 +1069,11 @@ impl TypeCheckerCtx {
                 return self.assign(*id, Type::Nil);
             }
             ast::Stmt::Declare(ast::DeclareStmt { id, pattern, expr }) => {
-                let pattern_ty = self.infer_declare_pattern(env, pattern)?;
+                let mut declare_locals = FxHashMap::default();
+                let pattern_ty = self.infer_declare_pattern(env, pattern, &mut declare_locals)?;
+
                 self.check_expr(env, expr, pattern_ty)?;
+                env.add_locals(declare_locals);
 
                 return self.assign(*id, Type::Nil);
             }
@@ -1169,6 +1181,7 @@ impl TypeCheckerCtx {
         &mut self,
         env: &mut Env,
         pattern: &ast::DeclarePattern,
+        declare_locals: &mut FxHashMap<String, Type>,
         // allow_guard
     ) -> Result<Type, TypeError> {
         match pattern {
@@ -1184,8 +1197,17 @@ impl TypeCheckerCtx {
                     .transpose()?
                     .unwrap_or_else(|| Type::TypeVar(self.fresh_ty_var()));
 
-                if let Some(prev_ty) = env.locals.insert(var.as_str().to_string(), ty.clone()) {
-                    // println!("SHADOWED {prev_ty:?}"); // allowed
+                if let Some(_) = declare_locals.insert(var.as_str().to_string(), ty.clone()) {
+                    panic!(
+                        "double declared variable in same declaration: {:?}",
+                        declare_locals
+                    );
+                    // println!(
+                    //     "SHADOWED var {} to {:?} -- was previously {:?}",
+                    //     var.as_str(),
+                    //     ty,
+                    //     prev_ty
+                    // ); // allowed
                 }
 
                 self.assign(*id, ty)
@@ -1195,7 +1217,7 @@ impl TypeCheckerCtx {
                 let ty = Type::List(element_ty.clone().into());
 
                 for el in elements {
-                    let decl_ty = self.infer_declarable(env, el)?;
+                    let decl_ty = self.infer_declarable(env, el, declare_locals)?;
                     self.add_constraint(Constraint::TypeEqual(
                         el.id(),
                         decl_ty,
@@ -1224,7 +1246,7 @@ impl TypeCheckerCtx {
                 let ty = Type::Tuple(element_types.clone());
 
                 for (i, el) in elements.iter().enumerate() {
-                    let decl_ty = self.infer_declarable(env, el)?;
+                    let decl_ty = self.infer_declarable(env, el, declare_locals)?;
                     self.add_constraint(Constraint::TypeEqual(
                         el.id(),
                         decl_ty,
@@ -1274,6 +1296,7 @@ impl TypeCheckerCtx {
         &mut self,
         env: &mut Env,
         declarable: &ast::Declarable,
+        declare_locals: &mut FxHashMap<String, Type>,
     ) -> Result<Type, TypeError> {
         let ast::Declarable {
             id,
@@ -1281,7 +1304,7 @@ impl TypeCheckerCtx {
             fallback,
         } = declarable;
 
-        let pattern_ty = self.infer_declare_pattern(env, pattern)?;
+        let pattern_ty = self.infer_declare_pattern(env, pattern, declare_locals)?;
 
         if let Some(expr) = fallback {
             self.check_expr(env, expr, pattern_ty.clone())?;
@@ -1334,6 +1357,8 @@ impl TypeCheckerCtx {
                         kind: TypeErrorKind::UnknownLocal(var.name.clone()),
                     });
                 };
+
+                println!("VAR {}: {:?}", var.as_str(), ty);
 
                 return self.assign(*id, ty);
             }
@@ -1533,7 +1558,7 @@ impl TypeCheckerCtx {
                     }
                 };
 
-                // println!("F_TY: {f_ty:?}");
+                println!("F_TY: {f_ty:?}");
 
                 if f_ty.params.len() != args.len() {
                     return Err(TypeError {
@@ -1552,18 +1577,22 @@ impl TypeCheckerCtx {
                     })
                     .collect::<Result<Vec<_>, TypeError>>()?;
 
+                println!("ARGS: {:?}", args);
+
                 return self.assign(*id, f_ty.ret.as_ref().clone().into());
             }
             ast::Expr::AnonymousFn(ast::AnonymousFnExpr { id, params, body }) => {
+                let mut declare_locals = FxHashMap::default();
                 let params = params
                     .into_iter()
-                    .map(|decl| self.infer_declarable(env, decl))
+                    .map(|decl| self.infer_declarable(env, decl, &mut declare_locals))
                     .collect::<Result<Vec<_>, TypeError>>()?;
 
                 let mut child_env = env.clone();
+                child_env.add_locals(declare_locals);
                 child_env.curr_loop = None;
                 child_env.loops = FxHashMap::default();
-                let body_ty = self.infer_block(env, body, true)?;
+                let body_ty = self.infer_block(&mut child_env, body, true)?;
 
                 let ty = Type::Fn(FnType {
                     generics: vec![],
@@ -1788,16 +1817,19 @@ impl TypeCheckerCtx {
                     ..
                 } = self.skolemize_fn_ty(fn_ty.clone());
 
+                let mut declare_locals = FxHashMap::default();
+
                 for (param, sk_param) in params.iter().zip(skolemized_params) {
                     // TODO: check declarable, instead of infer + unify
-                    let param_ty = self.infer_declarable(env, param)?;
+                    let param_ty = self.infer_declarable(env, param, &mut declare_locals)?;
                     self.add_constraint(Constraint::TypeEqual(param.id(), param_ty, sk_param))?;
                 }
 
                 let mut child_env = env.clone();
+                child_env.add_locals(declare_locals);
                 child_env.curr_loop = None;
                 child_env.loops = FxHashMap::default();
-                let body_ty = self.infer_block(env, body, true)?;
+                let body_ty = self.infer_block(&mut child_env, body, true)?;
 
                 // TODO: check block, instead of infer + unify
                 self.add_constraint(Constraint::TypeEqual(
@@ -2038,20 +2070,26 @@ mod test {
                 let mut description: Vec<&str> = vec![];
                 let mut expectation = "";
                 let mut skip = false;
+                let mut only = false;
                 let mut error_location = None;
                 let mut test_lines: Vec<&str> = vec![];
 
-                for (i, line) in lines.enumerate() {
+                'gather: for (i, line) in lines.enumerate() {
                     if status == "test" && line.starts_with("// ======") {
                         if expectation.len() > 0 {
-                            test_cases.push((
+                            let test_case = (
                                 description.join("\n"),
                                 lineno,
                                 expectation,
                                 skip,
                                 error_location.clone(),
                                 test_lines.join("\n"),
-                            ));
+                            );
+                            if only {
+                                test_cases = vec![test_case];
+                            } else {
+                                test_cases.push(test_case);
+                            }
                         }
                         status = "meta";
                         lineno = i;
@@ -2060,10 +2098,15 @@ mod test {
                         skip = false;
                         error_location = None;
                         test_lines = vec![];
+                        if only {
+                            break 'gather;
+                        }
                     } else if status == "meta" && line.starts_with("// skip") {
                         skip = true;
                     } else if status == "meta" && line.starts_with("// ok") {
                         expectation = "ok";
+                    } else if status == "meta" && line.starts_with("// only") {
+                        only = true;
                     } else if status == "meta" && line.starts_with("// err") {
                         expectation = &line[3..].trim();
                     } else if status == "meta" && line.starts_with("// ======") {
@@ -2087,14 +2130,19 @@ mod test {
                 }
 
                 if expectation.len() > 0 {
-                    test_cases.push((
+                    let test_case = (
                         description.join("\n"),
                         lineno,
                         expectation,
                         skip,
                         error_location.clone(),
                         test_lines.join("\n"),
-                    ));
+                    );
+                    if only {
+                        test_cases = vec![test_case];
+                    } else {
+                        test_cases.push(test_case);
+                    }
                 }
 
                 for (description, lineno, expectation, skip, error_location, source) in test_cases {
