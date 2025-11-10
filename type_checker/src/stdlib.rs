@@ -15,7 +15,7 @@ pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
         filter: fn<A, B>([A], fn(A) -> bool) -> [A]
         map: fn<A, B>([A], fn(A) -> B) -> [B]
         flat_map: fn<A, B>([A], fn(A) -> [B]) -> [B]
-        filter_map: fn<A, B>([A], fn(A) -> B) -> [B]     // TODO: improve after adding nullable types
+        filter_map: fn<A, B>([A], fn(A) -> B) -> [B]
         find_map: fn<A, B>([A], fn(A) -> B) -> ?B
         find: fn<A>([A], fn(A) -> bool) -> ?A
         sum: fn([int]) -> int
@@ -38,7 +38,6 @@ pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
         print: fn(str) -> nil
         fst: fn<A, B>((A, B)) -> A                      // TODO remove after adding tuple indexing
         snd: fn<A, B>((A, B)) -> B                      // TODO remove after adding tuple indexing
-        some: fn<A>(A) -> ?A                            // TODO after `some` is made a keyword
         is_some: fn<A>(?A) -> bool
         unwrap: fn<A>(?A) -> A
         MAX_INT: int
