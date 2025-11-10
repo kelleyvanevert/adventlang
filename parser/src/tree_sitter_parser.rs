@@ -652,9 +652,11 @@ impl<'a> Converter<'a> {
         match node.kind() {
             "declare_var" => DeclarePattern::Single(DeclareSingle {
                 id: self.fresh_ast_node_id(node),
-                guard: node.child_by_field_name("guard").is_some(),
                 var: self.as_var(node.child_by_field_name("name").unwrap()),
                 ty: node.map_opt_child("type", |node| self.as_type(node)),
+
+                // DEPRECATED as per the compiled version of Adventlang
+                guard: node.child_by_field_name("guard").is_some(),
             }),
             "declare_list" => DeclarePattern::List(DeclareList {
                 id: self.fresh_ast_node_id(node),

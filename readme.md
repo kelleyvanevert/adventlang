@@ -53,7 +53,7 @@ But, 2025 might be the year! In April and May I spent some time investigating an
 Status:
 
 - [x] 100% create a new parser using Tree-sitter (it's 150x as fast!)
-- [ ] 60% create a type checker
+- [ ] 70% create a type checker
   - [x] basic unification setup
   - [x] loops, labels, breaking, typing blocks
   - [x] function definitions and calls
@@ -62,8 +62,15 @@ Status:
   - [x] generics (parametric polymorphism)
   - [x] operator overloading (ad-hoc polymorphism)
   - [ ] named fn overloading (ad-hoc polymorphism)
-  - [ ] coalescing, nullability
+  - [x] nullability
+    - compromises:
+      - use new `some <x>` syntax to create inhabitants of nullable types (but usually you just use then as results of e.g. `:match`)
+      - use `is_some()` instead of some fancy new syntax or automatic bool conversions to just check if a nullable type is non-null
+      - no trickery with `nil :min 4`, nullable overloading of operators etc. Just use `MAX_INT` or something..
+    - also, I decided to ditch the special-case `if let some ...` syntax, which I actually think is not even really useful any more
+  - [ ] coalescing
   - [ ] automatic conversions (?) / allowing non-bools in conditions
+  - [ ] while-let, do-while
 - [ ] 0% create a compiler using LLVM
 
 ## Example (Advent of Code 2023, day 4)
