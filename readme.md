@@ -53,7 +53,7 @@ But, 2025 might be the year! In April and May I spent some time investigating an
 Status:
 
 - [x] 100% create a new parser using Tree-sitter (it's 150x as fast!)
-- [ ] 60% create a type checker
+- [ ] 70% create a type checker
   - [x] basic unification setup
   - [x] loops, labels, breaking, typing blocks
   - [x] function definitions and calls
@@ -62,9 +62,15 @@ Status:
   - [x] generics (parametric polymorphism)
   - [x] operator overloading (ad-hoc polymorphism)
   - [ ] named fn overloading (ad-hoc polymorphism)
-  - [ ] coalescing, nullability
+  - [x] nullability
+  - [ ] coalescing
   - [ ] automatic conversions (?) / allowing non-bools in conditions
+  - [ ] while-let, do-while
 - [ ] 0% create a compiler using LLVM
+
+Compromises:
+
+- In order to get nullability to work, which was quite a hassle, I decided to lose a bit of the "automagic" behavior I previously had in the interpreted version, where numeric operators and operations like `+` and `:min` would automatically coalesce, etc. So for example, instead of say tricking around with `:min` and starting with `nil`, just start with `MAX_INT`. To get the type system to work without too much extra hassle, I also just re-purposed the `some` keyword as a constructor for creating inhabitants of nullable types. For example: `let x = some 5`. (I removed it from the `if let` construction because it doesn't seem to make any sense there any more.) And finally you just have to use `:is_some` and `:unwrap` here and there. So, essentially, I just made nullable types more like your regular `Option<T>`.
 
 ## Example (Advent of Code 2023, day 4)
 

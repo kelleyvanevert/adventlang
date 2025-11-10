@@ -698,6 +698,11 @@
     }
   },
   {
+    "type": "declare_guard",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "declare_list",
     "named": true,
     "fields": {
@@ -1707,6 +1712,10 @@
           {
             "type": "-",
             "named": false
+          },
+          {
+            "type": "some",
+            "named": false
           }
         ]
       }
@@ -1959,10 +1968,6 @@
     "named": false
   },
   {
-    "type": "declare_guard",
-    "named": true
-  },
-  {
     "type": "dict",
     "named": false
   },
@@ -2052,6 +2057,10 @@
   },
   {
     "type": "return",
+    "named": false
+  },
+  {
+    "type": "some",
     "named": false
   },
   {

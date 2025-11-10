@@ -15,9 +15,9 @@ pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
         filter: fn<A, B>([A], fn(A) -> bool) -> [A]
         map: fn<A, B>([A], fn(A) -> B) -> [B]
         flat_map: fn<A, B>([A], fn(A) -> [B]) -> [B]
-        filter_map: fn<A, B>([A], fn(A) -> B) -> [B]     // TODO: improve after adding nullable types
-        find_map: fn<A, B>([A], fn(A) -> B) -> B         // TODO: improve after adding nullable types
-        find: fn<A>([A], fn(A) -> bool) -> A             // TODO: improve after adding nullable types
+        filter_map: fn<A, B>([A], fn(A) -> B) -> [B]
+        find_map: fn<A, B>([A], fn(A) -> B) -> ?B
+        find: fn<A>([A], fn(A) -> bool) -> ?A
         sum: fn([int]) -> int
         range: fn(int, int) -> [int]
         len: fn<A>(A) -> int                             // TODO: split into overloads when supported
@@ -25,7 +25,8 @@ pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
         slice: fn<B>(str, B) -> str                      // TODO: split into overloads when supported
             slice_arr: fn<A, B>([A], B) -> [A]
         bool: fn<A>(A) -> bool                           // TODO: just a hack, remove later
-        match: fn(str, regex) -> [str]                   // ... was previously `(str...)`, but I don't think that's possible any more, which is fine
+        match: fn(str, regex) -> ?[str]
+        matches: fn(str, regex) -> bool
         match_all: fn(str, regex) -> [[str]]             // ... was previously `[(str...)]`, but I don't think that's possible any more, which is fine
         max: fn(int, int) -> int
         min: fn(int, int) -> int                         // TODO: split into overloads when supported
@@ -35,8 +36,11 @@ pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
         sort_by_key: fn<T, K>([T], fn(T) -> K) -> [T]
         chunks: fn<T>([T], int) -> [[T]]
         print: fn(str) -> nil
-        fst: fn<A, B>((A, B)) -> A
-        snd: fn<A, B>((A, B)) -> B
+        fst: fn<A, B>((A, B)) -> A                      // TODO remove after adding tuple indexing
+        snd: fn<A, B>((A, B)) -> B                      // TODO remove after adding tuple indexing
+        is_some: fn<A>(?A) -> bool
+        unwrap: fn<A>(?A) -> A
+        MAX_INT: int
     ";
 
     for line in stdlib.trim().lines() {

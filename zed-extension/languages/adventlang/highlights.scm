@@ -63,6 +63,7 @@
 "let" @keyword
 "const" @keyword
 "with" @keyword
+"some" @keyword
 "return" @keyword
 "while" @keyword
 "loop" @keyword
