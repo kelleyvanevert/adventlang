@@ -280,8 +280,22 @@ impl TypeCheckerCtx {
                         // solve later
                         self.constraints.push(constraint);
                     }
-                    Type::Fn(fn_type) => {
-                        let ty = Type::Fn(self.instantiate_fn_ty(fn_type));
+                    Type::Fn { f, nullable: None } => {
+                        // solve later
+                        self.constraints.push(constraint);
+                    }
+                    Type::Fn { f, nullable } => {
+                        if nullable == Some(true) {
+                            return Err(TypeError {
+                                node_id: *node_id,
+                                kind: TypeErrorKind::NotCallable(Type::Fn { f, nullable }),
+                            });
+                        }
+
+                        let ty = Type::Fn {
+                            f: self.instantiate_fn_ty(f),
+                            nullable,
+                        };
                         self.add_constraint(Constraint::TypeEqual(*node_id, ty, concrete.clone()))?;
                     }
                     other => {
@@ -330,10 +344,31 @@ impl TypeCheckerCtx {
                             // try again later, when it has become a fn type
                             todo.push_back(Constraint::CanInstantiateTo(node_id, scheme, concrete));
                         }
-                        Type::Fn(fn_type) => {
+                        Type::Fn { f, nullable: None } => {
+                            // try again later
+                            todo.push_back(Constraint::TypeEqual(
+                                node_id,
+                                Type::Fn {
+                                    f: self.instantiate_fn_ty(f),
+                                    nullable: None,
+                                },
+                                concrete,
+                            ));
+                        }
+                        Type::Fn { f, nullable } => {
+                            if nullable == Some(false) {
+                                return Err(TypeError {
+                                    node_id,
+                                    kind: TypeErrorKind::NotCallable(Type::Fn { f, nullable }),
+                                });
+                            }
+
                             todo.push_front(Constraint::TypeEqual(
                                 node_id,
-                                Type::Fn(self.instantiate_fn_ty(fn_type)),
+                                Type::Fn {
+                                    f: self.instantiate_fn_ty(f),
+                                    nullable,
+                                },
                                 concrete,
                             ));
                         }
@@ -473,26 +508,29 @@ impl TypeCheckerCtx {
                     // );
                     let mgu_so_far = self.normalize_ty(overload_set.types[ti].clone());
 
-                    if !mgu_so_far.alpha_eq(&overload_set.overloads[i][ti], &vec![]) {
-                        // println!("      - failed, bail overload");
-                        self.unification_table.rollback_to(snapshot);
+                    match mgu_so_far.alpha_eq(&overload_set.overloads[i][ti], &vec![]) {
+                        None | Some(true) => {}
+                        Some(false) => {
+                            // println!("      - failed, bail overload");
+                            self.unification_table.rollback_to(snapshot);
 
-                        if mgu_so_far.is_concrete(&vec![]) {
-                            // println!(
-                            //     "        overload {i} is deemed IMPOSSIBLE, because of concrete type mismatch"
-                            // );
-                            impossible[i] = true;
+                            if mgu_so_far.is_concrete(&vec![]) {
+                                // println!(
+                                //     "        overload {i} is deemed IMPOSSIBLE, because of concrete type mismatch"
+                                // );
+                                impossible[i] = true;
 
-                            if impossible.iter().all(|&b| b) {
-                                // println!("  => no overloads are possible");
-                                return Err(TypeError {
-                                    node_id: overload_set.node_id,
-                                    kind: TypeErrorKind::NoOverload,
-                                });
+                                if impossible.iter().all(|&b| b) {
+                                    // println!("  => no overloads are possible");
+                                    return Err(TypeError {
+                                        node_id: overload_set.node_id,
+                                        kind: TypeErrorKind::NoOverload,
+                                    });
+                                }
                             }
-                        }
 
-                        continue 'check;
+                            continue 'check;
+                        }
                     }
                 }
 
@@ -686,27 +724,40 @@ impl TypeCheckerCtx {
     // do something with double nullability?
     fn normalize_ty(&mut self, ty: Type) -> Type {
         match ty {
-            Type::Nil | Type::Bool | Type::Str | Type::Int | Type::Float | Type::Regex => ty,
-            Type::Fn(def) => Type::Fn(self.normalize_fn_ty(def)),
-            Type::NamedFn(defs) => Type::NamedFn(
-                defs.into_iter()
+            Type::Nil => Type::Nil,
+            Type::Bool { nullable } => Type::Bool { nullable },
+            Type::Str { nullable } => Type::Str { nullable },
+            Type::Int { nullable } => Type::Int { nullable },
+            Type::Float { nullable } => Type::Float { nullable },
+            Type::Regex { nullable } => Type::Regex { nullable },
+
+            Type::Fn { f, nullable } => Type::Fn {
+                f: self.normalize_fn_ty(f),
+                nullable,
+            },
+            Type::NamedFn { fns, nullable } => Type::NamedFn {
+                fns: fns
+                    .into_iter()
                     .map(|def| self.normalize_fn_ty(def))
                     .collect(),
-            ),
-            Type::List(ty) => Type::List(self.normalize_ty(*ty).into()),
-            Type::Tuple(elements) => Type::Tuple(
-                elements
-                    .into_iter()
-                    .map(|ty| self.normalize_ty(ty))
-                    .collect(),
-            ),
-            Type::Dict { key, val } => Type::Dict {
+                nullable,
+            },
+            Type::List { els, nullable } => Type::List {
+                els: self.normalize_ty(*els).into(),
+                nullable,
+            },
+            Type::Tuple { els, nullable } => Type::Tuple {
+                els: els.into_iter().map(|ty| self.normalize_ty(ty)).collect(),
+                nullable,
+            },
+            Type::Dict { key, val, nullable } => Type::Dict {
                 key: self.normalize_ty(*key).into(),
                 val: self.normalize_ty(*val).into(),
+                nullable,
             },
-            Type::Nullable { child } => Type::Nullable {
-                child: self.normalize_ty(*child).into(),
-            },
+            // Type::Nullable { child } => Type::Nullable {
+            //     child: self.normalize_ty(*child).into(),
+            // },
             Type::TypeVar(var) => {
                 // not sure if this is needed, maybe just an unnecessary precaution
                 if self.rigid_vars.contains(&var) {
@@ -727,16 +778,40 @@ impl TypeCheckerCtx {
         ty: &ast::TypeHint,
     ) -> Result<Type, TypeError> {
         match ty {
-            ast::TypeHint::Bool(_) => Ok(Type::Bool),
-            ast::TypeHint::Int(_) => Ok(Type::Int),
-            ast::TypeHint::Float(_) => Ok(Type::Float),
-            ast::TypeHint::Regex(_) => Ok(Type::Regex),
-            ast::TypeHint::Str(_) => Ok(Type::Str),
-            ast::TypeHint::Nil(_) => Ok(Type::Nil),
+            ast::TypeHint::Bool(_) => {
+                return Ok(Type::Bool {
+                    nullable: Some(false),
+                });
+            }
+            ast::TypeHint::Int(_) => {
+                return Ok(Type::Int {
+                    nullable: Some(false),
+                });
+            }
+            ast::TypeHint::Float(_) => {
+                return Ok(Type::Float {
+                    nullable: Some(false),
+                });
+            }
+            ast::TypeHint::Regex(_) => {
+                return Ok(Type::Regex {
+                    nullable: Some(false),
+                });
+            }
+            ast::TypeHint::Str(_) => {
+                return Ok(Type::Str {
+                    nullable: Some(false),
+                });
+            }
+            ast::TypeHint::Nil(_) => {
+                return Ok(Type::Nil);
+            }
             // ast::TypeHint::SomeFn(_) => Type::Nil, // TODO
-            ast::TypeHint::Nullable(t) => Ok(Type::Nullable {
-                child: self.convert_hint_to_type(env, &t.child)?.into(),
-            }),
+            ast::TypeHint::Nullable(t) => {
+                return Ok(self
+                    .convert_hint_to_type(env, &t.child)?
+                    .nullable(Some(true)));
+            }
             ast::TypeHint::Fn(ast::FnTypeHint {
                 id,
                 generics,
@@ -757,16 +832,19 @@ impl TypeCheckerCtx {
                     })
                     .collect::<Vec<_>>();
 
-                Ok(Type::Fn(FnType {
-                    generics,
-                    params: params
-                        .into_iter()
-                        .map(|hint| self.convert_hint_to_type(&mut typing_child_env, hint))
-                        .collect::<Result<Vec<_>, _>>()?,
-                    ret: self
-                        .convert_hint_to_type(&mut typing_child_env, &ret)?
-                        .into(),
-                }))
+                Ok(Type::Fn {
+                    f: FnType {
+                        generics,
+                        params: params
+                            .into_iter()
+                            .map(|hint| self.convert_hint_to_type(&mut typing_child_env, hint))
+                            .collect::<Result<Vec<_>, _>>()?,
+                        ret: self
+                            .convert_hint_to_type(&mut typing_child_env, &ret)?
+                            .into(),
+                    },
+                    nullable: Some(false),
+                })
             }
             ast::TypeHint::Var(ast::VarTypeHint { id, var }) => {
                 match env.typevars.get(var.as_str()).cloned() {
@@ -777,15 +855,18 @@ impl TypeCheckerCtx {
                     }),
                 }
             }
-            ast::TypeHint::List(t) => Ok(Type::List(
-                self.convert_hint_to_type(env, &t.elements_ty)?.into(),
-            )),
-            ast::TypeHint::Tuple(t) => Ok(Type::Tuple(
-                t.element_types
+            ast::TypeHint::List(t) => Ok(Type::List {
+                els: self.convert_hint_to_type(env, &t.elements_ty)?.into(),
+                nullable: Some(false),
+            }),
+            ast::TypeHint::Tuple(t) => Ok(Type::Tuple {
+                els: t
+                    .element_types
                     .iter()
                     .map(|hint| self.convert_hint_to_type(env, hint))
                     .collect::<Result<Vec<_>, _>>()?,
-            )),
+                nullable: Some(false),
+            }),
             ty => todo!("can't convert typehint to type: {:?}", ty),
         }
     }
@@ -898,11 +979,14 @@ impl TypeCheckerCtx {
 
                 let ret = Type::TypeVar(self.fresh_ty_var());
 
-                let placeholder_ty = Type::Fn(FnType {
-                    generics,
-                    params,
-                    ret: ret.into(),
-                });
+                let placeholder_ty = Type::Fn {
+                    f: FnType {
+                        generics,
+                        params,
+                        ret: ret.into(),
+                    },
+                    nullable: Some(false),
+                };
 
                 env.locals.insert(name.str.clone(), placeholder_ty.clone());
                 Ok(placeholder_ty)
@@ -965,11 +1049,14 @@ impl TypeCheckerCtx {
                 let (body_ty, certain_return) = self.infer_block(&mut child_env, body, true)?;
 
                 // TODO -> NamedFn
-                let ty = Type::Fn(FnType {
-                    generics: generics.clone(),
-                    params: params.clone(),
-                    ret: ret_ty.clone().into(),
-                });
+                let ty = Type::Fn {
+                    f: FnType {
+                        generics: generics.clone(),
+                        params: params.clone(),
+                        ret: ret_ty.clone().into(),
+                    },
+                    nullable: Some(false),
+                };
 
                 if let Some(return_stmt_ty) = self.fn_return_ty.get(id).cloned() {
                     self.add_constraint(Constraint::TypeEqual(
@@ -1091,7 +1178,7 @@ impl TypeCheckerCtx {
                 splat,
             }) => {
                 let element_ty = Type::TypeVar(self.fresh_ty_var());
-                let ty = Type::List(element_ty.clone().into());
+                let ty = Type::list(element_ty.clone());
 
                 for pat in elements {
                     let pat_ty = self.infer_assign_pattern(env, pat)?;
@@ -1115,7 +1202,7 @@ impl TypeCheckerCtx {
                     .map(|_| Type::TypeVar(self.fresh_ty_var()))
                     .collect::<Vec<_>>();
 
-                let ty = Type::Tuple(element_types.clone());
+                let ty = Type::tuple(element_types.clone());
 
                 for (i, el) in elements.into_iter().enumerate() {
                     let decl_ty = self.infer_assign_pattern(env, el)?;
@@ -1154,10 +1241,10 @@ impl TypeCheckerCtx {
                 self.add_constraint(Constraint::TypeEqual(
                     *id,
                     container_ty,
-                    Type::List(element_ty.clone().into()),
+                    Type::list(element_ty.clone()),
                 ))?;
 
-                self.check_expr(env, index, Type::Int)?;
+                self.check_expr(env, index, Type::int())?;
 
                 self.assign(*id, element_ty)
             }
@@ -1202,7 +1289,7 @@ impl TypeCheckerCtx {
             }
             ast::DeclarePattern::List(ast::DeclareList { id, elements, rest }) => {
                 let element_ty = Type::TypeVar(self.fresh_ty_var());
-                let ty = Type::List(element_ty.clone().into());
+                let ty = Type::list(element_ty.clone());
 
                 for el in elements {
                     let decl_ty = self.infer_declarable(env, el, declare_locals)?;
@@ -1244,7 +1331,7 @@ impl TypeCheckerCtx {
                     .map(|_| Type::TypeVar(self.fresh_ty_var()))
                     .collect::<Vec<_>>();
 
-                let ty = Type::Tuple(element_types.clone());
+                let ty = Type::tuple(element_types.clone());
 
                 for (i, el) in elements.iter().enumerate() {
                     let decl_ty = self.infer_declarable(env, el, declare_locals)?;
@@ -1327,7 +1414,7 @@ impl TypeCheckerCtx {
                 for piece in pieces {
                     match piece {
                         ast::StrPiece::Fragment(ast::StrPieceFragment { id, str }) => {
-                            self.assign(*id, Type::Str)?;
+                            self.assign(*id, Type::str())?;
                         }
                         ast::StrPiece::Interpolation(ast::StrPieceInterpolation { id, expr }) => {
                             let (ty, cr) = self.infer_expr(env, expr, true)?;
@@ -1339,22 +1426,22 @@ impl TypeCheckerCtx {
                     }
                 }
 
-                return self.assign_extra(*id, Type::Str, certain_return);
+                return self.assign_extra(*id, Type::str(), certain_return);
             }
             ast::Expr::Nil(ast::NilExpr { id }) => {
                 return self.assign_extra(*id, Type::Nil, false);
             }
             ast::Expr::Regex(ast::RegexExpr { id, str }) => {
-                return self.assign_extra(*id, Type::Regex, false);
+                return self.assign_extra(*id, Type::regex(), false);
             }
             ast::Expr::Bool(ast::BoolExpr { id, value }) => {
-                return self.assign_extra(*id, Type::Bool, false);
+                return self.assign_extra(*id, Type::bool(), false);
             }
             ast::Expr::Int(ast::IntExpr { id, value }) => {
-                return self.assign_extra(*id, Type::Int, false);
+                return self.assign_extra(*id, Type::int(), false);
             }
             ast::Expr::Float(ast::FloatExpr { id, str }) => {
-                return self.assign_extra(*id, Type::Float, false);
+                return self.assign_extra(*id, Type::float(), false);
             }
             ast::Expr::Var(ast::VarExpr { id, var }) => {
                 let Some(ty) = env.locals.get(var.as_str()).cloned() else {
@@ -1369,10 +1456,43 @@ impl TypeCheckerCtx {
                 return self.assign_extra(*id, ty, false);
             }
             ast::Expr::Unary(ast::UnaryExpr { id, op, expr }) => {
-                let (expr_ty, cr) = self.infer_expr(env, expr, true)?;
+                let (expr_ty, certainly_returns) = self.infer_expr(env, expr, true)?;
 
-                // TODO implement operator overloading
-                return self.assign_extra(*id, expr_ty.apply_unary_op(&op), cr);
+                let res_ty = Type::TypeVar(self.fresh_ty_var());
+
+                match op.as_str() {
+                    "&&" | "||" => {
+                        self.add_constraint(Constraint::ChooseOverload {
+                            last_checked: 0,
+                            overload_set: OverloadSet {
+                                node_id: *id,
+                                nodes: vec![expr.id(), *id],
+                                types: vec![expr_ty.clone(), res_ty.clone()],
+                                overloads: vec![
+                                    //
+                                    vec![Type::bool(), Type::bool()],
+                                ],
+                            },
+                        })?;
+                    }
+                    "-" => {
+                        self.add_constraint(Constraint::ChooseOverload {
+                            last_checked: 0,
+                            overload_set: OverloadSet {
+                                node_id: *id,
+                                nodes: vec![expr.id(), *id],
+                                types: vec![expr_ty.clone(), res_ty.clone()],
+                                overloads: vec![
+                                    vec![Type::int(), Type::int()],
+                                    vec![Type::int(), Type::float()],
+                                ],
+                            },
+                        })?;
+                    }
+                    _ => todo!("binary operator {op}"),
+                }
+
+                return self.assign_extra(*id, res_ty, certainly_returns);
             }
             ast::Expr::Binary(ast::BinaryExpr {
                 id,
@@ -1397,10 +1517,10 @@ impl TypeCheckerCtx {
                                 nodes: vec![left.id(), right.id(), *id],
                                 types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
                                 overloads: vec![
-                                    vec![Type::Str, Type::Str, Type::Bool],
-                                    vec![Type::Int, Type::Int, Type::Bool],
-                                    vec![Type::Float, Type::Float, Type::Bool],
-                                    vec![Type::Bool, Type::Bool, Type::Bool],
+                                    vec![Type::str(), Type::str(), Type::bool()],
+                                    vec![Type::int(), Type::int(), Type::bool()],
+                                    vec![Type::float(), Type::float(), Type::bool()],
+                                    vec![Type::bool(), Type::bool(), Type::bool()],
                                 ],
                             },
                         })?;
@@ -1414,7 +1534,7 @@ impl TypeCheckerCtx {
                                 types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
                                 overloads: vec![
                                     //
-                                    vec![Type::Bool, Type::Bool, Type::Bool],
+                                    vec![Type::bool(), Type::bool(), Type::bool()],
                                 ],
                             },
                         })?;
@@ -1427,8 +1547,8 @@ impl TypeCheckerCtx {
                                 nodes: vec![left.id(), right.id(), *id],
                                 types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
                                 overloads: vec![
-                                    vec![Type::Int, Type::Int, Type::Bool],
-                                    vec![Type::Float, Type::Float, Type::Bool],
+                                    vec![Type::int(), Type::int(), Type::bool()],
+                                    vec![Type::float(), Type::float(), Type::bool()],
                                 ],
                             },
                         })?;
@@ -1448,11 +1568,11 @@ impl TypeCheckerCtx {
                                 nodes: vec![left.id(), right.id(), *id],
                                 types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
                                 overloads: vec![
-                                    vec![Type::Int, Type::Int, Type::Int],
-                                    vec![Type::Int, Type::Float, Type::Float],
-                                    vec![Type::Float, Type::Int, Type::Float],
-                                    vec![Type::Float, Type::Float, Type::Float],
-                                    vec![Type::Str, Type::Str, Type::Str],
+                                    vec![Type::int(), Type::int(), Type::int()],
+                                    vec![Type::int(), Type::float(), Type::float()],
+                                    vec![Type::float(), Type::int(), Type::float()],
+                                    vec![Type::float(), Type::float(), Type::float()],
+                                    vec![Type::str(), Type::str(), Type::str()],
                                 ],
                             },
                         })?;
@@ -1465,10 +1585,10 @@ impl TypeCheckerCtx {
                                 nodes: vec![left.id(), right.id(), *id],
                                 types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
                                 overloads: vec![
-                                    vec![Type::Int, Type::Int, Type::Int],
-                                    vec![Type::Int, Type::Float, Type::Float],
-                                    vec![Type::Float, Type::Int, Type::Float],
-                                    vec![Type::Float, Type::Float, Type::Float],
+                                    vec![Type::int(), Type::int(), Type::int()],
+                                    vec![Type::int(), Type::float(), Type::float()],
+                                    vec![Type::float(), Type::int(), Type::float()],
+                                    vec![Type::float(), Type::float(), Type::float()],
                                 ],
                             },
                         })?;
@@ -1486,7 +1606,7 @@ impl TypeCheckerCtx {
                 let mut certainly_returns = false;
 
                 let element_ty = Type::TypeVar(self.fresh_ty_var());
-                let list_ty = Type::List(element_ty.clone().into());
+                let list_ty = Type::list(element_ty.clone());
 
                 for el in elements {
                     let (_, cr) = self.check_expr(env, el, element_ty.clone())?;
@@ -1516,7 +1636,7 @@ impl TypeCheckerCtx {
                     }
                 }
 
-                return self.assign_extra(*id, Type::Tuple(element_types), certainly_returns);
+                return self.assign_extra(*id, Type::tuple(element_types), certainly_returns);
             }
             ast::Expr::Dict(_) => {
                 todo!()
@@ -1532,11 +1652,11 @@ impl TypeCheckerCtx {
                 }
 
                 let element_ty = Type::TypeVar(self.fresh_ty_var());
-                let list_ty = Type::List(element_ty.clone().into());
+                let list_ty = Type::list(element_ty.clone());
 
                 let (_, e_cr) = self.check_expr(env, expr, list_ty)?;
 
-                let (_, i_cr) = self.check_expr(env, index, Type::Int)?;
+                let (_, i_cr) = self.check_expr(env, index, Type::int())?;
 
                 return self.assign_extra(*id, element_ty, e_cr || i_cr);
             }
@@ -1545,7 +1665,7 @@ impl TypeCheckerCtx {
             }
             ast::Expr::Call(ast::CallExpr {
                 id,
-                f,
+                f: callee,
                 coalesce,
                 postfix,
                 args,
@@ -1556,15 +1676,37 @@ impl TypeCheckerCtx {
 
                 let mut certainly_returns = false;
 
-                let (f_ty, cr) = self.infer_expr(env, f, true)?;
+                let (f_ty, cr) = self.infer_expr(env, callee, true)?;
                 if cr {
                     certainly_returns = true;
                 }
 
                 let f_ty = match f_ty {
-                    Type::Fn(f_ty) => self.instantiate_fn_ty(f_ty),
+                    Type::Fn { f, nullable: None } => {
+                        // is it acceptable to not be able to deal with this?
+                        todo!()
+                    }
+
+                    Type::Fn {
+                        f,
+                        nullable: Some(true),
+                    } => {
+                        return Err(TypeError {
+                            node_id: *id,
+                            kind: TypeErrorKind::NotCallable(Type::Fn {
+                                f,
+                                nullable: Some(true),
+                            }),
+                        });
+                    }
+
+                    Type::Fn {
+                        f,
+                        nullable: Some(false),
+                    } => self.instantiate_fn_ty(f),
+
                     Type::TypeVar(v) => {
-                        let f_ty = FnType {
+                        let f = FnType {
                             generics: vec![], // TODO -- how ???
                             params: args
                                 .iter()
@@ -1574,12 +1716,15 @@ impl TypeCheckerCtx {
                         };
 
                         self.add_constraint(Constraint::CanInstantiateTo(
-                            f.id(),
+                            callee.id(),
                             Type::TypeVar(v),
-                            Type::Fn(f_ty.clone()),
+                            Type::Fn {
+                                f: f.clone(),
+                                nullable: Some(false),
+                            },
                         ))?;
 
-                        f_ty
+                        f
                     }
                     ty => {
                         return Err(TypeError {
@@ -1591,7 +1736,7 @@ impl TypeCheckerCtx {
 
                 if f_ty.params.len() != args.len() {
                     return Err(TypeError {
-                        node_id: f.id(),
+                        node_id: callee.id(),
                         kind: TypeErrorKind::ArgsMismatch(
                             f_ty.params.iter().map(|ty| format!("{ty:?}")).collect(),
                             args.iter()
@@ -1643,11 +1788,14 @@ impl TypeCheckerCtx {
                     self.add_constraint(Constraint::TypeEqual(body.id(), ret_ty.clone(), body_ty))?;
                 }
 
-                let ty = Type::Fn(FnType {
-                    generics: vec![],
-                    params,
-                    ret: ret_ty.into(),
-                });
+                let ty = Type::Fn {
+                    f: FnType {
+                        generics: vec![],
+                        params,
+                        ret: ret_ty.into(),
+                    },
+                    nullable: Some(false),
+                };
 
                 return self.assign_extra(*id, ty, false);
             }
@@ -1690,7 +1838,7 @@ impl TypeCheckerCtx {
                 else_if,
                 else_then,
             }) => {
-                let (cond_ty, mut certainly_returns) = self.check_expr(env, cond, Type::Bool)?;
+                let (cond_ty, mut certainly_returns) = self.check_expr(env, cond, Type::bool())?;
 
                 let (then_ty, then_returns) =
                     self.infer_block(&mut env.clone(), then, use_result)?;
@@ -1721,7 +1869,7 @@ impl TypeCheckerCtx {
                 cond,
                 body,
             }) => {
-                let (cond_ty, mut certainly_returns) = self.check_expr(env, cond, Type::Bool)?;
+                let (cond_ty, mut certainly_returns) = self.check_expr(env, cond, Type::bool())?;
 
                 let label = label
                     .clone()
@@ -1805,7 +1953,7 @@ impl TypeCheckerCtx {
                 let mut declare_locals = FxHashMap::default();
                 let pattern_ty = self.infer_declare_pattern(env, pattern, &mut declare_locals)?;
 
-                self.check_expr(env, range, Type::List(pattern_ty.into()))?;
+                self.check_expr(env, range, Type::list(pattern_ty))?;
 
                 let mut child_env = env.clone();
                 child_env.add_locals(declare_locals);
@@ -1882,13 +2030,38 @@ impl TypeCheckerCtx {
         match (&expr, &ty) {
             (
                 ast::Expr::AnonymousFn(ast::AnonymousFnExpr { id, params, body }),
-                Type::Fn(fn_ty),
+                Type::Fn { f, nullable: None },
             ) => {
-                if fn_ty.params.len() != params.len() {
+                // is it acceptable to not be able to deal with this?
+                todo!()
+            }
+            (
+                ast::Expr::AnonymousFn(ast::AnonymousFnExpr { id, params, body }),
+                Type::Fn {
+                    f,
+                    nullable: Some(true),
+                },
+            ) => {
+                return Err(TypeError {
+                    node_id: expr.id(),
+                    kind: TypeErrorKind::NotCallable(Type::Fn {
+                        f: f.clone(),
+                        nullable: Some(true),
+                    }),
+                });
+            }
+            (
+                ast::Expr::AnonymousFn(ast::AnonymousFnExpr { id, params, body }),
+                Type::Fn {
+                    f,
+                    nullable: Some(false),
+                },
+            ) => {
+                if f.params.len() != params.len() {
                     return Err(TypeError {
                         node_id: *id,
                         kind: TypeErrorKind::ArgsMismatch(
-                            fn_ty.params.iter().map(|ty| format!("{ty:?}")).collect(),
+                            f.params.iter().map(|ty| format!("{ty:?}")).collect(),
                             params.into_iter().map(|arg| format!("{arg:?}")).collect(),
                         ),
                     });
@@ -1899,7 +2072,7 @@ impl TypeCheckerCtx {
                     params: skolemized_params,
                     ret: skolemized_ret,
                     ..
-                } = self.skolemize_fn_ty(fn_ty.clone());
+                } = self.skolemize_fn_ty(f.clone());
 
                 let mut declare_locals = FxHashMap::default();
 
@@ -1929,7 +2102,14 @@ impl TypeCheckerCtx {
                     ))?;
                 }
 
-                return self.assign_extra(*id, Type::Fn(fn_ty.clone()), false);
+                return self.assign_extra(
+                    *id,
+                    Type::Fn {
+                        f: f.clone(),
+                        nullable: Some(false),
+                    },
+                    false,
+                );
             }
 
             // (ast::Expr::Var(ast::VarExpr { id, var }), Type::Fn(fn_ty)) => {
