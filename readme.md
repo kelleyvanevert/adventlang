@@ -15,18 +15,26 @@ I must say, it's a bit insulting that GitHub thinks Adventlang most resembles Pe
 The concept came about while I was learning Rust for the first time while doing Advent of Code 2022. I loved Rust's syntax so much, even separately from the _other cool thing_ about Rust (its innovative typing system that allows it to eliminate garbage collection while staying low-level), that I wanted to create a language with that kind of syntax, but even easier to use. For example for solving Advent of Code challenges. What especially stood out, is that I'd often be writing code like this:
 
 ```rust
-let total = input.trim().lines().map(|line| {
+let total = input
+  .trim()
+  .lines()
+  .map(|line| {
     line.split("-").map(|s| s.parse::<usize>().unwrap()).sum::<usize>()
-}).sum::<usize>()
+  })
+  .sum::<usize>()
 ```
 
 I figured, I'd create a language, that combines the syntax of Rust, but adding a new special syntax element for applying data transformations in a postfix/infix style easily:
 
 ```al
-let total = input :trim :lines :map |line| { line :split "-" :map int :sum } :sum
+let total = input
+  :trim
+  :lines
+  :map |line| { line :split "-" :map int :sum }
+  :sum
 ```
 
-The idea is that you can take any function
+The idea is that you can take any function, say
 
 ```al
 fn map<A, B>(arr: [A], f: fn(A) -> B): [B] {
@@ -34,7 +42,7 @@ fn map<A, B>(arr: [A], f: fn(A) -> B): [B] {
 }
 ```
 
-and apply it as a postfix or infix operator, like `a :map f`.
+...and apply it as a postfix or infix operator, like `a :map f`.
 
 So, the next year, 2023, I did Advent of Code while creating an interpreted language "on the go". Every next day, I'd add whatever features the language needed, in order to solve the challenge of that particular day. I was able to get to ± day 17 in this way, until performance became a problem and I switched back to solving the challenges (only) in Rust.
 
