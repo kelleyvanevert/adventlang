@@ -3,7 +3,7 @@
 
 use std::{collections::VecDeque, fmt::Display};
 
-use ena::unify::{InPlaceUnificationTable, UnifyKey};
+use ena::unify::InPlaceUnificationTable;
 use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
 use parser::ast::{self, AstNode};
@@ -11,7 +11,7 @@ use thiserror::Error;
 
 use crate::{
     stdlib::add_stdlib_types,
-    types::{FnType, Type, TypeVar},
+    types::{FnType, Nullability, NullabilityVar, Type, TypeVar},
 };
 
 mod stdlib;
@@ -73,22 +73,6 @@ impl Env {
         child_env.loops = FxHashMap::default();
         child_env.curr_fn = Some(node_id);
         child_env
-    }
-}
-
-impl UnifyKey for TypeVar {
-    type Value = Option<Type>;
-
-    fn from_index(u: u32) -> Self {
-        Self(u)
-    }
-
-    fn index(&self) -> u32 {
-        self.0
-    }
-
-    fn tag() -> &'static str {
-        "TypeVar"
     }
 }
 
@@ -183,6 +167,7 @@ struct OverloadSet {
 #[derive(Debug)]
 struct TypeCheckerCtx {
     unification_table: InPlaceUnificationTable<TypeVar>,
+    nullability_unification_table: InPlaceUnificationTable<NullabilityVar>,
     constraints: Vec<Constraint>,
     next_loop_id: usize,
     progress: usize,
@@ -198,6 +183,7 @@ impl TypeCheckerCtx {
     pub fn new() -> Self {
         Self {
             unification_table: InPlaceUnificationTable::new(),
+            nullability_unification_table: InPlaceUnificationTable::new(),
             constraints: vec![],
             next_loop_id: 0,
             progress: 0,
@@ -224,6 +210,12 @@ impl TypeCheckerCtx {
         let v = self.unification_table.new_key(None);
         self.all_vars.push(v);
         self.rigid_vars.insert(v);
+        v
+    }
+
+    pub fn fresh_null_var(&mut self) -> NullabilityVar {
+        let v = self.nullability_unification_table.new_key(None);
+        // self.all_vars.push(v);
         v
     }
 
@@ -280,22 +272,27 @@ impl TypeCheckerCtx {
                         // solve later
                         self.constraints.push(constraint);
                     }
-                    Type::Fn { f, nullable: None } => {
+                    Type::Fn {
+                        f,
+                        nullable: Nullability::Var(_),
+                    } => {
                         // solve later
                         self.constraints.push(constraint);
                     }
-                    Type::Fn { f, nullable } => {
-                        if nullable == Some(true) {
-                            return Err(TypeError {
-                                node_id: *node_id,
-                                kind: TypeErrorKind::NotCallable(Type::Fn { f, nullable }),
-                            });
-                        }
-
-                        let ty = Type::Fn {
-                            f: self.instantiate_fn_ty(f),
-                            nullable,
-                        };
+                    Type::Fn {
+                        f,
+                        nullable: Nullability::Nullable,
+                    } => {
+                        return Err(TypeError {
+                            node_id: *node_id,
+                            kind: TypeErrorKind::NotCallable(Type::fun(f)),
+                        });
+                    }
+                    Type::Fn {
+                        f,
+                        nullable: Nullability::NonNullable,
+                    } => {
+                        let ty = Type::fun(self.instantiate_fn_ty(f));
                         self.add_constraint(Constraint::TypeEqual(*node_id, ty, concrete.clone()))?;
                     }
                     other => {
@@ -344,31 +341,36 @@ impl TypeCheckerCtx {
                             // try again later, when it has become a fn type
                             todo.push_back(Constraint::CanInstantiateTo(node_id, scheme, concrete));
                         }
-                        Type::Fn { f, nullable: None } => {
+                        Type::Fn {
+                            f,
+                            nullable: Nullability::Var(v),
+                        } => {
                             // try again later
                             todo.push_back(Constraint::TypeEqual(
                                 node_id,
-                                Type::Fn {
-                                    f: self.instantiate_fn_ty(f),
-                                    nullable: None,
-                                },
+                                Type::fun(self.instantiate_fn_ty(f)),
                                 concrete,
                             ));
                         }
-                        Type::Fn { f, nullable } => {
-                            if nullable == Some(false) {
-                                return Err(TypeError {
-                                    node_id,
-                                    kind: TypeErrorKind::NotCallable(Type::Fn { f, nullable }),
-                                });
-                            }
-
+                        Type::Fn {
+                            f,
+                            nullable: Nullability::Nullable,
+                        } => {
+                            return Err(TypeError {
+                                node_id,
+                                kind: TypeErrorKind::NotCallable(Type::Fn {
+                                    f,
+                                    nullable: Nullability::Nullable,
+                                }),
+                            });
+                        }
+                        Type::Fn {
+                            f,
+                            nullable: Nullability::NonNullable,
+                        } => {
                             todo.push_front(Constraint::TypeEqual(
                                 node_id,
-                                Type::Fn {
-                                    f: self.instantiate_fn_ty(f),
-                                    nullable,
-                                },
+                                Type::fun(self.instantiate_fn_ty(f)),
                                 concrete,
                             ));
                         }
@@ -508,29 +510,26 @@ impl TypeCheckerCtx {
                     // );
                     let mgu_so_far = self.normalize_ty(overload_set.types[ti].clone());
 
-                    match mgu_so_far.alpha_eq(&overload_set.overloads[i][ti], &vec![]) {
-                        None | Some(true) => {}
-                        Some(false) => {
-                            // println!("      - failed, bail overload");
-                            self.unification_table.rollback_to(snapshot);
+                    if !mgu_so_far.alpha_eq(&overload_set.overloads[i][ti], &vec![]) {
+                        // println!("      - failed, bail overload");
+                        self.unification_table.rollback_to(snapshot);
 
-                            if mgu_so_far.is_concrete(&vec![]) {
-                                // println!(
-                                //     "        overload {i} is deemed IMPOSSIBLE, because of concrete type mismatch"
-                                // );
-                                impossible[i] = true;
+                        if mgu_so_far.is_concrete(&vec![]) {
+                            // println!(
+                            //     "        overload {i} is deemed IMPOSSIBLE, because of concrete type mismatch"
+                            // );
+                            impossible[i] = true;
 
-                                if impossible.iter().all(|&b| b) {
-                                    // println!("  => no overloads are possible");
-                                    return Err(TypeError {
-                                        node_id: overload_set.node_id,
-                                        kind: TypeErrorKind::NoOverload,
-                                    });
-                                }
+                            if impossible.iter().all(|&b| b) {
+                                // println!("  => no overloads are possible");
+                                return Err(TypeError {
+                                    node_id: overload_set.node_id,
+                                    kind: TypeErrorKind::NoOverload,
+                                });
                             }
-
-                            continue 'check;
                         }
+
+                        continue 'check;
                     }
                 }
 
@@ -567,48 +566,130 @@ impl TypeCheckerCtx {
         Ok(false)
     }
 
+    fn check_nullability_equal(&mut self, left: Nullability, right: Nullability) -> Result<(), ()> {
+        let left = self.normalize_nullability(left);
+        let right = self.normalize_nullability(right);
+
+        match (left.clone(), right.clone()) {
+            (Nullability::NonNullable, Nullability::NonNullable) => Ok(()),
+            (Nullability::Nullable, Nullability::Nullable) => Ok(()),
+            (Nullability::Var(x), Nullability::Var(y)) => {
+                self.nullability_unification_table
+                    .unify_var_var(x, y)
+                    .map_err(|_| ())?;
+
+                Ok(())
+            }
+            _ => Err(()),
+        }
+    }
+
+    fn normalize_nullability(&mut self, n: Nullability) -> Nullability {
+        match n {
+            Nullability::NonNullable => Nullability::NonNullable,
+            Nullability::Nullable => Nullability::Nullable,
+            Nullability::Var(x) => match self.nullability_unification_table.probe_value(x) {
+                Some(nullability) => self.normalize_nullability(nullability),
+                None => Nullability::Var(self.nullability_unification_table.find(x)),
+            },
+        }
+    }
+
     fn check_ty_equal(&mut self, left: Type, right: Type) -> Result<(), TypeErrorKind> {
         let left = self.normalize_ty(left);
         let right = self.normalize_ty(right);
 
-        match (left, right) {
-            (Type::Nil, Type::Nil) => Ok(()),
-            (Type::Bool, Type::Bool) => Ok(()),
-            (Type::Str, Type::Str) => Ok(()),
-            (Type::Int, Type::Int) => Ok(()),
-            (Type::Float, Type::Float) => Ok(()),
-            (Type::Regex, Type::Regex) => Ok(()),
-            (Type::List(a), Type::List(b)) => self.check_ty_equal(*a, *b),
-            (Type::Tuple(a), Type::Tuple(b)) if a.len() == b.len() => {
+        match (left.clone(), right.clone()) {
+            (Type::Nil { nullable: x }, Type::Nil { nullable: y })
+            | (Type::Bool { nullable: x }, Type::Bool { nullable: y })
+            | (Type::Str { nullable: x }, Type::Str { nullable: y })
+            | (Type::Int { nullable: x }, Type::Int { nullable: y })
+            | (Type::Float { nullable: x }, Type::Float { nullable: y })
+            | (Type::Regex { nullable: x }, Type::Regex { nullable: y }) => {
+                self.check_nullability_equal(x, y)
+                    .map_err(|_| TypeErrorKind::NotEqual(left, right))?;
+
+                Ok(())
+            }
+
+            (
+                Type::List {
+                    els: a,
+                    nullable: x,
+                },
+                Type::List {
+                    els: b,
+                    nullable: y,
+                },
+            ) => {
+                self.check_ty_equal(*a, *b)?;
+
+                self.check_nullability_equal(x, y)
+                    .map_err(|_| TypeErrorKind::NotEqual(left, right))?;
+
+                Ok(())
+            }
+
+            (
+                Type::Tuple {
+                    els: a,
+                    nullable: x,
+                },
+                Type::Tuple {
+                    els: b,
+                    nullable: y,
+                },
+            ) if a.len() == b.len() => {
                 for (a, b) in a.into_iter().zip(b.into_iter()) {
                     self.check_ty_equal(a, b)?;
                 }
+
+                self.check_nullability_equal(x, y)
+                    .map_err(|_| TypeErrorKind::NotEqual(left, right))?;
+
                 Ok(())
             }
+
             (
                 Type::Dict {
                     key: a_key,
                     val: a_val,
+                    nullable: x,
                 },
                 Type::Dict {
                     key: b_key,
                     val: b_val,
+                    nullable: y,
                 },
             ) => {
                 self.check_ty_equal(*a_key, *b_key)?;
-                self.check_ty_equal(*a_val, *b_val)
+                self.check_ty_equal(*a_val, *b_val)?;
+
+                self.check_nullability_equal(x, y)
+                    .map_err(|_| TypeErrorKind::NotEqual(left, right))?;
+
+                Ok(())
             }
+
             (
-                Type::Fn(FnType {
-                    generics: a_generics,
-                    params: a_params,
-                    ret: a_ret,
-                }),
-                Type::Fn(FnType {
-                    generics: b_generics,
-                    params: b_params,
-                    ret: b_ret,
-                }),
+                Type::Fn {
+                    f:
+                        FnType {
+                            generics: a_generics,
+                            params: a_params,
+                            ret: a_ret,
+                        },
+                    nullable: x,
+                },
+                Type::Fn {
+                    f:
+                        FnType {
+                            generics: b_generics,
+                            params: b_params,
+                            ret: b_ret,
+                        },
+                    nullable: y,
+                },
             ) => {
                 // fn map<T>(arr: [T]) -> int { ... }
 
@@ -626,22 +707,22 @@ impl TypeCheckerCtx {
                 // let g: (fn<t>(t) -> t) = |x| { x }
 
                 if a_generics.len() != b_generics.len() {
-                    println!(
-                        "A: {:?}",
-                        Type::Fn(FnType {
-                            generics: a_generics,
-                            params: a_params,
-                            ret: a_ret,
-                        })
-                    );
-                    println!(
-                        "B: {:?}",
-                        Type::Fn(FnType {
-                            generics: b_generics,
-                            params: b_params,
-                            ret: b_ret,
-                        })
-                    );
+                    // println!(
+                    //     "A: {:?}",
+                    //     Type::Fn(FnType {
+                    //         generics: a_generics,
+                    //         params: a_params,
+                    //         ret: a_ret,
+                    //     })
+                    // );
+                    // println!(
+                    //     "B: {:?}",
+                    //     Type::Fn(FnType {
+                    //         generics: b_generics,
+                    //         params: b_params,
+                    //         ret: b_ret,
+                    //     })
+                    // );
                     return Err(TypeErrorKind::GenericsMismatch);
                 }
 
@@ -660,11 +741,14 @@ impl TypeCheckerCtx {
 
                 self.check_ty_equal(*a_ret, *b_ret)?;
 
+                self.check_nullability_equal(x, y)
+                    .map_err(|_| TypeErrorKind::NotEqual(left, right))?;
+
                 Ok(())
             }
-            (Type::Nullable { child: a_child }, Type::Nullable { child: b_child }) => {
-                self.check_ty_equal(*a_child, *b_child)
-            }
+            // (Type::Nullable { child: a_child }, Type::Nullable { child: b_child }) => {
+            //     self.check_ty_equal(*a_child, *b_child)
+            // }
 
             // nullability
             // (a, Type::Nil) => Ok(()),
@@ -724,36 +808,48 @@ impl TypeCheckerCtx {
     // do something with double nullability?
     fn normalize_ty(&mut self, ty: Type) -> Type {
         match ty {
-            Type::Nil => Type::Nil,
-            Type::Bool { nullable } => Type::Bool { nullable },
-            Type::Str { nullable } => Type::Str { nullable },
-            Type::Int { nullable } => Type::Int { nullable },
-            Type::Float { nullable } => Type::Float { nullable },
-            Type::Regex { nullable } => Type::Regex { nullable },
+            Type::Nil { nullable } => Type::Nil {
+                nullable: self.normalize_nullability(nullable),
+            },
+            Type::Bool { nullable } => Type::Bool {
+                nullable: self.normalize_nullability(nullable),
+            },
+            Type::Str { nullable } => Type::Str {
+                nullable: self.normalize_nullability(nullable),
+            },
+            Type::Int { nullable } => Type::Int {
+                nullable: self.normalize_nullability(nullable),
+            },
+            Type::Float { nullable } => Type::Float {
+                nullable: self.normalize_nullability(nullable),
+            },
+            Type::Regex { nullable } => Type::Regex {
+                nullable: self.normalize_nullability(nullable),
+            },
 
             Type::Fn { f, nullable } => Type::Fn {
                 f: self.normalize_fn_ty(f),
-                nullable,
+                nullable: self.normalize_nullability(nullable),
             },
             Type::NamedFn { fns, nullable } => Type::NamedFn {
                 fns: fns
                     .into_iter()
                     .map(|def| self.normalize_fn_ty(def))
                     .collect(),
-                nullable,
+                nullable: self.normalize_nullability(nullable),
             },
             Type::List { els, nullable } => Type::List {
                 els: self.normalize_ty(*els).into(),
-                nullable,
+                nullable: self.normalize_nullability(nullable),
             },
             Type::Tuple { els, nullable } => Type::Tuple {
                 els: els.into_iter().map(|ty| self.normalize_ty(ty)).collect(),
-                nullable,
+                nullable: self.normalize_nullability(nullable),
             },
             Type::Dict { key, val, nullable } => Type::Dict {
                 key: self.normalize_ty(*key).into(),
                 val: self.normalize_ty(*val).into(),
-                nullable,
+                nullable: self.normalize_nullability(nullable),
             },
             // Type::Nullable { child } => Type::Nullable {
             //     child: self.normalize_ty(*child).into(),
@@ -778,40 +874,18 @@ impl TypeCheckerCtx {
         ty: &ast::TypeHint,
     ) -> Result<Type, TypeError> {
         match ty {
-            ast::TypeHint::Bool(_) => {
-                return Ok(Type::Bool {
-                    nullable: Some(false),
-                });
-            }
-            ast::TypeHint::Int(_) => {
-                return Ok(Type::Int {
-                    nullable: Some(false),
-                });
-            }
-            ast::TypeHint::Float(_) => {
-                return Ok(Type::Float {
-                    nullable: Some(false),
-                });
-            }
-            ast::TypeHint::Regex(_) => {
-                return Ok(Type::Regex {
-                    nullable: Some(false),
-                });
-            }
-            ast::TypeHint::Str(_) => {
-                return Ok(Type::Str {
-                    nullable: Some(false),
-                });
-            }
-            ast::TypeHint::Nil(_) => {
-                return Ok(Type::Nil);
-            }
+            ast::TypeHint::Bool(_) => Ok(Type::bool()),
+            ast::TypeHint::Int(_) => Ok(Type::int()),
+            ast::TypeHint::Float(_) => Ok(Type::float()),
+            ast::TypeHint::Regex(_) => Ok(Type::regex()),
+            ast::TypeHint::Str(_) => Ok(Type::str()),
+            ast::TypeHint::Nil(_) => Ok(Type::nil()),
             // ast::TypeHint::SomeFn(_) => Type::Nil, // TODO
-            ast::TypeHint::Nullable(t) => {
-                return Ok(self
-                    .convert_hint_to_type(env, &t.child)?
-                    .nullable(Some(true)));
-            }
+            // ast::TypeHint::Nullable(t) => {
+            //     return Ok(self
+            //         .convert_hint_to_type(env, &t.child)?
+            //         .nullable(Some(true)));
+            // }
             ast::TypeHint::Fn(ast::FnTypeHint {
                 id,
                 generics,
@@ -832,19 +906,16 @@ impl TypeCheckerCtx {
                     })
                     .collect::<Vec<_>>();
 
-                Ok(Type::Fn {
-                    f: FnType {
-                        generics,
-                        params: params
-                            .into_iter()
-                            .map(|hint| self.convert_hint_to_type(&mut typing_child_env, hint))
-                            .collect::<Result<Vec<_>, _>>()?,
-                        ret: self
-                            .convert_hint_to_type(&mut typing_child_env, &ret)?
-                            .into(),
-                    },
-                    nullable: Some(false),
-                })
+                Ok(Type::fun(FnType {
+                    generics,
+                    params: params
+                        .into_iter()
+                        .map(|hint| self.convert_hint_to_type(&mut typing_child_env, hint))
+                        .collect::<Result<Vec<_>, _>>()?,
+                    ret: self
+                        .convert_hint_to_type(&mut typing_child_env, &ret)?
+                        .into(),
+                }))
             }
             ast::TypeHint::Var(ast::VarTypeHint { id, var }) => {
                 match env.typevars.get(var.as_str()).cloned() {
@@ -855,18 +926,15 @@ impl TypeCheckerCtx {
                     }),
                 }
             }
-            ast::TypeHint::List(t) => Ok(Type::List {
-                els: self.convert_hint_to_type(env, &t.elements_ty)?.into(),
-                nullable: Some(false),
-            }),
-            ast::TypeHint::Tuple(t) => Ok(Type::Tuple {
-                els: t
-                    .element_types
+            ast::TypeHint::List(t) => {
+                Ok(Type::list(self.convert_hint_to_type(env, &t.elements_ty)?))
+            }
+            ast::TypeHint::Tuple(t) => Ok(Type::tuple(
+                t.element_types
                     .iter()
                     .map(|hint| self.convert_hint_to_type(env, hint))
                     .collect::<Result<Vec<_>, _>>()?,
-                nullable: Some(false),
-            }),
+            )),
             ty => todo!("can't convert typehint to type: {:?}", ty),
         }
     }
@@ -902,7 +970,7 @@ impl TypeCheckerCtx {
         block: &ast::Block,
         use_result: bool,
     ) -> Result<(Type, bool), TypeError> {
-        let mut ty = Type::Nil;
+        let mut ty = Type::nil();
         let mut certain_return = false;
 
         let mut item_placeholder_types = vec![];
@@ -979,14 +1047,11 @@ impl TypeCheckerCtx {
 
                 let ret = Type::TypeVar(self.fresh_ty_var());
 
-                let placeholder_ty = Type::Fn {
-                    f: FnType {
-                        generics,
-                        params,
-                        ret: ret.into(),
-                    },
-                    nullable: Some(false),
-                };
+                let placeholder_ty = Type::fun(FnType {
+                    generics,
+                    params,
+                    ret: ret.into(),
+                });
 
                 env.locals.insert(name.str.clone(), placeholder_ty.clone());
                 Ok(placeholder_ty)
@@ -1049,14 +1114,11 @@ impl TypeCheckerCtx {
                 let (body_ty, certain_return) = self.infer_block(&mut child_env, body, true)?;
 
                 // TODO -> NamedFn
-                let ty = Type::Fn {
-                    f: FnType {
-                        generics: generics.clone(),
-                        params: params.clone(),
-                        ret: ret_ty.clone().into(),
-                    },
-                    nullable: Some(false),
-                };
+                let ty = Type::fun(FnType {
+                    generics: generics.clone(),
+                    params: params.clone(),
+                    ret: ret_ty.clone().into(),
+                });
 
                 if let Some(return_stmt_ty) = self.fn_return_ty.get(id).cloned() {
                     self.add_constraint(Constraint::TypeEqual(
@@ -1072,7 +1134,7 @@ impl TypeCheckerCtx {
 
                 self.add_constraint(Constraint::TypeEqual(*id, ty.clone(), placeholder_ty))?;
 
-                self.assign(*id, Type::Nil)
+                self.assign(*id, Type::nil())
             }
         }
     }
@@ -1089,7 +1151,7 @@ impl TypeCheckerCtx {
                     .as_ref()
                     .map(|expr| self.infer_expr(env, expr, true))
                     .transpose()?
-                    .unwrap_or((Type::Nil, false));
+                    .unwrap_or((Type::nil(), false));
 
                 let Some(curr_loop_label) = env.curr_loop.clone() else {
                     return Err(TypeError {
@@ -1111,17 +1173,17 @@ impl TypeCheckerCtx {
                     self.add_constraint(Constraint::TypeEqual(*id, prev_ty, expr_ty))?;
                 }
 
-                return self.assign_extra(*id, Type::Nil, expr_certainly_returns);
+                return self.assign_extra(*id, Type::nil(), expr_certainly_returns);
             }
             ast::Stmt::Continue(ast::ContinueStmt { id, label }) => {
-                return self.assign_extra(*id, Type::Nil, false);
+                return self.assign_extra(*id, Type::nil(), false);
             }
             ast::Stmt::Return(ast::ReturnStmt { id, expr }) => {
                 let (expr_ty, _) = expr
                     .as_ref()
                     .map(|expr| self.infer_expr(env, expr, true))
                     .transpose()?
-                    .unwrap_or((Type::Nil, false));
+                    .unwrap_or((Type::nil(), false));
 
                 let Some(fn_node_id) = env.curr_fn else {
                     return Err(TypeError {
@@ -1136,7 +1198,7 @@ impl TypeCheckerCtx {
                     self.add_constraint(Constraint::TypeEqual(*id, prev_ty, expr_ty))?;
                 }
 
-                return self.assign_extra(*id, Type::Nil, true);
+                return self.assign_extra(*id, Type::nil(), true);
             }
             ast::Stmt::Declare(ast::DeclareStmt { id, pattern, expr }) => {
                 let mut declare_locals = FxHashMap::default();
@@ -1145,13 +1207,13 @@ impl TypeCheckerCtx {
                 let (_, expr_certainly_returns) = self.check_expr(env, expr, pattern_ty)?;
                 env.add_locals(declare_locals);
 
-                return self.assign_extra(*id, Type::Nil, expr_certainly_returns);
+                return self.assign_extra(*id, Type::nil(), expr_certainly_returns);
             }
             ast::Stmt::Assign(ast::AssignStmt { id, pattern, expr }) => {
                 let pattern_ty = self.infer_assign_pattern(env, pattern)?;
                 let (_, expr_certainly_returns) = self.check_expr(env, expr, pattern_ty)?;
 
-                return self.assign_extra(*id, Type::Nil, expr_certainly_returns);
+                return self.assign_extra(*id, Type::nil(), expr_certainly_returns);
             }
             ast::Stmt::Expr(ast::ExprStmt { id, expr }) => {
                 let (expr_ty, expr_certainly_returns) = self.infer_expr(env, expr, use_result)?;
@@ -1429,7 +1491,7 @@ impl TypeCheckerCtx {
                 return self.assign_extra(*id, Type::str(), certain_return);
             }
             ast::Expr::Nil(ast::NilExpr { id }) => {
-                return self.assign_extra(*id, Type::Nil, false);
+                return self.assign_extra(*id, Type::nil(), false);
             }
             ast::Expr::Regex(ast::RegexExpr { id, str }) => {
                 return self.assign_extra(*id, Type::regex(), false);
@@ -1682,27 +1744,27 @@ impl TypeCheckerCtx {
                 }
 
                 let f_ty = match f_ty {
-                    Type::Fn { f, nullable: None } => {
+                    Type::Fn {
+                        f,
+                        nullable: Nullability::Var(_),
+                    } => {
                         // is it acceptable to not be able to deal with this?
                         todo!()
                     }
 
                     Type::Fn {
                         f,
-                        nullable: Some(true),
+                        nullable: Nullability::Nullable,
                     } => {
                         return Err(TypeError {
                             node_id: *id,
-                            kind: TypeErrorKind::NotCallable(Type::Fn {
-                                f,
-                                nullable: Some(true),
-                            }),
+                            kind: TypeErrorKind::NotCallable(Type::fun(f)),
                         });
                     }
 
                     Type::Fn {
                         f,
-                        nullable: Some(false),
+                        nullable: Nullability::NonNullable,
                     } => self.instantiate_fn_ty(f),
 
                     Type::TypeVar(v) => {
@@ -1718,10 +1780,7 @@ impl TypeCheckerCtx {
                         self.add_constraint(Constraint::CanInstantiateTo(
                             callee.id(),
                             Type::TypeVar(v),
-                            Type::Fn {
-                                f: f.clone(),
-                                nullable: Some(false),
-                            },
+                            Type::fun(f.clone()),
                         ))?;
 
                         f
@@ -1788,14 +1847,11 @@ impl TypeCheckerCtx {
                     self.add_constraint(Constraint::TypeEqual(body.id(), ret_ty.clone(), body_ty))?;
                 }
 
-                let ty = Type::Fn {
-                    f: FnType {
-                        generics: vec![],
-                        params,
-                        ret: ret_ty.into(),
-                    },
-                    nullable: Some(false),
-                };
+                let ty = Type::fun(FnType {
+                    generics: vec![],
+                    params,
+                    ret: ret_ty.into(),
+                });
 
                 return self.assign_extra(*id, ty, false);
             }
@@ -1850,7 +1906,7 @@ impl TypeCheckerCtx {
                     els = Some((expr.id(), self.infer_block(&mut env.clone(), block, true)?));
                 }
 
-                let mut ty = Type::Nil;
+                let mut ty = Type::nil();
                 if let Some((node_id, (t, else_returns))) = els {
                     if use_result {
                         ty = t.clone();
@@ -1881,7 +1937,7 @@ impl TypeCheckerCtx {
 
                 self.infer_block(&mut env.clone(), body, false)?;
 
-                let break_expr_ty = self.types.entry(*id).or_insert(Type::Nil).clone();
+                let break_expr_ty = self.types.entry(*id).or_insert(Type::nil()).clone();
                 Ok((break_expr_ty, certainly_returns))
             }
             ast::Expr::WhileLet(_) => {
@@ -1915,7 +1971,7 @@ impl TypeCheckerCtx {
                 } else {
                     return self.assign_extra(
                         *id,
-                        if use_result { body_ty } else { Type::Nil },
+                        if use_result { body_ty } else { Type::nil() },
                         certainly_returns,
                     );
                 }
@@ -1935,7 +1991,7 @@ impl TypeCheckerCtx {
 
                 let (_, certainly_returns) = self.infer_block(&mut child_env, body, false)?;
 
-                let break_expr_ty = self.types.entry(*id).or_insert(Type::Nil).clone();
+                let break_expr_ty = self.types.entry(*id).or_insert(Type::nil()).clone();
                 Ok((break_expr_ty, certainly_returns))
             }
             ast::Expr::For(ast::ForExpr {
@@ -1977,7 +2033,7 @@ impl TypeCheckerCtx {
                 } else {
                     return self.assign_extra(
                         *id,
-                        if use_result { body_ty } else { Type::Nil },
+                        if use_result { body_ty } else { Type::nil() },
                         false,
                     );
                 }
@@ -2030,7 +2086,10 @@ impl TypeCheckerCtx {
         match (&expr, &ty) {
             (
                 ast::Expr::AnonymousFn(ast::AnonymousFnExpr { id, params, body }),
-                Type::Fn { f, nullable: None },
+                Type::Fn {
+                    f,
+                    nullable: Nullability::Var(_),
+                },
             ) => {
                 // is it acceptable to not be able to deal with this?
                 todo!()
@@ -2039,22 +2098,19 @@ impl TypeCheckerCtx {
                 ast::Expr::AnonymousFn(ast::AnonymousFnExpr { id, params, body }),
                 Type::Fn {
                     f,
-                    nullable: Some(true),
+                    nullable: Nullability::Nullable,
                 },
             ) => {
                 return Err(TypeError {
                     node_id: expr.id(),
-                    kind: TypeErrorKind::NotCallable(Type::Fn {
-                        f: f.clone(),
-                        nullable: Some(true),
-                    }),
+                    kind: TypeErrorKind::NotCallable(Type::fun(f.clone())),
                 });
             }
             (
                 ast::Expr::AnonymousFn(ast::AnonymousFnExpr { id, params, body }),
                 Type::Fn {
                     f,
-                    nullable: Some(false),
+                    nullable: Nullability::NonNullable,
                 },
             ) => {
                 if f.params.len() != params.len() {
@@ -2102,14 +2158,7 @@ impl TypeCheckerCtx {
                     ))?;
                 }
 
-                return self.assign_extra(
-                    *id,
-                    Type::Fn {
-                        f: f.clone(),
-                        nullable: Some(false),
-                    },
-                    false,
-                );
+                return self.assign_extra(*id, Type::fun(f.clone()), false);
             }
 
             // (ast::Expr::Var(ast::VarExpr { id, var }), Type::Fn(fn_ty)) => {

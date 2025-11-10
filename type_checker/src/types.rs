@@ -1,6 +1,6 @@
 use std::{fmt::Debug, iter::once};
 
-use ena::unify::{EqUnifyValue, InPlaceUnificationTable, UnifyValue};
+use ena::unify::{EqUnifyValue, InPlaceUnificationTable, UnifyKey, UnifyValue};
 use fxhash::FxHashMap;
 use parser::ast;
 
@@ -14,20 +14,104 @@ impl Debug for TypeVar {
     }
 }
 
+impl UnifyKey for TypeVar {
+    type Value = Option<Type>;
+
+    fn from_index(u: u32) -> Self {
+        Self(u)
+    }
+
+    fn index(&self) -> u32 {
+        self.0
+    }
+
+    fn tag() -> &'static str {
+        "TypeVar"
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Hash, Copy)]
+pub struct NullabilityVar(pub u32);
+
+impl Debug for NullabilityVar {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "n{}", self.0);
+        Ok(())
+    }
+}
+
+impl UnifyKey for NullabilityVar {
+    type Value = Option<Nullability>;
+
+    fn from_index(u: u32) -> Self {
+        Self(u)
+    }
+
+    fn index(&self) -> u32 {
+        self.0
+    }
+
+    fn tag() -> &'static str {
+        "NullabilityVar"
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Nullability {
+    Nullable,
+    NonNullable,
+    Var(NullabilityVar),
+}
+
+impl Nullability {
+    pub fn is_concrete(&self) -> bool {
+        match self {
+            Nullability::NonNullable => true,
+            Nullability::Nullable => true,
+            Nullability::Var(_) => false,
+        }
+    }
+
+    fn prefix(&self) -> &'static str {
+        match self {
+            Nullability::NonNullable => "",
+            Nullability::Nullable => "?",
+            Nullability::Var(_) => ":",
+        }
+    }
+
+    // pub fn alpha_eq(
+    //     &self,
+    //     other: &Nullability,
+    //     bound_nulls: &Vec<(NullabilityVar, NullabilityVar)>,
+    // ) -> bool {
+    //     match (self, other) {
+    //         (Nullability::Nullable, Nullability::Nullable) => true,
+    //         (Nullability::NonNullable, Nullability::NonNullable) => true,
+    //         (Nullability::Var(x), Nullability::Var(y)) => {
+    //             equal_bound_null_var(bound_nulls, *x, *y, 0)
+    //         }
+    //         _ => false,
+    //     }
+    // }
+}
+
+impl EqUnifyValue for Nullability {}
+
 #[rustfmt::skip]
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub enum Type {
-    Nil,
-    Bool { nullable: Option<bool> },
-    Str { nullable: Option<bool> },
-    Int { nullable: Option<bool> },
-    Float { nullable: Option<bool> },
-    Regex { nullable: Option<bool> },
-    Fn { f: FnType, nullable: Option<bool> },
-    NamedFn { fns: Vec<FnType>, nullable: Option<bool> },
-    List { els: Box<Type>, nullable: Option<bool> },
-    Tuple { els: Vec<Type>, nullable: Option<bool> },
-    Dict { key: Box<Type>, val: Box<Type>, nullable: Option<bool> },
+    Nil { nullable: Nullability },
+    Bool { nullable: Nullability },
+    Str { nullable: Nullability },
+    Int { nullable: Nullability },
+    Float { nullable: Nullability },
+    Regex { nullable: Nullability },
+    Fn { f: FnType, nullable: Nullability },
+    NamedFn { fns: Vec<FnType>, nullable: Nullability },
+    List { els: Box<Type>, nullable: Nullability },
+    Tuple { els: Vec<Type>, nullable: Nullability },
+    Dict { key: Box<Type>, val: Box<Type>, nullable: Nullability },
     // Nullable { child: Box<Type>, nullable: Option<bool> },
     TypeVar(TypeVar),
 }
@@ -100,6 +184,21 @@ fn equal_bound_var(bound: &Vec<(TypeVar, TypeVar)>, x: TypeVar, y: TypeVar, i: u
     }
 }
 
+// fn equal_bound_null_var(
+//     bound: &Vec<(NullabilityVar, NullabilityVar)>,
+//     x: NullabilityVar,
+//     y: NullabilityVar,
+//     i: usize,
+// ) -> bool {
+//     if i == bound.len() && x == y {
+//         true
+//     } else if bound[i] == (x, y) {
+//         true
+//     } else {
+//         bound[i].0 != x && bound[i].1 != y && equal_bound_null_var(bound, x, y, i + 1)
+//     }
+// }
+
 impl FnType {
     pub fn is_concrete(&self, bound: &Vec<TypeVar>) -> bool {
         let bound = vec![bound.clone(), self.generics.clone()].concat();
@@ -107,30 +206,21 @@ impl FnType {
     }
 
     // TODO test
-    pub fn alpha_eq(&self, other: &FnType, bound: &Vec<(TypeVar, TypeVar)>) -> Option<bool> {
+    pub fn alpha_eq(
+        &self,
+        other: &FnType,
+        bound: &Vec<(TypeVar, TypeVar)>,
+        // bound_nulls: &Vec<(NullabilityVar, NullabilityVar)>,
+    ) -> bool {
         if self.generics.len() != other.generics.len() || self.params.len() != other.params.len() {
-            return Some(false);
+            return false;
         }
 
         let mut bound = bound.clone();
         bound.extend((0..self.generics.len()).map(|i| (self.generics[i], other.generics[i])));
 
-        for res in (0..self.params.len())
-            .map(|i| self.params[i].alpha_eq(&other.params[i], &bound))
-            .chain(once(self.ret.alpha_eq(&other.ret, &bound)))
-        {
-            match res {
-                None => {
-                    return None;
-                }
-                Some(false) => {
-                    return Some(false);
-                }
-                Some(true) => {}
-            }
-        }
-
-        return Some(true);
+        (0..self.params.len()).all(|i| self.params[i].alpha_eq(&other.params[i], &bound))
+            && self.ret.alpha_eq(&other.ret, &bound)
     }
 
     pub fn occurs_check(&self, var: TypeVar) -> Result<(), Type> {
@@ -176,90 +266,73 @@ impl Type {
     pub fn list(els: Type) -> Self {
         Type::List {
             els: els.into(),
-            nullable: Some(false),
+            nullable: Nullability::NonNullable,
         }
     }
 
     pub fn tuple(els: Vec<Type>) -> Self {
         Type::Tuple {
             els: els.into(),
-            nullable: Some(false),
+            nullable: Nullability::NonNullable,
         }
     }
 
     pub fn int() -> Self {
         Type::Int {
-            nullable: Some(false),
+            nullable: Nullability::NonNullable,
         }
     }
 
     pub fn float() -> Self {
         Type::Float {
-            nullable: Some(false),
+            nullable: Nullability::NonNullable,
         }
     }
 
     pub fn str() -> Self {
         Type::Str {
-            nullable: Some(false),
+            nullable: Nullability::NonNullable,
+        }
+    }
+
+    pub fn nil() -> Self {
+        Type::Nil {
+            nullable: Nullability::NonNullable,
         }
     }
 
     pub fn regex() -> Self {
         Type::Regex {
-            nullable: Some(false),
+            nullable: Nullability::NonNullable,
         }
     }
 
     pub fn bool() -> Self {
         Type::Bool {
-            nullable: Some(false),
+            nullable: Nullability::NonNullable,
         }
     }
 
-    pub fn alpha_eq(&self, other: &Type, bound: &Vec<(TypeVar, TypeVar)>) -> Option<bool> {
-        // first check: if definitely different types, regardless of nullability, then not the same
-        if match (self, other) {
-            (Type::Nil, Type::Nil) => false,
-            (Type::Bool { .. }, Type::Bool { .. }) => false,
-            (Type::Str { .. }, Type::Str { .. }) => false,
-            (Type::Int { .. }, Type::Int { .. }) => false,
-            (Type::Float { .. }, Type::Float { .. }) => false,
-            (Type::Regex { .. }, Type::Regex { .. }) => false,
-            (Type::TypeVar(_), Type::TypeVar(_)) => false,
-            (Type::Fn { .. }, Type::Fn { .. }) => false,
-            (Type::NamedFn { .. }, Type::NamedFn { .. }) => false,
-            (Type::List { .. }, Type::List { .. }) => false,
-            (Type::Tuple { .. }, Type::Tuple { .. }) => false,
-            (Type::Dict { .. }, Type::Dict { .. }) => false,
-            // (Type::Nullable { .. }, Type::Nullable { .. })
-            _ => true,
-        } {
-            return Some(false);
+    pub fn fun(f: FnType) -> Self {
+        Type::Fn {
+            f,
+            nullable: Nullability::NonNullable,
         }
+    }
 
-        // second check: if nullability doesn't concur, then not the same
-        //  .. or if any of the two unknown nullable, then unknown
-        match (self.nullability(), other.nullability()) {
-            (None, _) | (_, None) => {
-                return None;
-            }
-            (Some(a), Some(b)) => {
-                if a != b {
-                    return Some(false);
-                }
-            }
-        }
-
+    pub fn alpha_eq(&self, other: &Type, bound: &Vec<(TypeVar, TypeVar)>) -> bool {
         // third check: check equality
         match (self, other) {
-            (Type::Nil, Type::Nil) => Some(true),
-            (Type::Bool { .. }, Type::Bool { .. }) => Some(true),
-            (Type::Str { .. }, Type::Str { .. }) => Some(true),
-            (Type::Int { .. }, Type::Int { .. }) => Some(true),
-            (Type::Float { .. }, Type::Float { .. }) => Some(true),
-            (Type::Regex { .. }, Type::Regex { .. }) => Some(true),
-            (Type::TypeVar(x), Type::TypeVar(y)) => Some(equal_bound_var(bound, *x, *y, 0)),
+            (Type::Nil { nullable: a }, Type::Nil { nullable: b })
+            | (Type::Bool { nullable: a }, Type::Bool { nullable: b })
+            | (Type::Str { nullable: a }, Type::Str { nullable: b })
+            | (Type::Int { nullable: a }, Type::Int { nullable: b })
+            | (Type::Float { nullable: a }, Type::Float { nullable: b })
+            | (Type::Regex { nullable: a }, Type::Regex { nullable: b }) => {
+                a == b
+                // equal_bound_null_var(bound_nulls, *a, *b, 0)
+            }
+            (Type::TypeVar(x), Type::TypeVar(y)) => equal_bound_var(bound, *x, *y, 0),
             // (Type::Fn(a), Type::Fn(b)) => a.alpha_eq(b, bound),
             // (Type::NamedFn(a), Type::NamedFn(b)) => {
             //     a.len() == b.len() && (0..a.len()).all(|i| a[i].alpha_eq(&b[i], bound))
@@ -269,32 +342,13 @@ impl Type {
             }
             (Type::Tuple { els: a_els, .. }, Type::Tuple { els: b_els, .. }) => {
                 if a_els.len() == b_els.len() {
-                    return Some(false);
+                    return false;
                 }
 
                 let mut all_eq = true;
                 let mut all_unknown = true;
 
-                for i in 0..a_els.len() {
-                    match a_els[i].alpha_eq(&b_els[i], bound) {
-                        Some(true) => {
-                            all_unknown = false;
-                        }
-                        Some(false) => {
-                            all_unknown = false;
-                            all_eq = false;
-                        }
-                        None => {}
-                    }
-                }
-
-                if all_eq {
-                    Some(true)
-                } else if all_unknown {
-                    None
-                } else {
-                    Some(false)
-                }
+                (0..a_els.len()).all(|i| a_els[i].alpha_eq(&b_els[i], bound))
             }
             // (
             //     Type::Dict {
@@ -309,13 +363,13 @@ impl Type {
             // (Type::Nullable { child: a_child }, Type::Nullable { child: b_child }) => {
             //     a_child.alpha_eq(b_child, bound)
             // }
-            _ => Some(false),
+            _ => false,
         }
     }
 
-    pub fn nullable(self, nullable: Option<bool>) -> Self {
+    pub fn with_nullability(self, nullable: Nullability) -> Self {
         match self {
-            Type::Nil => Type::Nil,
+            Type::Nil { .. } => Type::Nil { nullable },
             Type::Bool { .. } => Type::Bool { nullable },
             Type::Str { .. } => Type::Str { nullable },
             Type::Int { .. } => Type::Int { nullable },
@@ -331,47 +385,46 @@ impl Type {
         }
     }
 
-    pub fn nullability(&self) -> Option<bool> {
-        match self {
-            Type::Nil => Some(true),
-            Type::Bool { nullable } => nullable.clone(),
-            Type::Str { nullable } => nullable.clone(),
-            Type::Int { nullable } => nullable.clone(),
-            Type::Float { nullable } => nullable.clone(),
-            Type::Regex { nullable } => nullable.clone(),
-            Type::TypeVar(v) => None,
-            Type::Fn { nullable, .. } => nullable.clone(),
-            Type::NamedFn { nullable, .. } => nullable.clone(),
-            // Type::Nullable { child, nullable } => Type::Nullable { child, nullable },
-            Type::List { nullable, .. } => nullable.clone(),
-            Type::Tuple { nullable, .. } => nullable.clone(),
-            Type::Dict { nullable, .. } => nullable.clone(),
-        }
-    }
+    // pub fn nullability(&self) -> Nullability {
+    //     match self {
+    //         Type::Nil { nullable } => nullable.clone(),
+    //         Type::Bool { nullable } => nullable.clone(),
+    //         Type::Str { nullable } => nullable.clone(),
+    //         Type::Int { nullable } => nullable.clone(),
+    //         Type::Float { nullable } => nullable.clone(),
+    //         Type::Regex { nullable } => nullable.clone(),
+    //         Type::TypeVar(v) => Nu,
+    //         Type::Fn { nullable, .. } => nullable.clone(),
+    //         Type::NamedFn { nullable, .. } => nullable.clone(),
+    //         // Type::Nullable { child, nullable } => Type::Nullable { child, nullable },
+    //         Type::List { nullable, .. } => nullable.clone(),
+    //         Type::Tuple { nullable, .. } => nullable.clone(),
+    //         Type::Dict { nullable, .. } => nullable.clone(),
+    //     }
+    // }
 
     pub fn is_concrete(&self, bound: &Vec<TypeVar>) -> bool {
         match self {
-            Type::Nil => true,
-
-            Type::Bool { nullable } => nullable.is_some(),
-            Type::Str { nullable } => nullable.is_some(),
-            Type::Int { nullable } => nullable.is_some(),
-            Type::Float { nullable } => nullable.is_some(),
-            Type::Regex { nullable } => nullable.is_some(),
+            Type::Nil { nullable } => nullable.is_concrete(),
+            Type::Bool { nullable } => nullable.is_concrete(),
+            Type::Str { nullable } => nullable.is_concrete(),
+            Type::Int { nullable } => nullable.is_concrete(),
+            Type::Float { nullable } => nullable.is_concrete(),
+            Type::Regex { nullable } => nullable.is_concrete(),
 
             Type::TypeVar(v) => false,
 
-            Type::Fn { f, nullable } => nullable.is_some() && f.is_concrete(bound),
+            Type::Fn { f, nullable } => nullable.is_concrete() && f.is_concrete(bound),
             Type::NamedFn { fns, nullable } => {
-                nullable.is_some() && fns.iter().all(|el| el.is_concrete(bound))
+                nullable.is_concrete() && fns.iter().all(|el| el.is_concrete(bound))
             }
-            // Type::Nullable { child, nullable } => nullable.is_some() && child.is_concrete(bound),
-            Type::List { els, nullable } => nullable.is_some() && els.is_concrete(bound),
+            // Type::Nullable { child, nullable } => nullable.is_concrete() && child.is_concrete(bound),
+            Type::List { els, nullable } => nullable.is_concrete() && els.is_concrete(bound),
             Type::Tuple { els, nullable } => {
-                nullable.is_some() && els.iter().all(|el| el.is_concrete(bound))
+                nullable.is_concrete() && els.iter().all(|el| el.is_concrete(bound))
             }
             Type::Dict { key, val, nullable } => {
-                nullable.is_some() && key.is_concrete(bound) && val.is_concrete(bound)
+                nullable.is_concrete() && key.is_concrete(bound) && val.is_concrete(bound)
             }
         }
     }
@@ -530,44 +583,23 @@ impl Type {
 impl Debug for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Type::Nil => write!(f, "nil"),
-
-            Type::Bool { nullable: None } => write!(f, "$bool"),
-            Type::Str { nullable: None } => write!(f, "$str"),
-            Type::Int { nullable: None } => write!(f, "$int"),
-            Type::Float { nullable: None } => write!(f, "$float"),
-            Type::Regex { nullable: None } => write!(f, "$regex"),
-
-            Type::Bool { nullable: Some(true) } => write!(f, "?bool"),
-            Type::Str { nullable: Some(true) } => write!(f, "?str"),
-            Type::Int { nullable: Some(true) } => write!(f, "?int"),
-            Type::Float { nullable: Some(true) } => write!(f, "?float"),
-            Type::Regex { nullable: Some(true) } => write!(f, "?regex"),
-
-            Type::Bool { nullable: Some(false) } => write!(f, "bool"),
-            Type::Str { nullable: Some(false) } => write!(f, "str"),
-            Type::Int { nullable: Some(false) } => write!(f, "int"),
-            Type::Float { nullable: Some(false) } => write!(f, "float"),
-            Type::Regex { nullable: Some(false) } => write!(f, "regex"),
+            Type::Nil { nullable } => write!(f, "{}nil", nullable.prefix()),
+            Type::Bool { nullable } => write!(f, "{}bool", nullable.prefix()),
+            Type::Str { nullable } => write!(f, "{}str", nullable.prefix()),
+            Type::Int { nullable } => write!(f, "{}int", nullable.prefix()),
+            Type::Float { nullable } => write!(f, "{}float", nullable.prefix()),
+            Type::Regex { nullable } => write!(f, "{}regex", nullable.prefix()),
 
             Type::TypeVar(v) => write!(f, "{v:?}"),
 
-            Type::Fn { f: def, nullable: None } => write!(f, "${def:?}"),
-            Type::Fn { f: def, nullable: Some(true) } => write!(f, "?{def:?}"),
-            Type::Fn { f: def, nullable: Some(false) } => write!(f, "{def:?}"),
+            Type::Fn { f: def, nullable } => write!(f, "{}{def:?}", nullable.prefix()),
 
             Type::NamedFn { fns, nullable } => write!(f, "TODO"),
 
-            Type::List { els, nullable: None } => write!(f, "$[{els:?}]"),
-            Type::List { els, nullable: Some(true) } => write!(f, "?[{els:?}]"),
-            Type::List { els, nullable: Some(false) } => write!(f, "[{els:?}]"),
+            Type::List { els, nullable } => write!(f, "{}[{els:?}]", nullable.prefix()),
 
             Type::Tuple { els, nullable } => {
-                write!(f, "{}", match nullable {
-                    None => "$",
-                    Some(true) => "?",
-                    Some(false) => "",
-                });
+                write!(f, "{}", nullable.prefix());
                 write!(f, "(")?;
                 for (i, el) in els.into_iter().enumerate() {
                     if i > 0 {
@@ -581,9 +613,7 @@ impl Debug for Type {
                 write!(f, ")")
             }
 
-            Type::Dict { key, val, nullable: None } => write!(f, "$dict[{key:?}, {val:?}]"),
-            Type::Dict { key, val, nullable: Some(true) } => write!(f, "?dict[{key:?}, {val:?}]"),
-            Type::Dict { key, val, nullable: Some(false) } => write!(f, "dict[{key:?}, {val:?}]"),
+            Type::Dict { key, val, nullable } => write!(f, "{}dict[{key:?}, {val:?}]", nullable.prefix()),
 
             // Type::Nullable { child, nullable } => write!(f, "?{child:?}"),
         }
