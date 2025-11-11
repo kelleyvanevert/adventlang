@@ -980,7 +980,11 @@ impl TypeCheckerCtx {
                     self.add_constraint(Constraint::TypeEqual(
                         body.id(),
                         ret_ty.clone(),
-                        return_stmt_ty,
+                        if certain_return {
+                            return_stmt_ty
+                        } else {
+                            return_stmt_ty.nullable()
+                        },
                     ))?;
                 }
 
@@ -1681,7 +1685,11 @@ impl TypeCheckerCtx {
                     self.add_constraint(Constraint::TypeEqual(
                         body.id(),
                         ret_ty.clone(),
-                        return_stmt_ty,
+                        if certain_return {
+                            return_stmt_ty
+                        } else {
+                            return_stmt_ty.nullable()
+                        },
                     ))?;
                 }
 
@@ -1988,7 +1996,11 @@ impl TypeCheckerCtx {
                     self.add_constraint(Constraint::TypeEqual(
                         body.id(),
                         skolemized_ret.as_ref().clone(),
-                        return_stmt_ty,
+                        if certain_return {
+                            return_stmt_ty
+                        } else {
+                            return_stmt_ty.nullable()
+                        },
                     ))?;
                 }
 

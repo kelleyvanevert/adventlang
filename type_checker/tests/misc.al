@@ -41,6 +41,37 @@ let a: fn() -> ?int = fun
 
 
 // ======
+// uncertain return, but same as final body ty
+// ok
+// skip
+// ======
+
+fn fun() {
+  if true {
+    return 42
+  }
+
+  12
+}
+
+let a: fn() -> int = fun
+
+
+// ======
+// uncertain return, and different from final body ty
+// err: str != ?int
+// ======
+
+fn fun() {
+  if true {
+    return 42
+  }
+
+  "diff"
+}
+
+
+// ======
 // certain return
 // ok
 // ======

@@ -133,7 +133,7 @@ fn solve(input) {
       return true
     }
 
-    false
+    return false;
   }
 
   for let (y, line) in schematic:enumerate {
