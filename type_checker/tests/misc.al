@@ -35,6 +35,8 @@ fn fun() {
   if true {
     return 42
   }
+
+  nil
 }
 
 let a: fn() -> ?int = fun
@@ -43,7 +45,6 @@ let a: fn() -> ?int = fun
 // ======
 // uncertain return, but same as final body ty
 // ok
-// skip
 // ======
 
 fn fun() {
@@ -59,7 +60,7 @@ let a: fn() -> int = fun
 
 // ======
 // uncertain return, and different from final body ty
-// err: str != ?int
+// err: str != int
 // ======
 
 fn fun() {
@@ -91,6 +92,12 @@ fn fun_2() {
 let a: fn() -> int = fun_2
 
 let a: fn() -> int = || { return 42 }
+
+
+// ======
+// certain return
+// ok
+// ======
 
 fn bla(f: fn() -> int) {}
 

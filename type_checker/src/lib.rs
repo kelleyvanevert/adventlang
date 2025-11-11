@@ -810,7 +810,7 @@ impl TypeCheckerCtx {
     }
 
     fn infer_doc(&mut self, env: &mut Env, doc: &ast::Document) -> Result<(), TypeError> {
-        self.infer_block(env, &doc.body, false)?;
+        self.infer_block(env, &doc.body, false, false)?;
 
         Ok(())
     }
@@ -820,7 +820,12 @@ impl TypeCheckerCtx {
         env: &mut Env,
         block: &ast::Block,
         use_result: bool,
+        as_function_body: bool,
     ) -> Result<(Type, bool), TypeError> {
+        if as_function_body && !use_result {
+            panic!("infer_block: use_result must be set if as_function_body is set");
+        }
+
         let mut ty = Type::Nil;
         let mut certain_return = false;
 
@@ -840,8 +845,30 @@ impl TypeCheckerCtx {
             if returns {
                 certain_return = returns;
             }
+
             if is_last && use_result {
-                ty = stmt_ty;
+                ty = stmt_ty.clone();
+            }
+
+            if is_last && as_function_body && !certain_return {
+                // treat this as an implicit return
+
+                let fn_node_id = env.curr_fn.expect("function block must be inside fn scope");
+
+                // Enforce the function return value to have the given type
+                if let Some(prev_ty) = self.fn_return_ty.insert(fn_node_id, stmt_ty.clone()) {
+                    // If the function return value already has been typed, add a type constraint
+                    self.add_constraint(Constraint::TypeEqual(stmt.id(), prev_ty, stmt_ty))?;
+                }
+            }
+        }
+
+        // edge case: empty body fns
+        if as_function_body && num_stmts == 0 {
+            let fn_node_id = env.curr_fn.expect("function block must be inside fn scope");
+            if let Some(prev_ty) = self.fn_return_ty.insert(fn_node_id, Type::Nil) {
+                // If the function return value already has been typed, add a type constraint
+                self.add_constraint(Constraint::TypeEqual(block.id(), prev_ty, Type::Nil))?;
             }
         }
 
@@ -967,7 +994,8 @@ impl TypeCheckerCtx {
                     .unwrap_or_else(|| Type::TypeVar(self.fresh_ty_var()));
 
                 let mut child_env = typing_child_env.new_child_fn_scope(*id, declare_locals);
-                let (body_ty, certain_return) = self.infer_block(&mut child_env, body, true)?;
+                let (body_ty, certain_return) =
+                    self.infer_block(&mut child_env, body, true, true)?;
 
                 // TODO -> NamedFn
                 let ty = Type::Fn(FnType {
@@ -976,21 +1004,15 @@ impl TypeCheckerCtx {
                     ret: ret_ty.clone().into(),
                 });
 
-                if let Some(return_stmt_ty) = self.fn_return_ty.get(id).cloned() {
-                    self.add_constraint(Constraint::TypeEqual(
-                        body.id(),
-                        ret_ty.clone(),
-                        if certain_return {
-                            return_stmt_ty
-                        } else {
-                            return_stmt_ty.nullable()
-                        },
-                    ))?;
-                }
+                let Some(return_stmt_ty) = self.fn_return_ty.get(id).cloned() else {
+                    panic!("fn_return_ty not set");
+                };
 
-                if !certain_return {
-                    self.add_constraint(Constraint::TypeEqual(body.id(), ret_ty, body_ty))?;
-                }
+                self.add_constraint(Constraint::TypeEqual(
+                    body.id(),
+                    ret_ty.clone(),
+                    return_stmt_ty,
+                ))?;
 
                 self.add_constraint(Constraint::TypeEqual(*id, ty.clone(), placeholder_ty))?;
 
@@ -1354,6 +1376,8 @@ impl TypeCheckerCtx {
                 return self.assign_extra(*id, Type::Str, certain_return);
             }
             ast::Expr::Nil(ast::NilExpr { id }) => {
+                let v = Type::TypeVar(self.fresh_ty_var());
+                return self.assign_extra(*id, Type::Nullable { child: v.into() }, false);
                 return self.assign_extra(*id, Type::Nil, false);
             }
             ast::Expr::Regex(ast::RegexExpr { id, str }) => {
@@ -1677,25 +1701,20 @@ impl TypeCheckerCtx {
                     .collect::<Result<Vec<_>, TypeError>>()?;
 
                 let mut child_env = env.new_child_fn_scope(*id, declare_locals);
-                let (body_ty, certain_return) = self.infer_block(&mut child_env, body, true)?;
+                let (body_ty, certain_return) =
+                    self.infer_block(&mut child_env, body, true, true)?;
 
                 let ret_ty = Type::TypeVar(self.fresh_ty_var());
 
-                if let Some(return_stmt_ty) = self.fn_return_ty.get(id).cloned() {
-                    self.add_constraint(Constraint::TypeEqual(
-                        body.id(),
-                        ret_ty.clone(),
-                        if certain_return {
-                            return_stmt_ty
-                        } else {
-                            return_stmt_ty.nullable()
-                        },
-                    ))?;
-                }
+                let Some(return_stmt_ty) = self.fn_return_ty.get(id).cloned() else {
+                    panic!("fn_return_ty not set");
+                };
 
-                if !certain_return {
-                    self.add_constraint(Constraint::TypeEqual(body.id(), ret_ty.clone(), body_ty))?;
-                }
+                self.add_constraint(Constraint::TypeEqual(
+                    body.id(),
+                    ret_ty.clone(),
+                    return_stmt_ty,
+                ))?;
 
                 let ty = Type::Fn(FnType {
                     generics: vec![],
@@ -1722,13 +1741,16 @@ impl TypeCheckerCtx {
                 let mut then_child_env = env.clone();
                 then_child_env.add_locals(declare_locals);
                 let (then_ty, then_returns) =
-                    self.infer_block(&mut then_child_env, then, use_result)?;
+                    self.infer_block(&mut then_child_env, then, use_result, false)?;
 
                 let mut els = None;
                 if let Some(expr) = else_if {
                     els = Some((expr.id(), self.infer_expr(&mut env.clone(), expr, true)?));
                 } else if let Some(block) = else_then {
-                    els = Some((expr.id(), self.infer_block(&mut env.clone(), block, true)?));
+                    els = Some((
+                        expr.id(),
+                        self.infer_block(&mut env.clone(), block, true, false)?,
+                    ));
                 }
 
                 let mut ty = if use_result {
@@ -1763,13 +1785,16 @@ impl TypeCheckerCtx {
                 let (cond_ty, mut certainly_returns) = self.check_expr(env, cond, Type::Bool)?;
 
                 let (then_ty, then_returns) =
-                    self.infer_block(&mut env.clone(), then, use_result)?;
+                    self.infer_block(&mut env.clone(), then, use_result, false)?;
 
                 let mut els = None;
                 if let Some(expr) = else_if {
                     els = Some((expr.id(), self.infer_expr(&mut env.clone(), expr, true)?));
                 } else if let Some(block) = else_then {
-                    els = Some((expr.id(), self.infer_block(&mut env.clone(), block, true)?));
+                    els = Some((
+                        expr.id(),
+                        self.infer_block(&mut env.clone(), block, true, false)?,
+                    ));
                 }
 
                 let mut ty = if use_result {
@@ -1810,7 +1835,7 @@ impl TypeCheckerCtx {
                 let mut child_env = env.clone();
                 child_env.curr_loop = Some(label.clone());
 
-                self.infer_block(&mut env.clone(), body, false)?;
+                self.infer_block(&mut env.clone(), body, false, false)?;
 
                 let break_expr_ty = self.types.entry(*id).or_insert(Type::Nil).clone();
                 Ok((break_expr_ty, certainly_returns))
@@ -1829,7 +1854,7 @@ impl TypeCheckerCtx {
                 child_env.loops.insert(label, *id);
 
                 let (body_ty, certainly_returns) =
-                    self.infer_block(&mut child_env, body, use_result)?;
+                    self.infer_block(&mut child_env, body, use_result, false)?;
 
                 if let Some(break_expr_ty) = self.types.get(id).cloned() {
                     if use_result {
@@ -1864,7 +1889,8 @@ impl TypeCheckerCtx {
                 child_env.curr_loop = Some(label.clone());
                 child_env.loops.insert(label, *id);
 
-                let (_, certainly_returns) = self.infer_block(&mut child_env, body, false)?;
+                let (_, certainly_returns) =
+                    self.infer_block(&mut child_env, body, false, false)?;
 
                 let break_expr_ty = self.types.entry(*id).or_insert(Type::Nil).clone();
                 Ok((break_expr_ty, certainly_returns))
@@ -1892,7 +1918,7 @@ impl TypeCheckerCtx {
                 child_env.curr_loop = Some(label.clone());
                 child_env.loops.insert(label, *id);
 
-                let (body_ty, _) = self.infer_block(&mut child_env, body, use_result)?;
+                let (body_ty, _) = self.infer_block(&mut child_env, body, use_result, false)?;
 
                 if let Some(break_expr_ty) = self.types.get(id).cloned() {
                     if use_result {
@@ -1990,28 +2016,18 @@ impl TypeCheckerCtx {
                 }
 
                 let mut child_env = env.new_child_fn_scope(*id, declare_locals);
-                let (body_ty, certain_return) = self.infer_block(&mut child_env, body, true)?;
+                let (body_ty, certain_return) =
+                    self.infer_block(&mut child_env, body, true, true)?;
 
-                if let Some(return_stmt_ty) = self.fn_return_ty.get(id).cloned() {
-                    self.add_constraint(Constraint::TypeEqual(
-                        body.id(),
-                        skolemized_ret.as_ref().clone(),
-                        if certain_return {
-                            return_stmt_ty
-                        } else {
-                            return_stmt_ty.nullable()
-                        },
-                    ))?;
-                }
+                let Some(return_stmt_ty) = self.fn_return_ty.get(id).cloned() else {
+                    panic!("fn_return_ty not set");
+                };
 
-                if !certain_return {
-                    // TODO: check block, instead of infer + unify
-                    self.add_constraint(Constraint::TypeEqual(
-                        body.id(),
-                        body_ty,
-                        skolemized_ret.as_ref().clone(),
-                    ))?;
-                }
+                self.add_constraint(Constraint::TypeEqual(
+                    body.id(),
+                    skolemized_ret.as_ref().clone(),
+                    return_stmt_ty,
+                ))?;
 
                 return self.assign_extra(*id, Type::Fn(fn_ty.clone()), false);
             }
