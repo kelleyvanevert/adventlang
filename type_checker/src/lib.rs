@@ -1376,8 +1376,8 @@ impl TypeCheckerCtx {
                 return self.assign_extra(*id, Type::Str, certain_return);
             }
             ast::Expr::Nil(ast::NilExpr { id }) => {
-                let v = Type::TypeVar(self.fresh_ty_var());
-                return self.assign_extra(*id, Type::Nullable { child: v.into() }, false);
+                // let v = Type::TypeVar(self.fresh_ty_var());
+                // return self.assign_extra(*id, Type::Nullable { child: v.into() }, false);
                 return self.assign_extra(*id, Type::Nil, false);
             }
             ast::Expr::Regex(ast::RegexExpr { id, str }) => {

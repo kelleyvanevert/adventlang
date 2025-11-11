@@ -26,7 +26,20 @@ a += 10
 
 
 // ======
-// uncertain return
+// uncertain return; should be ?int, currently can't unify int and ?nil
+// ok
+// skip
+// ======
+
+fn fun() {
+  if true {
+    return 42
+  }
+}
+
+
+// ======
+// uncertain return; should be ?int, currently can't unify int and nil
 // ok
 // skip
 // ======
@@ -38,8 +51,6 @@ fn fun() {
 
   nil
 }
-
-let a: fn() -> ?int = fun
 
 
 // ======
