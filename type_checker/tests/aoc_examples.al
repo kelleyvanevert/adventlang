@@ -33,11 +33,10 @@ fn bonus(input: str) {
     let digits = range(0, line :len)
       :filter_map |i| {
         nums :find_map |t| {
-          // if line :slice i :starts_with t[0] { // TODO: indexing tuples
-          //   t[1]
-          // }
-          "3"
-        } :unwrap
+          if line :slice i :starts_with (t :fst) { // TODO: indexing tuples
+            t :snd // TODO: indexing tuples
+          }
+        } :unwrap :unwrap
       }
 
     int(digits[0] + digits[-1])
@@ -140,15 +139,14 @@ fn solve(input) {
   for let (y, line) in schematic:enumerate {
     let x = 0
     while x < line:len {
-      // // TODO if-let-expr
-      // if let some m = line :slice x :match /^[0-9]+/ {
-      //   if should_include(y, x, m[0]:len) {
-      //     total = total + int(m[0])
-      //   }
-      //   x += m[0]:len
-      // } else {
-      //   x += 1
-      // }
+      if let m = line :slice x :match /^[0-9]+/ {
+        if should_include(y, x, m[0]:len) {
+          total = total + int(m[0])
+        }
+        x += m[0]:len
+      } else {
+        x += 1
+      }
     }
   }
 

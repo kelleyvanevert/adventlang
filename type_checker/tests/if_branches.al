@@ -50,3 +50,16 @@ let res = if true {
 } else {
     3
 }
+
+
+// ======
+// ok
+// ======
+
+fn bla() {
+  if true {
+    42
+  }
+}
+
+let r: ?int = bla()

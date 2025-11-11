@@ -1723,7 +1723,16 @@ impl TypeCheckerCtx {
                     els = Some((expr.id(), self.infer_block(&mut env.clone(), block, true)?));
                 }
 
-                let mut ty = Type::Nil;
+                let mut ty = if use_result {
+                    if els.is_some() {
+                        then_ty.clone()
+                    } else {
+                        then_ty.clone().nullable()
+                    }
+                } else {
+                    Type::Nil
+                };
+
                 if let Some((node_id, (t, else_returns))) = els {
                     if use_result {
                         ty = t.clone();
@@ -1755,7 +1764,16 @@ impl TypeCheckerCtx {
                     els = Some((expr.id(), self.infer_block(&mut env.clone(), block, true)?));
                 }
 
-                let mut ty = Type::Nil;
+                let mut ty = if use_result {
+                    if els.is_some() {
+                        then_ty.clone()
+                    } else {
+                        then_ty.clone().nullable()
+                    }
+                } else {
+                    Type::Nil
+                };
+
                 if let Some((node_id, (t, else_returns))) = els {
                     if use_result {
                         ty = t.clone();

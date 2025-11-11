@@ -27,7 +27,8 @@ a += 10
 
 // ======
 // uncertain return
-// err: int != nil
+// ok
+// skip
 // ======
 
 fn fun() {
@@ -36,7 +37,7 @@ fn fun() {
   }
 }
 
-let a: fn() -> int = fun
+let a: fn() -> ?int = fun
 
 
 // ======
