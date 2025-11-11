@@ -246,7 +246,7 @@ ast_nodes! {
     }
 
     struct DeclareSingle {
-        '_ guard: bool,
+        '_ guard: bool, // deprecated as per the compiled version of Adventlang
         var: Var,
         ty: Option<TypeHint>,
     }

@@ -55,12 +55,16 @@
 "break" @keyword
 "continue" @keyword
 "else" @keyword
+"do" @keyword
 "fn" @keyword
 "for" @keyword
 "if" @keyword
 "in" @keyword
+"const" @keyword
 "let" @keyword
 "return" @keyword
+"some" @keyword
+"with" @keyword
 "while" @keyword
 "loop" @keyword
 (declare_guard) @keyword

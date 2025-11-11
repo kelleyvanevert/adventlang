@@ -951,7 +951,12 @@ impl TypeCheckerCtx {
                 let params = params
                     .into_iter()
                     .map(|decl| {
-                        self.infer_declarable(&mut typing_child_env, decl, &mut declare_locals)
+                        self.infer_declarable(
+                            &mut typing_child_env,
+                            decl,
+                            &mut declare_locals,
+                            false,
+                        )
                     })
                     .collect::<Result<Vec<_>, TypeError>>()?;
 
@@ -1053,7 +1058,8 @@ impl TypeCheckerCtx {
             }
             ast::Stmt::Declare(ast::DeclareStmt { id, pattern, expr }) => {
                 let mut declare_locals = FxHashMap::default();
-                let pattern_ty = self.infer_declare_pattern(env, pattern, &mut declare_locals)?;
+                let pattern_ty =
+                    self.infer_declare_pattern(env, pattern, &mut declare_locals, false)?;
 
                 let (_, expr_certainly_returns) = self.check_expr(env, expr, pattern_ty)?;
                 env.add_locals(declare_locals);
@@ -1170,7 +1176,7 @@ impl TypeCheckerCtx {
         env: &mut Env,
         pattern: &ast::DeclarePattern,
         declare_locals: &mut FxHashMap<String, Type>,
-        // allow_guard
+        if_let_guarded: bool,
     ) -> Result<Type, TypeError> {
         match pattern {
             ast::DeclarePattern::Single(ast::DeclareSingle { id, guard, var, ty }) => {
@@ -1205,7 +1211,7 @@ impl TypeCheckerCtx {
                 let ty = Type::List(element_ty.clone().into());
 
                 for el in elements {
-                    let decl_ty = self.infer_declarable(env, el, declare_locals)?;
+                    let decl_ty = self.infer_declarable(env, el, declare_locals, if_let_guarded)?;
                     self.add_constraint(Constraint::TypeEqual(
                         el.id(),
                         decl_ty,
@@ -1247,7 +1253,7 @@ impl TypeCheckerCtx {
                 let ty = Type::Tuple(element_types.clone());
 
                 for (i, el) in elements.iter().enumerate() {
-                    let decl_ty = self.infer_declarable(env, el, declare_locals)?;
+                    let decl_ty = self.infer_declarable(env, el, declare_locals, if_let_guarded)?;
                     self.add_constraint(Constraint::TypeEqual(
                         el.id(),
                         decl_ty,
@@ -1298,6 +1304,7 @@ impl TypeCheckerCtx {
         env: &mut Env,
         declarable: &ast::Declarable,
         declare_locals: &mut FxHashMap<String, Type>,
+        if_let_guarded: bool,
     ) -> Result<Type, TypeError> {
         let ast::Declarable {
             id,
@@ -1305,7 +1312,8 @@ impl TypeCheckerCtx {
             fallback,
         } = declarable;
 
-        let pattern_ty = self.infer_declare_pattern(env, pattern, declare_locals)?;
+        let pattern_ty =
+            self.infer_declare_pattern(env, pattern, declare_locals, if_let_guarded)?;
 
         if let Some(expr) = fallback {
             self.check_expr(env, expr, pattern_ty.clone())?;
@@ -1368,11 +1376,49 @@ impl TypeCheckerCtx {
 
                 return self.assign_extra(*id, ty, false);
             }
-            ast::Expr::Unary(ast::UnaryExpr { id, op, expr }) => {
-                let (expr_ty, cr) = self.infer_expr(env, expr, true)?;
+            ast::Expr::Unary(ast::UnaryExpr { id, op, expr }) if op.as_str() == "some" => {
+                let (expr_ty, certainly_returns) = self.infer_expr(env, expr, true)?;
 
-                // TODO implement operator overloading
-                return self.assign_extra(*id, expr_ty.apply_unary_op(&op), cr);
+                return self.assign_extra(*id, expr_ty.nullable(), certainly_returns);
+            }
+            ast::Expr::Unary(ast::UnaryExpr { id, op, expr }) => {
+                let (expr_ty, certainly_returns) = self.infer_expr(env, expr, true)?;
+
+                let res_ty = Type::TypeVar(self.fresh_ty_var());
+
+                match op.as_str() {
+                    "&&" | "||" => {
+                        self.add_constraint(Constraint::ChooseOverload {
+                            last_checked: 0,
+                            overload_set: OverloadSet {
+                                node_id: *id,
+                                nodes: vec![expr.id(), *id],
+                                types: vec![expr_ty.clone(), res_ty.clone()],
+                                overloads: vec![
+                                    //
+                                    vec![Type::Bool, Type::Bool],
+                                ],
+                            },
+                        })?;
+                    }
+                    "-" => {
+                        self.add_constraint(Constraint::ChooseOverload {
+                            last_checked: 0,
+                            overload_set: OverloadSet {
+                                node_id: *id,
+                                nodes: vec![expr.id(), *id],
+                                types: vec![expr_ty.clone(), res_ty.clone()],
+                                overloads: vec![
+                                    vec![Type::Int, Type::Int],
+                                    vec![Type::Float, Type::Float],
+                                ],
+                            },
+                        })?;
+                    }
+                    _ => todo!("binary operator {op}"),
+                }
+
+                return self.assign_extra(*id, res_ty, certainly_returns);
             }
             ast::Expr::Binary(ast::BinaryExpr {
                 id,
@@ -1623,7 +1669,7 @@ impl TypeCheckerCtx {
                 let mut declare_locals = FxHashMap::default();
                 let params = params
                     .into_iter()
-                    .map(|decl| self.infer_declarable(env, decl, &mut declare_locals))
+                    .map(|decl| self.infer_declarable(env, decl, &mut declare_locals, false))
                     .collect::<Result<Vec<_>, TypeError>>()?;
 
                 let mut child_env = env.new_child_fn_scope(*id, declare_locals);
@@ -1659,29 +1705,36 @@ impl TypeCheckerCtx {
                 else_if,
                 else_then,
             }) => {
-                // let pattern = self.infer_declare_pattern(env, pattern)?;
-                // let expr = self.check_expr(env, *expr, pattern.ty())?;
+                let mut declare_locals = FxHashMap::default();
+                let pattern_ty =
+                    self.infer_declare_pattern(env, pattern, &mut declare_locals, true)?;
 
-                // let mut then_branch_env = env.clone();
-                // let then = self.infer_block(&mut then_branch_env, then, true)?;
+                let (expr_ty, mut certainly_returns) = self.check_expr(env, expr, pattern_ty)?;
 
-                // let mut else_branch_env = env.clone();
-                // let els = els
-                //     .map(|els| self.infer_block(&mut else_branch_env, els, true))
-                //     .transpose()?;
+                let mut then_child_env = env.clone();
+                then_child_env.add_locals(declare_locals);
+                let (then_ty, then_returns) =
+                    self.infer_block(&mut then_child_env, then, use_result)?;
 
-                // let ty = match (use_result, &els) {
-                //     (false, _) => Type::Nil,
-                //     (true, None) => Type::Nil,
-                //     (true, Some(els)) => {
-                //         self.constraints.push(Constraint::TypeEqual(els.id(), then.ty(), els.ty()));
-                //         els.ty()
-                //     }
-                // };
+                let mut els = None;
+                if let Some(expr) = else_if {
+                    els = Some((expr.id(), self.infer_expr(&mut env.clone(), expr, true)?));
+                } else if let Some(block) = else_then {
+                    els = Some((expr.id(), self.infer_block(&mut env.clone(), block, true)?));
+                }
 
-                // self.assign(*id, ty)
+                let mut ty = Type::Nil;
+                if let Some((node_id, (t, else_returns))) = els {
+                    if use_result {
+                        ty = t.clone();
+                        self.add_constraint(Constraint::TypeEqual(node_id, then_ty.clone(), t))?;
+                    }
+                    if then_returns && else_returns {
+                        certainly_returns = true;
+                    }
+                }
 
-                todo!()
+                return self.assign_extra(*id, ty, certainly_returns);
             }
             ast::Expr::If(ast::IfExpr {
                 id,
@@ -1803,7 +1856,8 @@ impl TypeCheckerCtx {
                     .unwrap_or_else(|| self.fresh_loop_label());
 
                 let mut declare_locals = FxHashMap::default();
-                let pattern_ty = self.infer_declare_pattern(env, pattern, &mut declare_locals)?;
+                let pattern_ty =
+                    self.infer_declare_pattern(env, pattern, &mut declare_locals, false)?;
 
                 self.check_expr(env, range, Type::List(pattern_ty.into()))?;
 
@@ -1905,7 +1959,7 @@ impl TypeCheckerCtx {
 
                 for (param, sk_param) in params.iter().zip(skolemized_params) {
                     // TODO: check declarable, instead of infer + unify
-                    let param_ty = self.infer_declarable(env, param, &mut declare_locals)?;
+                    let param_ty = self.infer_declarable(env, param, &mut declare_locals, false)?;
                     self.add_constraint(Constraint::TypeEqual(param.id(), param_ty, sk_param))?;
                 }
 
@@ -2259,6 +2313,7 @@ mod test {
     run_test_cases_in_file!(operator_overloading);
     run_test_cases_in_file!(generics);
     run_test_cases_in_file!(function_calls);
+    run_test_cases_in_file!(nullability);
     run_test_cases_in_file!(aoc_examples);
 
     // #[test]

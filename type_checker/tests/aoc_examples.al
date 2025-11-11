@@ -16,34 +16,7 @@ const nums = [
   ("0", "0"),
   ("1", "1"),
   ("2", "2"),
-  ("3", "3"),
-  ("4", "4"),
-  ("5", "5"),
-  ("6", "6"),
-  ("7", "7"),
-  ("8", "8"),
-  ("9", "9"),
-  ("zero", "0"),
-  ("one", "1"),
-  ("two", "2"),
-  ("three", "3"),
-  ("four", "4"),
-  ("five", "5"),
-  ("six", "6"),
-  ("seven", "7"),
-  ("eight", "8"),
-  ("nine", "9"),
-  ("ten", "0"),
-  ("eleven", "1"),
-  ("twelve", "2"),
-  ("thirteen", "3"),
-  ("fourteen", "4"),
-  ("fifteen", "5"),
-  ("sixteen", "6"),
-  ("seventeen", "7"),
-  ("eighteen", "8"),
-  ("nineteen", "9"),
-  ("twenty", "0"),
+  // [...]
 ]
 
 fn solve(input) {
@@ -64,7 +37,7 @@ fn bonus(input: str) {
           //   t[1]
           // }
           "3"
-        }
+        } :unwrap
       }
 
     int(digits[0] + digits[-1])
@@ -109,7 +82,7 @@ fn solve(input, red, green, blue) {
           || color == "blue" && num > blue
         }
 
-      if invalid :bool { // TODO remove necessity for explicit conversions
+      if invalid :is_some {
         0
       } else {
         id
@@ -147,17 +120,17 @@ fn solve(input) {
 
   let should_include = |y: int, x: int, l: int| {
     // check previous row
-    if y > 0 && schematic[y - 1] :slice (max(x-1, 0), x+l+1) :match /[-!@^&*#+%$=\/]/ :bool {
+    if y > 0 && schematic[y - 1] :slice (max(x-1, 0), x+l+1) :matches /[-!@^&*#+%$=\/]/ {
       return true
     }
 
     // check current row
-    if schematic[y] :slice (max(x-1, 0), x+l+1) :match /[-!@^&*#+%$=\/]/ :bool {
+    if schematic[y] :slice (max(x-1, 0), x+l+1) :matches /[-!@^&*#+%$=\/]/ {
       return true
     }
 
     // check next row
-    if y < schematic:len - 1 && schematic[y + 1] :slice (max(x-1, 0), x+l+1) :match /[-!@^&*#+%$=\/]/ :bool {
+    if y < schematic:len - 1 && schematic[y + 1] :slice (max(x-1, 0), x+l+1) :matches /[-!@^&*#+%$=\/]/ {
       return true
     }
 
@@ -243,7 +216,7 @@ assert(bonus(example_input) == 30)
 // ======
 // 2023 day 5
 // TODO:
-// - [ ] nullable types
+// - [ ] tuple indexing
 //
 // ok
 // ======
@@ -342,24 +315,24 @@ fn bonus(input: str) {
   let seeds = seeds :replace ("seeds: ", "") :split " " :map int
   let mappers = rest :map construct_smart_mapper
 
-  let loc = nil
+  let loc = MAX_INT
 
   for let [seed, num] in seeds :chunks 2 {
-    // print("seed {seed}")
+    print("seed {seed}")
     let end = seed + num
     while seed < end {
-      // let n = seed
-      // let skip = nil // TODO nullable types
-      // for let m in mappers {
-      //   let t = m(n)
-      //   // n = t[0] // TODO tuple indexing
-      //   n = t :fst
-      //   // skip = t[1] :min skip // TODO tuple indexing
-      //   skip = t :snd :min skip
-      // }
+      let n = seed
+      let skip = MAX_INT
+      for let m in mappers {
+        let t = m(n)
+        // n = t[0] // TODO tuple indexing
+        n = t :fst
+        // skip = t[1] :min skip // TODO tuple indexing
+        skip = t :snd :min skip
+      }
 
-      // loc = loc :min n
-      // seed += skip
+      loc = loc :min n
+      seed += skip
     }
   }
 
@@ -367,4 +340,4 @@ fn bonus(input: str) {
 }
 
 assert(solve(example_input) == 35)
-// assert(bonus(example_input) == 46) // TODO nullable types
+assert(bonus(example_input) == 46)
