@@ -26,9 +26,8 @@ a += 10
 
 
 // ======
-// uncertain return; should be ?int, currently can't unify int and ?nil
+// uncertain return
 // ok
-// skip
 // ======
 
 fn fun() {
@@ -49,7 +48,7 @@ fn fun() {
     return 42
   }
 
-  nil
+  nil // doesn't work because `nil` is the `ret_ty`
 }
 
 

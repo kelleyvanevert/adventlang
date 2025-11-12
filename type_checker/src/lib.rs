@@ -164,6 +164,7 @@ impl TypeErrorKind {
 #[derive(Debug, Clone)]
 enum Constraint {
     TypeEqual(usize, Type, Type),
+    ReturnTyHack(usize, usize, Type, Type, Type),
     CanInstantiateTo(usize, Type, Type),
     ChooseOverload {
         last_checked: usize,
@@ -304,6 +305,18 @@ impl TypeCheckerCtx {
                     });
                 }
             }
+
+            // this is, well, a hack
+            Constraint::ReturnTyHack(last_checked, node_id, a, b, ret_ty) => {
+                let (success, new_constraints) =
+                    TypeCheckerCtx::solve_fn_return_ty_hack(*node_id, a, b, ret_ty)?;
+
+                if success {
+                    self.constraints.extend_from_slice(&new_constraints);
+                } else {
+                    self.constraints.push(constraint);
+                }
+            }
         }
 
         Ok(())
@@ -318,28 +331,33 @@ impl TypeCheckerCtx {
         // println!("num constraints to check at end: {}", todo.len());
 
         while let Some(constraint) = todo.pop_front() {
-            match constraint {
+            match &constraint {
                 Constraint::TypeEqual(node_id, left, right) => {
-                    unreachable!("type equality constraints should have been dealt with already");
-                    // self.check_ty_equal(left.clone(), right.clone())
-                    //     .map_err(|kind| TypeError { node_id, kind })?;
+                    // unreachable!("type equality constraints should have been dealt with already");
+                    // ^^ not any more, now that I added the "return-ty-hack-constraint"
+
+                    self.check_ty_equal(left.clone(), right.clone())
+                        .map_err(|kind| TypeError {
+                            node_id: *node_id,
+                            kind,
+                        })?;
                 }
                 Constraint::CanInstantiateTo(node_id, scheme, concrete) => {
                     match self.normalize_ty(scheme.clone()) {
                         Type::TypeVar(v) => {
                             // try again later, when it has become a fn type
-                            todo.push_back(Constraint::CanInstantiateTo(node_id, scheme, concrete));
+                            todo.push_back(constraint);
                         }
                         Type::Fn(fn_type) => {
                             todo.push_front(Constraint::TypeEqual(
-                                node_id,
+                                *node_id,
                                 Type::Fn(self.instantiate_fn_ty(fn_type)),
-                                concrete,
+                                concrete.clone(),
                             ));
                         }
                         other => {
                             return Err(TypeError {
-                                node_id,
+                                node_id: *node_id,
                                 kind: TypeErrorKind::NotCallable(other),
                             });
                         }
@@ -351,7 +369,7 @@ impl TypeCheckerCtx {
                 } => {
                     if !self.select_overload(overload_set.clone())? {
                         // if no progress was made, then the overload can't be chosen
-                        if last_checked >= self.progress {
+                        if *last_checked >= self.progress {
                             return Err(TypeError {
                                 node_id: overload_set.node_id,
                                 kind: TypeErrorKind::NoOverload,
@@ -361,14 +379,128 @@ impl TypeCheckerCtx {
                         // try again later, when more concrete information is available
                         todo.push_back(Constraint::ChooseOverload {
                             last_checked: self.progress,
-                            overload_set,
+                            overload_set: overload_set.clone(),
                         });
+                    }
+                }
+
+                // this is, well, a hack
+                Constraint::ReturnTyHack(last_checked, node_id, a, b, ret_ty) => {
+                    let (success, new_constraints) =
+                        TypeCheckerCtx::solve_fn_return_ty_hack(*node_id, a, b, ret_ty)?;
+
+                    // if no progress was made, then the overload can't be chosen
+                    if *last_checked >= self.progress {
+                        return Err(TypeError {
+                            node_id: *node_id,
+                            kind: TypeErrorKind::NotEqual(a.clone(), b.clone()),
+                        });
+                    }
+
+                    if success {
+                        for c in new_constraints {
+                            todo.push_back(c);
+                        }
+                    } else {
+                        // try again later, when more concrete information is available
+                        todo.push_back(Constraint::ReturnTyHack(
+                            self.progress,
+                            *node_id,
+                            a.clone(),
+                            b.clone(),
+                            ret_ty.clone(),
+                        ));
                     }
                 }
             }
         }
 
         Ok(())
+    }
+
+    fn solve_fn_return_ty_hack(
+        node_id: usize,
+        a: &Type,
+        b: &Type,
+        ret_ty: &Type,
+    ) -> Result<(bool, Vec<Constraint>), TypeError> {
+        match (a, b) {
+            (Type::TypeVar(x), other) | (other, Type::TypeVar(x)) => {
+                // resolve this later
+                return Ok((false, vec![]));
+            }
+            (Type::Nil, Type::Nil) => {
+                // resolve this now
+                return Ok((
+                    true,
+                    vec![Constraint::TypeEqual(node_id, ret_ty.clone(), Type::Nil)],
+                ));
+            }
+            (Type::Nil, Type::Nullable { child }) | (Type::Nullable { child }, Type::Nil) => {
+                // resolve this now
+                return Ok((
+                    true,
+                    vec![Constraint::TypeEqual(
+                        node_id,
+                        ret_ty.clone(),
+                        Type::Nullable {
+                            child: child.clone(),
+                        },
+                    )],
+                ));
+            }
+            (Type::Nullable { child: child_a }, Type::Nullable { child: child_b }) => {
+                // resolve this now
+                return Ok((
+                    true,
+                    vec![
+                        Constraint::TypeEqual(
+                            node_id,
+                            child_a.as_ref().clone(),
+                            child_b.as_ref().clone(),
+                        ),
+                        Constraint::TypeEqual(
+                            node_id,
+                            ret_ty.clone(),
+                            Type::Nullable {
+                                child: child_a.clone(),
+                            },
+                        ),
+                    ],
+                ));
+            }
+            (other, Type::Nullable { child }) | (Type::Nullable { child }, other) => {
+                // resolve this now
+                return Ok((
+                    true,
+                    vec![Constraint::TypeEqual(
+                        node_id,
+                        ret_ty.clone(),
+                        Type::Nullable {
+                            child: child.clone(),
+                        },
+                    )],
+                ));
+            }
+            (Type::Nil, other) | (other, Type::Nil) => {
+                // resolve this now
+                return Err(TypeError {
+                    node_id,
+                    kind: TypeErrorKind::NotEqual(Type::Nil, other.clone()),
+                });
+            }
+
+            // now: both sides are not nil, and also not nullable, and not vars
+            _ => {
+                return Ok((
+                    true,
+                    vec![
+                        Constraint::TypeEqual(node_id, a.clone(), b.clone()),
+                        Constraint::TypeEqual(node_id, b.clone(), ret_ty.clone()),
+                    ],
+                ));
+            }
+        }
     }
 
     fn instantiate_fn_ty(
@@ -850,27 +982,27 @@ impl TypeCheckerCtx {
                 ty = stmt_ty.clone();
             }
 
-            if is_last && as_function_body && !certain_return {
-                // treat this as an implicit return
+            // if is_last && as_function_body && !certain_return {
+            //     // treat this as an implicit return
 
-                let fn_node_id = env.curr_fn.expect("function block must be inside fn scope");
+            //     let fn_node_id = env.curr_fn.expect("function block must be inside fn scope");
 
-                // Enforce the function return value to have the given type
-                if let Some(prev_ty) = self.fn_return_ty.insert(fn_node_id, stmt_ty.clone()) {
-                    // If the function return value already has been typed, add a type constraint
-                    self.add_constraint(Constraint::TypeEqual(stmt.id(), prev_ty, stmt_ty))?;
-                }
-            }
+            //     // Enforce the function return value to have the given type
+            //     if let Some(prev_ty) = self.fn_return_ty.insert(fn_node_id, stmt_ty.clone()) {
+            //         // If the function return value already has been typed, add a type constraint
+            //         self.add_constraint(Constraint::TypeEqual(stmt.id(), prev_ty, stmt_ty))?;
+            //     }
+            // }
         }
 
-        // edge case: empty body fns
-        if as_function_body && num_stmts == 0 {
-            let fn_node_id = env.curr_fn.expect("function block must be inside fn scope");
-            if let Some(prev_ty) = self.fn_return_ty.insert(fn_node_id, Type::Nil) {
-                // If the function return value already has been typed, add a type constraint
-                self.add_constraint(Constraint::TypeEqual(block.id(), prev_ty, Type::Nil))?;
-            }
-        }
+        // // edge case: empty body fns
+        // if as_function_body && num_stmts == 0 && !certain_return {
+        //     let fn_node_id = env.curr_fn.expect("function block must be inside fn scope");
+        //     if let Some(prev_ty) = self.fn_return_ty.insert(fn_node_id, Type::Nil) {
+        //         // If the function return value already has been typed, add a type constraint
+        //         self.add_constraint(Constraint::TypeEqual(block.id(), prev_ty, Type::Nil))?;
+        //     }
+        // }
 
         self.assign_extra(block.id(), ty, certain_return)
     }
@@ -1004,15 +1136,45 @@ impl TypeCheckerCtx {
                     ret: ret_ty.clone().into(),
                 });
 
-                let Some(return_stmt_ty) = self.fn_return_ty.get(id).cloned() else {
-                    panic!("fn_return_ty not set");
-                };
+                {
+                    // ret_ty
+                    // body_ty + certain_return
+                    // fn_return_ty
+                    //
+                    // if certain_return {
+                    //   ret_ty = fn_return_ty
+                    // } else if fn_return_ty {
+                    //   ret_ty = fn_return_ty = body_ty  <-  this is tricky w/ nulls
+                    // } else {
+                    //   ret_ty = body_ty
+                    // }
 
-                self.add_constraint(Constraint::TypeEqual(
-                    body.id(),
-                    ret_ty.clone(),
-                    return_stmt_ty,
-                ))?;
+                    if certain_return {
+                        self.add_constraint(Constraint::TypeEqual(
+                            body.id(),
+                            ret_ty.clone(),
+                            self.fn_return_ty
+                                .get(id)
+                                .cloned()
+                                .expect("fn_return_ty not set"),
+                        ))?;
+                    } else if let Some(return_expr_ty) = self.fn_return_ty.get(id).cloned() {
+                        // unify return_expr_ty and body_ty, then unify result with res_ty
+                        self.add_constraint(Constraint::ReturnTyHack(
+                            0,
+                            body.id(),
+                            return_expr_ty,
+                            body_ty,
+                            ret_ty,
+                        ))?;
+                    } else {
+                        self.add_constraint(Constraint::TypeEqual(
+                            body.id(),
+                            ret_ty.clone(),
+                            body_ty,
+                        ))?;
+                    }
+                }
 
                 self.add_constraint(Constraint::TypeEqual(*id, ty.clone(), placeholder_ty))?;
 
@@ -1706,15 +1868,44 @@ impl TypeCheckerCtx {
 
                 let ret_ty = Type::TypeVar(self.fresh_ty_var());
 
-                let Some(return_stmt_ty) = self.fn_return_ty.get(id).cloned() else {
-                    panic!("fn_return_ty not set");
-                };
+                {
+                    // ret_ty
+                    // body_ty + certain_return
+                    // fn_return_ty
+                    //
+                    // if certain_return {
+                    //   ret_ty = fn_return_ty
+                    // } else {
+                    //   fn_return_ty = body_ty
+                    //   ret_ty = nullable<fn_return_ty> = nullable<body_ty>
+                    // }
 
-                self.add_constraint(Constraint::TypeEqual(
-                    body.id(),
-                    ret_ty.clone(),
-                    return_stmt_ty,
-                ))?;
+                    if certain_return {
+                        self.add_constraint(Constraint::TypeEqual(
+                            body.id(),
+                            ret_ty.clone(),
+                            self.fn_return_ty
+                                .get(id)
+                                .cloned()
+                                .expect("fn_return_ty not set"),
+                        ))?;
+                    } else if let Some(return_expr_ty) = self.fn_return_ty.get(id).cloned() {
+                        // unify return_expr_ty and body_ty, then unify result with res_ty
+                        self.add_constraint(Constraint::ReturnTyHack(
+                            0,
+                            body.id(),
+                            return_expr_ty,
+                            body_ty,
+                            ret_ty.clone(),
+                        ))?;
+                    } else {
+                        self.add_constraint(Constraint::TypeEqual(
+                            body.id(),
+                            ret_ty.clone(),
+                            body_ty,
+                        ))?;
+                    }
+                }
 
                 let ty = Type::Fn(FnType {
                     generics: vec![],
@@ -2019,15 +2210,56 @@ impl TypeCheckerCtx {
                 let (body_ty, certain_return) =
                     self.infer_block(&mut child_env, body, true, true)?;
 
-                let Some(return_stmt_ty) = self.fn_return_ty.get(id).cloned() else {
-                    panic!("fn_return_ty not set");
-                };
+                let ret_ty = skolemized_ret.as_ref().clone();
 
-                self.add_constraint(Constraint::TypeEqual(
-                    body.id(),
-                    skolemized_ret.as_ref().clone(),
-                    return_stmt_ty,
-                ))?;
+                {
+                    // ret_ty
+                    // body_ty + certain_return
+                    // fn_return_ty
+                    //
+                    // if certain_return {
+                    //   ret_ty = fn_return_ty
+                    // } else {
+                    //   fn_return_ty = body_ty
+                    //   ret_ty = nullable<fn_return_ty> = nullable<body_ty>
+                    // }
+
+                    if certain_return {
+                        self.add_constraint(Constraint::TypeEqual(
+                            body.id(),
+                            ret_ty.clone(),
+                            self.fn_return_ty
+                                .get(id)
+                                .cloned()
+                                .expect("fn_return_ty not set"),
+                        ))?;
+                    } else if let Some(return_expr_ty) = self.fn_return_ty.get(id).cloned() {
+                        // unify return_expr_ty and body_ty, then unify result with res_ty
+                        self.add_constraint(Constraint::ReturnTyHack(
+                            0,
+                            body.id(),
+                            return_expr_ty,
+                            body_ty,
+                            ret_ty,
+                        ))?;
+                    } else {
+                        self.add_constraint(Constraint::TypeEqual(
+                            body.id(),
+                            ret_ty.clone(),
+                            body_ty,
+                        ))?;
+                    }
+                }
+
+                // let Some(return_stmt_ty) = self.fn_return_ty.get(id).cloned() else {
+                //     panic!("fn_return_ty not set");
+                // };
+
+                // self.add_constraint(Constraint::TypeEqual(
+                //     body.id(),
+                //     skolemized_ret.as_ref().clone(),
+                //     return_stmt_ty,
+                // ))?;
 
                 return self.assign_extra(*id, Type::Fn(fn_ty.clone()), false);
             }
