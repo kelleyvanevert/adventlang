@@ -38,9 +38,9 @@ fn fun() {
 
 
 // ======
-// uncertain return; should be ?int, currently can't unify int and nil
+// uncertain return
+// -- interesting: this works if `nil` is typed as `nullable<t>`
 // ok
-// skip
 // ======
 
 fn fun() {
