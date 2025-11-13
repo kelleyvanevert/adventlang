@@ -19,18 +19,18 @@ pub mod types;
 
 // TODO:
 // - [ ] named and optional params/args
-// - [ ] underspecified types ("fn", "dict")
 // - [ ] dicts + members
-// - [ ] coalescing + nullability
+// - [ ] coalescing
 // - [ ] if-let, while, while-let, do, do-while, for
 // - [ ] choose either `do-expr` or `block-expr`, not both
 // - [ ] indexing tuples
-// - [ ] allowing non-bools in if conditions (-> automatic conversions)
+// - [ ] underspecified types ("fn", "dict")
 //
 // DOING:
 // - [..] overloading + unary/binary operators ("can't apply op + on typevar")
 //
 // DONE:
+// - [x] nullability
 // - [x] certain return analysis
 // - [x] generics
 // - [x] unification
@@ -39,6 +39,9 @@ pub mod types;
 // - [x] pretty error messages around source code
 // - [x] tests in separate test case files
 // - [x] 80%
+//
+// WON'T DO
+// - allowing non-bools in if conditions (-> automatic conversions)
 
 #[derive(Debug, Clone)]
 struct Env {
