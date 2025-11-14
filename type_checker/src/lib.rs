@@ -529,7 +529,7 @@ impl TypeCheckerCtx {
         }
     }
 
-    fn skolemize_fn_ty(
+    fn instantiate_fn_ty_skolemized(
         &mut self,
         FnType {
             generics,
@@ -2199,7 +2199,7 @@ impl TypeCheckerCtx {
                     params: skolemized_params,
                     ret: skolemized_ret,
                     ..
-                } = self.skolemize_fn_ty(fn_ty.clone());
+                } = self.instantiate_fn_ty_skolemized(fn_ty.clone());
 
                 let mut declare_locals = FxHashMap::default();
 
@@ -2269,7 +2269,7 @@ impl TypeCheckerCtx {
 
             // (ast::Expr::Var(ast::VarExpr { id, var }), Type::Fn(fn_ty)) => {
             //     let expr_ty = self.infer_expr(env, expr, true)?;
-            //     let sk_check_ty = Type::Fn(self.skolemize_fn_ty(fn_ty.clone()));
+            //     let sk_check_ty = Type::Fn(self.instantiate_fn_ty_skolemized(fn_ty.clone()));
 
             //     self.add_constraint(Constraint::TypeEqual(expr.id(), expr_ty, sk_check_ty))?;
 
