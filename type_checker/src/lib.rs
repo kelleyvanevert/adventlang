@@ -63,6 +63,34 @@ impl Env {
         }
     }
 
+    fn add_local(&mut self, name: String, ty: Type) {
+        self.locals.insert(name, ty);
+    }
+
+    fn add_named_fn_local(
+        &mut self,
+        node_id: usize,
+        name: String,
+        def: FnType,
+    ) -> Result<(), TypeError> {
+        if let Some(ty) = self.locals.get_mut(&name) {
+            match ty {
+                Type::NamedFn(defs) => defs.push(def),
+                _ => {
+                    return Err(TypeError {
+                        node_id,
+                        kind: TypeErrorKind::NamedFnShadow(name, ty.clone()),
+                    });
+                }
+            }
+        } else {
+            // self.locals.insert(name, Type::NamedFn(vec![def]));
+            self.locals.insert(name, Type::Fn(def));
+        }
+
+        Ok(())
+    }
+
     fn add_locals(&mut self, new_locals: FxHashMap<String, Type>) {
         self.locals.extend(new_locals);
     }
@@ -130,6 +158,8 @@ pub enum TypeErrorKind {
     BreakOutsideLoop,
     #[error("use of return statement outside function body")]
     ReturnOutsideFn,
+    #[error("named fn shadows local {0} with type {1:?}")]
+    NamedFnShadow(String, Type),
     #[error("local not defined: {0}")]
     UnknownLocal(String),
     #[error("typevar not defined: {0}")]
@@ -157,6 +187,7 @@ impl TypeErrorKind {
             Self::BreakOutsideLoop => {}
             Self::ReturnOutsideFn => {}
             Self::GenericsMismatch => {}
+            Self::NamedFnShadow(_, _) => {}
             Self::ArgsMismatch(_, _) => {}
             Self::UnknownLocal(_) => {}
             Self::UnknownTypeVar(_) => {}
@@ -707,21 +738,6 @@ impl TypeCheckerCtx {
                     ret: b_ret,
                 }),
             ) => {
-                // fn map<T>(arr: [T]) -> int { ... }
-
-                // forward declaration:  fn<A>(B) -> D
-                // infer named fn item:  fn<T>([T]) -> int
-
-                // unify:
-                // A = T
-                // B = [C]
-                // C = T
-                // D = int
-
-                // ====
-
-                // let g: (fn<t>(t) -> t) = |x| { x }
-
                 if a_generics.len() != b_generics.len() {
                     println!(
                         "A: {:?}",
@@ -1015,7 +1031,7 @@ impl TypeCheckerCtx {
             ast::Item::ConstItem(ast::ConstItem { id, name, expr }) => {
                 let placeholder_ty = Type::TypeVar(self.fresh_ty_var());
 
-                env.locals.insert(name.str.clone(), placeholder_ty.clone());
+                env.add_local(name.str.clone(), placeholder_ty.clone());
                 Ok(placeholder_ty)
             }
             ast::Item::NamedFn(ast::NamedFnItem {
@@ -1060,14 +1076,14 @@ impl TypeCheckerCtx {
 
                 let ret = Type::TypeVar(self.fresh_ty_var());
 
-                let placeholder_ty = Type::Fn(FnType {
+                let fn_ty = FnType {
                     generics,
                     params,
                     ret: ret.into(),
-                });
+                };
 
-                env.locals.insert(name.str.clone(), placeholder_ty.clone());
-                Ok(placeholder_ty)
+                env.add_named_fn_local(*id, name.str.clone(), fn_ty.clone())?;
+                Ok(Type::Fn(fn_ty))
             }
         }
     }
@@ -1580,20 +1596,6 @@ impl TypeCheckerCtx {
                 let res_ty = Type::TypeVar(self.fresh_ty_var());
 
                 match op.as_str() {
-                    "&&" | "||" => {
-                        self.add_constraint(Constraint::ChooseOverload {
-                            last_checked: 0,
-                            overload_set: OverloadSet {
-                                node_id: *id,
-                                nodes: vec![expr.id(), *id],
-                                types: vec![expr_ty.clone(), res_ty.clone()],
-                                overloads: vec![
-                                    //
-                                    vec![Type::Bool, Type::Bool],
-                                ],
-                            },
-                        })?;
-                    }
                     "-" => {
                         self.add_constraint(Constraint::ChooseOverload {
                             last_checked: 0,

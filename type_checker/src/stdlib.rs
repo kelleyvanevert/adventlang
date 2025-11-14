@@ -10,7 +10,6 @@ pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
         replace: fn(str, (str, str)) -> str
         lines: fn(str) -> [str]
         chars: fn(str) -> [str]
-        is_digit: fn(str) -> bool
         int: fn(str) -> int
         filter: fn<A, B>([A], fn(A) -> bool) -> [A]
         map: fn<A, B>([A], fn(A) -> B) -> [B]
@@ -41,9 +40,41 @@ pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
         is_some: fn<A>(?A) -> bool
         unwrap: fn<A>(?A) -> A
         MAX_INT: int
+
+        ==: fn<T>(T, T) -> bool
+        &&: fn(bool, bool) -> bool
+        ||: fn(bool, bool) -> bool
+
+        >: fn(int, int) -> bool
+        >: fn(float, float) -> bool
+        <: fn(int, int) -> bool
+        <: fn(float, float) -> bool
+        <=: fn(int, int) -> bool
+        <=: fn(float, float) -> bool
+        >=: fn(int, int) -> bool
+        >=: fn(float, float) -> bool
+
+        -: fn(int, int) -> int
+        -: fn(int, float) -> float
+        -: fn(float, int) -> float
+        -: fn(float, float) -> float
+
+        -: fn(int) -> int
+        -: fn(float) -> float
+
+        +: fn(int, int) -> int
+        +: fn(int, float) -> float
+        +: fn(float, int) -> float
+        +: fn(float, float) -> float
+
+        +: fn(str, str) -> str
     ";
 
     for line in stdlib.trim().lines() {
+        if line.trim().len() == 0 {
+            continue;
+        }
+
         let (name, hint) = line.trim().split_once(": ").unwrap();
         let hint = hint.split_once("//").map(|t| t.0.trim()).unwrap_or(hint);
 
