@@ -187,7 +187,9 @@ impl TypeErrorKind {
             Self::BreakOutsideLoop => {}
             Self::ReturnOutsideFn => {}
             Self::GenericsMismatch => {}
-            Self::NamedFnShadow(_, _) => {}
+            Self::NamedFnShadow(_, ty) => {
+                ty.substitute(bound, unification_table);
+            }
             Self::ArgsMismatch(_, _) => {}
             Self::UnknownLocal(_) => {}
             Self::UnknownTypeVar(_) => {}
@@ -195,30 +197,49 @@ impl TypeErrorKind {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Constraint {
     TypeEqual(usize, Type, Type),
     ReturnTyHack(usize, usize, Type, Type, Type),
     CanInstantiateTo(usize, Type, Type),
-    ChooseOverload {
-        last_checked: usize,
-        overload_set: OverloadSet,
-    },
+    ChooseOverload(ChooseOverloadConstraint),
 }
 
-/// Supports choosing an overload from a list of FULLY CONCRETE overloads
-#[derive(Debug, Clone)]
-struct OverloadSet {
+impl Constraint {
+    fn to_error(self) -> TypeError {
+        match self {
+            Constraint::TypeEqual(node_id, a, b) => TypeError {
+                node_id,
+                kind: TypeErrorKind::NotEqual(a, b),
+            },
+            Constraint::ChooseOverload(choose) => TypeError {
+                node_id: choose.node_id,
+                kind: TypeErrorKind::NoOverload,
+            },
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ChooseOverloadConstraint {
     node_id: usize,
     nodes: Vec<usize>,
     types: Vec<Type>,
     overloads: Vec<Vec<Type>>,
 }
 
+#[derive(Debug, Clone)]
+enum ConstraintResult {
+    Succeed,
+    ResolveTo(Vec<Constraint>),
+    NeedsMoreInformation,
+}
+
 #[derive(Debug)]
 struct TypeCheckerCtx {
     unification_table: InPlaceUnificationTable<TypeVar>,
-    constraints: Vec<Constraint>,
+    constraints: Vec<(usize, Constraint)>,
     next_loop_id: usize,
     progress: usize,
 
@@ -300,59 +321,21 @@ impl TypeCheckerCtx {
         Ok(())
     }
 
+    /// While walking through the document, add constraints using this method.
+    /// It will immediately try to solve the constraint, and otherwise
+    ///  just push it on the backlog of constraints to solve later.
     fn add_constraint(&mut self, constraint: Constraint) -> Result<(), TypeError> {
-        match &constraint {
-            Constraint::TypeEqual(node_id, left, right) => {
-                self.check_ty_equal(left.clone(), right.clone())
-                    .map_err(|kind| TypeError {
-                        node_id: *node_id,
-                        kind,
-                    })?;
+        match self.solve_constraint(&constraint)? {
+            ConstraintResult::Succeed => {}
+            ConstraintResult::NeedsMoreInformation => {
+                self.constraints.push((self.progress, constraint));
             }
-            Constraint::CanInstantiateTo(node_id, scheme, concrete) => {
-                match self.normalize_ty(scheme.clone()) {
-                    Type::TypeVar(v) => {
-                        // solve later
-                        self.constraints.push(constraint);
-                    }
-                    Type::Fn(fn_type) => {
-                        let ty = Type::Fn(self.instantiate_fn_ty(fn_type));
-                        self.add_constraint(Constraint::TypeEqual(*node_id, ty, concrete.clone()))?;
-                    }
-                    other => {
-                        return Err(TypeError {
-                            node_id: *node_id,
-                            kind: TypeErrorKind::NotCallable(other),
-                        });
-                    }
-                }
-            }
-            Constraint::ChooseOverload {
-                last_checked,
-                overload_set,
-            } => {
-                if !self.select_overload(overload_set.clone())? {
-                    // solve later
-                    self.constraints.push(Constraint::ChooseOverload {
-                        last_checked: 0,
-                        overload_set: overload_set.clone(),
-                    });
-                }
-            }
-
-            // this is, well, a hack
-            Constraint::ReturnTyHack(last_checked, node_id, a, b, ret_ty) => {
-                let (success, new_constraints) =
-                    TypeCheckerCtx::solve_fn_return_ty_hack(*node_id, a, b, ret_ty)?;
-
-                if success {
-                    self.constraints.extend_from_slice(&new_constraints);
-                } else {
-                    self.constraints.push(constraint);
+            ConstraintResult::ResolveTo(resulting_constraints) => {
+                for constraint in resulting_constraints {
+                    self.add_constraint(constraint)?;
                 }
             }
         }
-
         Ok(())
     }
 
@@ -362,88 +345,22 @@ impl TypeCheckerCtx {
         // so that it's initially bigger than `last_progress`
         self.progress = 1;
 
-        // println!("num constraints to check at end: {}", todo.len());
+        println!("num constraints to check at end: {}", todo.len());
 
-        while let Some(constraint) = todo.pop_front() {
-            match &constraint {
-                Constraint::TypeEqual(node_id, left, right) => {
-                    // unreachable!("type equality constraints should have been dealt with already");
-                    // ^^ not any more, now that I added the "return-ty-hack-constraint"
+        while let Some((last_checked, constraint)) = todo.pop_front() {
+            // if no progress was made, then apparently this constraint just can't be solved
+            if last_checked >= self.progress {
+                return Err(constraint.to_error());
+            }
 
-                    self.check_ty_equal(left.clone(), right.clone())
-                        .map_err(|kind| TypeError {
-                            node_id: *node_id,
-                            kind,
-                        })?;
+            match self.solve_constraint(&constraint)? {
+                ConstraintResult::Succeed => {}
+                ConstraintResult::NeedsMoreInformation => {
+                    todo.push_back((self.progress, constraint));
                 }
-                Constraint::CanInstantiateTo(node_id, scheme, concrete) => {
-                    match self.normalize_ty(scheme.clone()) {
-                        Type::TypeVar(v) => {
-                            // try again later, when it has become a fn type
-                            todo.push_back(constraint);
-                        }
-                        Type::Fn(fn_type) => {
-                            todo.push_front(Constraint::TypeEqual(
-                                *node_id,
-                                Type::Fn(self.instantiate_fn_ty(fn_type)),
-                                concrete.clone(),
-                            ));
-                        }
-                        other => {
-                            return Err(TypeError {
-                                node_id: *node_id,
-                                kind: TypeErrorKind::NotCallable(other),
-                            });
-                        }
-                    }
-                }
-                Constraint::ChooseOverload {
-                    last_checked,
-                    overload_set,
-                } => {
-                    if !self.select_overload(overload_set.clone())? {
-                        // if no progress was made, then the overload can't be chosen
-                        if *last_checked >= self.progress {
-                            return Err(TypeError {
-                                node_id: overload_set.node_id,
-                                kind: TypeErrorKind::NoOverload,
-                            });
-                        }
-
-                        // try again later, when more concrete information is available
-                        todo.push_back(Constraint::ChooseOverload {
-                            last_checked: self.progress,
-                            overload_set: overload_set.clone(),
-                        });
-                    }
-                }
-
-                // this is, well, a hack
-                Constraint::ReturnTyHack(last_checked, node_id, a, b, ret_ty) => {
-                    let (success, new_constraints) =
-                        TypeCheckerCtx::solve_fn_return_ty_hack(*node_id, a, b, ret_ty)?;
-
-                    // if no progress was made, then the overload can't be chosen
-                    if *last_checked >= self.progress {
-                        return Err(TypeError {
-                            node_id: *node_id,
-                            kind: TypeErrorKind::NotEqual(a.clone(), b.clone()),
-                        });
-                    }
-
-                    if success {
-                        for c in new_constraints {
-                            todo.push_back(c);
-                        }
-                    } else {
-                        // try again later, when more concrete information is available
-                        todo.push_back(Constraint::ReturnTyHack(
-                            self.progress,
-                            *node_id,
-                            a.clone(),
-                            b.clone(),
-                            ret_ty.clone(),
-                        ));
+                ConstraintResult::ResolveTo(resulting_constraints) => {
+                    for constraint in resulting_constraints {
+                        todo.push_front((0, constraint));
                     }
                 }
             }
@@ -452,69 +369,110 @@ impl TypeCheckerCtx {
         Ok(())
     }
 
+    fn solve_constraint(&mut self, constraint: &Constraint) -> Result<ConstraintResult, TypeError> {
+        match &constraint {
+            Constraint::TypeEqual(node_id, left, right) => {
+                self.check_ty_equal(left.clone(), right.clone())
+                    .map_err(|kind| TypeError {
+                        node_id: *node_id,
+                        kind,
+                    })?;
+
+                Ok(ConstraintResult::Succeed)
+            }
+            Constraint::CanInstantiateTo(node_id, scheme, concrete) => {
+                match self.normalize_ty(scheme.clone()) {
+                    Type::TypeVar(v) => {
+                        // solve later
+                        Ok(ConstraintResult::NeedsMoreInformation)
+                    }
+                    Type::Fn(fn_type) => {
+                        let ty = Type::Fn(self.instantiate_fn_ty(fn_type));
+                        Ok(ConstraintResult::ResolveTo(vec![Constraint::TypeEqual(
+                            *node_id,
+                            ty,
+                            concrete.clone(),
+                        )]))
+                    }
+                    other => {
+                        return Err(TypeError {
+                            node_id: *node_id,
+                            kind: TypeErrorKind::NotCallable(other),
+                        });
+                    }
+                }
+            }
+            Constraint::ChooseOverload(choose) => {
+                if self.select_overload(choose)? {
+                    Ok(ConstraintResult::Succeed)
+                } else {
+                    // solve later
+                    Ok(ConstraintResult::NeedsMoreInformation)
+                }
+            }
+
+            // this is, well, a hack
+            Constraint::ReturnTyHack(last_checked, node_id, a, b, ret_ty) => {
+                TypeCheckerCtx::solve_fn_return_ty_hack(*node_id, a, b, ret_ty)
+            }
+        }
+    }
+
     fn solve_fn_return_ty_hack(
         node_id: usize,
         a: &Type,
         b: &Type,
         ret_ty: &Type,
-    ) -> Result<(bool, Vec<Constraint>), TypeError> {
+    ) -> Result<ConstraintResult, TypeError> {
         match (a, b) {
             (Type::TypeVar(x), other) | (other, Type::TypeVar(x)) => {
                 // resolve this later
-                return Ok((false, vec![]));
+                Ok(ConstraintResult::NeedsMoreInformation)
             }
             (Type::Nil, Type::Nil) => {
                 // resolve this now
-                return Ok((
-                    true,
-                    vec![Constraint::TypeEqual(node_id, ret_ty.clone(), Type::Nil)],
-                ));
+                Ok(ConstraintResult::ResolveTo(vec![Constraint::TypeEqual(
+                    node_id,
+                    ret_ty.clone(),
+                    Type::Nil,
+                )]))
             }
             (Type::Nil, Type::Nullable { child }) | (Type::Nullable { child }, Type::Nil) => {
                 // resolve this now
-                return Ok((
-                    true,
-                    vec![Constraint::TypeEqual(
-                        node_id,
-                        ret_ty.clone(),
-                        Type::Nullable {
-                            child: child.clone(),
-                        },
-                    )],
-                ));
+                Ok(ConstraintResult::ResolveTo(vec![Constraint::TypeEqual(
+                    node_id,
+                    ret_ty.clone(),
+                    Type::Nullable {
+                        child: child.clone(),
+                    },
+                )]))
             }
             (Type::Nullable { child: child_a }, Type::Nullable { child: child_b }) => {
                 // resolve this now
-                return Ok((
-                    true,
-                    vec![
-                        Constraint::TypeEqual(
-                            node_id,
-                            child_a.as_ref().clone(),
-                            child_b.as_ref().clone(),
-                        ),
-                        Constraint::TypeEqual(
-                            node_id,
-                            ret_ty.clone(),
-                            Type::Nullable {
-                                child: child_a.clone(),
-                            },
-                        ),
-                    ],
-                ));
-            }
-            (other, Type::Nullable { child }) | (Type::Nullable { child }, other) => {
-                // resolve this now
-                return Ok((
-                    true,
-                    vec![Constraint::TypeEqual(
+                Ok(ConstraintResult::ResolveTo(vec![
+                    Constraint::TypeEqual(
+                        node_id,
+                        child_a.as_ref().clone(),
+                        child_b.as_ref().clone(),
+                    ),
+                    Constraint::TypeEqual(
                         node_id,
                         ret_ty.clone(),
                         Type::Nullable {
-                            child: child.clone(),
+                            child: child_a.clone(),
                         },
-                    )],
-                ));
+                    ),
+                ]))
+            }
+            (other, Type::Nullable { child }) | (Type::Nullable { child }, other) => {
+                // resolve this now
+                Ok(ConstraintResult::ResolveTo(vec![Constraint::TypeEqual(
+                    node_id,
+                    ret_ty.clone(),
+                    Type::Nullable {
+                        child: child.clone(),
+                    },
+                )]))
             }
             (Type::Nil, other) | (other, Type::Nil) => {
                 // resolve this now
@@ -525,15 +483,10 @@ impl TypeCheckerCtx {
             }
 
             // now: both sides are not nil, and also not nullable, and not vars
-            _ => {
-                return Ok((
-                    true,
-                    vec![
-                        Constraint::TypeEqual(node_id, a.clone(), b.clone()),
-                        Constraint::TypeEqual(node_id, b.clone(), ret_ty.clone()),
-                    ],
-                ));
-            }
+            _ => Ok(ConstraintResult::ResolveTo(vec![
+                Constraint::TypeEqual(node_id, a.clone(), b.clone()),
+                Constraint::TypeEqual(node_id, b.clone(), ret_ty.clone()),
+            ])),
         }
     }
 
@@ -587,9 +540,9 @@ impl TypeCheckerCtx {
         }
     }
 
-    fn select_overload(&mut self, overload_set: OverloadSet) -> Result<bool, TypeError> {
-        let n = overload_set.nodes.len();
-        let num_overloads = overload_set.overloads.len();
+    fn select_overload(&mut self, choose: &ChooseOverloadConstraint) -> Result<bool, TypeError> {
+        let n = choose.nodes.len();
+        let num_overloads = choose.overloads.len();
 
         let mut impossible = (0..num_overloads).map(|_| false).collect::<Vec<_>>();
 
@@ -613,9 +566,9 @@ impl TypeCheckerCtx {
                             return true;
                         }
 
-                        return indices.iter().any(|&ti| {
-                            overload_set.overloads[i][ti] != overload_set.overloads[j][ti]
-                        });
+                        return indices
+                            .iter()
+                            .any(|&ti| choose.overloads[i][ti] != choose.overloads[j][ti]);
                     });
                 })
                 .collect::<Vec<_>>();
@@ -637,9 +590,9 @@ impl TypeCheckerCtx {
                     //     self.normalize_ty(overload_set.types[ti].clone()),
                     //     overload_set.overloads[i][ti].clone(),
                     // );
-                    let mgu_so_far = self.normalize_ty(overload_set.types[ti].clone());
+                    let mgu_so_far = self.normalize_ty(choose.types[ti].clone());
 
-                    if !mgu_so_far.alpha_eq(&overload_set.overloads[i][ti], &vec![]) {
+                    if !mgu_so_far.alpha_eq(&choose.overloads[i][ti], &vec![]) {
                         // println!("      - failed, bail overload");
                         self.unification_table.rollback_to(snapshot);
 
@@ -652,7 +605,7 @@ impl TypeCheckerCtx {
                             if impossible.iter().all(|&b| b) {
                                 // println!("  => no overloads are possible");
                                 return Err(TypeError {
-                                    node_id: overload_set.node_id,
+                                    node_id: choose.node_id,
                                     kind: TypeErrorKind::NoOverload,
                                 });
                             }
@@ -673,15 +626,15 @@ impl TypeCheckerCtx {
                     if !indices.contains(&ti) {
                         // println!(
                         //     "    - unifying type-constraint {ti}: {:?} =?= {:?}",
-                        //     overload_set.types[ti].clone(),
-                        //     overload_set.overloads[i][ti].clone(),
+                        //     choose.types[ti].clone(),
+                        //     choose.overloads[i][ti].clone(),
                         // );
                         self.check_ty_equal(
-                            overload_set.types[ti].clone(),
-                            overload_set.overloads[i][ti].clone(),
+                            choose.types[ti].clone(),
+                            choose.overloads[i][ti].clone(),
                         )
                         .map_err(|kind| TypeError {
-                            node_id: overload_set.nodes[ti],
+                            node_id: choose.nodes[ti],
                             kind,
                         })?;
                     }
@@ -1597,9 +1550,8 @@ impl TypeCheckerCtx {
 
                 match op.as_str() {
                     "-" => {
-                        self.add_constraint(Constraint::ChooseOverload {
-                            last_checked: 0,
-                            overload_set: OverloadSet {
+                        self.add_constraint(Constraint::ChooseOverload(
+                            ChooseOverloadConstraint {
                                 node_id: *id,
                                 nodes: vec![expr.id(), *id],
                                 types: vec![expr_ty.clone(), res_ty.clone()],
@@ -1608,7 +1560,7 @@ impl TypeCheckerCtx {
                                     vec![Type::Float, Type::Float],
                                 ],
                             },
-                        })?;
+                        ))?;
                     }
                     _ => todo!("binary operator {op}"),
                 }
@@ -1631,9 +1583,8 @@ impl TypeCheckerCtx {
 
                 match op.as_str() {
                     "==" => {
-                        self.add_constraint(Constraint::ChooseOverload {
-                            last_checked: 0,
-                            overload_set: OverloadSet {
+                        self.add_constraint(Constraint::ChooseOverload(
+                            ChooseOverloadConstraint {
                                 node_id: *id,
                                 nodes: vec![left.id(), right.id(), *id],
                                 types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
@@ -1644,12 +1595,11 @@ impl TypeCheckerCtx {
                                     vec![Type::Bool, Type::Bool, Type::Bool],
                                 ],
                             },
-                        })?;
+                        ))?;
                     }
                     "&&" | "||" => {
-                        self.add_constraint(Constraint::ChooseOverload {
-                            last_checked: 0,
-                            overload_set: OverloadSet {
+                        self.add_constraint(Constraint::ChooseOverload(
+                            ChooseOverloadConstraint {
                                 node_id: *id,
                                 nodes: vec![left.id(), right.id(), *id],
                                 types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
@@ -1658,12 +1608,11 @@ impl TypeCheckerCtx {
                                     vec![Type::Bool, Type::Bool, Type::Bool],
                                 ],
                             },
-                        })?;
+                        ))?;
                     }
                     ">" | "<" | "<=" | ">=" => {
-                        self.add_constraint(Constraint::ChooseOverload {
-                            last_checked: 0,
-                            overload_set: OverloadSet {
+                        self.add_constraint(Constraint::ChooseOverload(
+                            ChooseOverloadConstraint {
                                 node_id: *id,
                                 nodes: vec![left.id(), right.id(), *id],
                                 types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
@@ -1672,7 +1621,7 @@ impl TypeCheckerCtx {
                                     vec![Type::Float, Type::Float, Type::Bool],
                                 ],
                             },
-                        })?;
+                        ))?;
                     }
                     "+" | "^" => {
                         // a + b
@@ -1682,9 +1631,8 @@ impl TypeCheckerCtx {
                         // +: fn(float, float) -> float
                         // +: fn(str, str) -> str
 
-                        self.add_constraint(Constraint::ChooseOverload {
-                            last_checked: 0,
-                            overload_set: OverloadSet {
+                        self.add_constraint(Constraint::ChooseOverload(
+                            ChooseOverloadConstraint {
                                 node_id: *id,
                                 nodes: vec![left.id(), right.id(), *id],
                                 types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
@@ -1696,12 +1644,11 @@ impl TypeCheckerCtx {
                                     vec![Type::Str, Type::Str, Type::Str],
                                 ],
                             },
-                        })?;
+                        ))?;
                     }
                     "-" => {
-                        self.add_constraint(Constraint::ChooseOverload {
-                            last_checked: 0,
-                            overload_set: OverloadSet {
+                        self.add_constraint(Constraint::ChooseOverload(
+                            ChooseOverloadConstraint {
                                 node_id: *id,
                                 nodes: vec![left.id(), right.id(), *id],
                                 types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
@@ -1712,7 +1659,7 @@ impl TypeCheckerCtx {
                                     vec![Type::Float, Type::Float, Type::Float],
                                 ],
                             },
-                        })?;
+                        ))?;
                     }
                     _ => todo!("binary operator {op}"),
                 }
