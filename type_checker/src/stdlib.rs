@@ -19,17 +19,30 @@ pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
         find: fn<A>([A], fn(A) -> bool) -> ?A
         sum: fn([int]) -> int
         range: fn(int, int) -> [int]
-        len: fn<A>(A) -> int                             // TODO: { len: fn(str) -> int; len: fn<A>([A]) -> int }
         starts_with: fn(str, str) -> bool
-        slice: fn<B>(str, B) -> str                      // TODO: split into overloads when supported
-            slice_arr: fn<A, B>([A], B) -> [A]
+
+        len: fn(str) -> int
+        len: fn<A>([A]) -> int
+    //  len: fn<A>(A) -> int
+
+        slice: fn(str, int) -> str
+        slice: fn(str, (int, int)) -> str
+        slice: fn<A, B>([A], B) -> [A]
+
         bool: fn<A>(A) -> bool                           // TODO: just a hack, remove later
         match: fn(str, regex) -> [str]
         matches: fn(str, regex) -> bool
         match_all: fn(str, regex) -> [[str]]             // ... was previously `[(str...)]`, but I don't think that's possible any more, which is fine
+
         max: fn(int, int) -> int
-        min: fn(int, int) -> int                         // TODO: split into overloads when supported
-            min_arr: fn([int]) -> int
+
+        min: fn(int, int) -> int
+        min: fn(float, int) -> float
+        min: fn(int, float) -> float
+        min: fn(float, float) -> float
+        min: fn([int]) -> int
+        min: fn([float]) -> float
+
         enumerate: fn<T>([T]) -> [(int, T)]
         assert: fn(bool) -> nil
         sort_by_key: fn<T, K>([T], fn(T) -> K) -> [T]
@@ -71,7 +84,7 @@ pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
     ";
 
     for line in stdlib.trim().lines() {
-        if line.trim().len() == 0 {
+        if line.trim().len() == 0 || line.trim().starts_with("//") {
             continue;
         }
 

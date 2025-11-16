@@ -23,12 +23,19 @@ pub enum Type {
     Float,
     Regex,
     Fn(FnType),
-    NamedFn(Vec<FnType>),
+    NamedFnOverload {
+        defs: Vec<FnType>,
+        choice_var: usize,
+    },
     List(Box<Type>),
     Tuple(Vec<Type>),
-    Dict { key: Box<Type>, val: Box<Type> },
-    Nullable { child: Box<Type> },
-    // NonNull { child: Box<Type> },
+    Dict {
+        key: Box<Type>,
+        val: Box<Type>,
+    },
+    Nullable {
+        child: Box<Type>,
+    },
     TypeVar(TypeVar),
 }
 
@@ -106,6 +113,12 @@ impl FnType {
         self.params.iter().all(|p| p.is_concrete(&bound)) && self.ret.is_concrete(&bound)
     }
 
+    pub fn irreconcilable(&self, other: &FnType) -> bool {
+        self.params.len() != other.params.len()
+            || (0..self.params.len()).any(|i| self.params[i].irreconcilable(&other.params[i]))
+                && self.ret.irreconcilable(&other.ret)
+    }
+
     // TODO test
     pub fn alpha_eq(&self, other: &FnType, bound: &Vec<(TypeVar, TypeVar)>) -> bool {
         if self.generics.len() != other.generics.len() || self.params.len() != other.params.len() {
@@ -166,6 +179,38 @@ impl Type {
         }
     }
 
+    pub fn irreconcilable(&self, other: &Type) -> bool {
+        match (self, other) {
+            (
+                Type::Nil | Type::Bool | Type::Str | Type::Int | Type::Float | Type::Regex,
+                Type::Nil | Type::Bool | Type::Str | Type::Int | Type::Float | Type::Regex,
+            ) => self != other,
+            (Type::TypeVar(x), Type::TypeVar(y)) => false,
+            (Type::Fn(a), Type::Fn(b)) => a.irreconcilable(b),
+            (Type::NamedFnOverload { .. }, Type::NamedFnOverload { .. }) => {
+                todo!()
+            }
+            (Type::List(a), Type::List(b)) => a.irreconcilable(b),
+            (Type::Tuple(a), Type::Tuple(b)) => {
+                a.len() != b.len() || (0..a.len()).any(|i| a[i].irreconcilable(&b[i]))
+            }
+            (
+                Type::Dict {
+                    key: a_key,
+                    val: a_val,
+                },
+                Type::Dict {
+                    key: b_key,
+                    val: b_val,
+                },
+            ) => a_key.irreconcilable(b_key) || b_val.irreconcilable(b_val),
+            (Type::Nullable { child: a_child }, Type::Nullable { child: b_child }) => {
+                a_child.irreconcilable(b_child)
+            }
+            _ => true,
+        }
+    }
+
     pub fn alpha_eq(&self, other: &Type, bound: &Vec<(TypeVar, TypeVar)>) -> bool {
         match (self, other) {
             (
@@ -174,8 +219,9 @@ impl Type {
             ) => self == other,
             (Type::TypeVar(x), Type::TypeVar(y)) => equal_bound_var(bound, *x, *y, 0),
             (Type::Fn(a), Type::Fn(b)) => a.alpha_eq(b, bound),
-            (Type::NamedFn(a), Type::NamedFn(b)) => {
-                a.len() == b.len() && (0..a.len()).all(|i| a[i].alpha_eq(&b[i], bound))
+            (Type::NamedFnOverload { .. }, Type::NamedFnOverload { .. }) => {
+                todo!()
+                // a.len() == b.len() && (0..a.len()).all(|i| a[i].alpha_eq(&b[i], bound))
             }
             (Type::List(a), Type::List(b)) => a.alpha_eq(b, bound),
             (Type::Tuple(a), Type::Tuple(b)) => {
@@ -203,7 +249,7 @@ impl Type {
             Type::Nil | Type::Bool | Type::Str | Type::Int | Type::Float | Type::Regex => true,
             Type::TypeVar(v) => false,
             Type::Fn(def) => def.is_concrete(bound),
-            Type::NamedFn(defs) => defs.iter().all(|el| el.is_concrete(bound)),
+            Type::NamedFnOverload { defs, .. } => defs.iter().all(|el| el.is_concrete(bound)),
             Type::List(element_ty) => element_ty.is_concrete(bound),
             Type::Tuple(elements) => elements.iter().all(|el| el.is_concrete(bound)),
             Type::Dict { key, val } => key.is_concrete(bound) && val.is_concrete(bound),
@@ -222,7 +268,7 @@ impl Type {
                 }
             }
             Type::Fn(def) => def.occurs_check(var),
-            Type::NamedFn(defs) => {
+            Type::NamedFnOverload { defs, .. } => {
                 for def in defs {
                     def.occurs_check(var).map_err(|_| self.clone())?;
                 }
@@ -261,7 +307,7 @@ impl Type {
             Type::Fn(def) => {
                 def.substitute_vars(sub);
             }
-            Type::NamedFn(defs) => {
+            Type::NamedFnOverload { defs, .. } => {
                 for def in defs {
                     def.substitute_vars(sub);
                 }
@@ -337,7 +383,7 @@ impl Type {
             Type::Fn(def) => {
                 def.substitute(bound, unification_table);
             }
-            Type::NamedFn(defs) => {
+            Type::NamedFnOverload { defs, .. } => {
                 for def in defs {
                     def.substitute(bound, unification_table);
                 }
@@ -357,12 +403,12 @@ impl Debug for Type {
             Type::Regex => write!(f, "regex"),
             Type::TypeVar(v) => write!(f, "{v:?}"),
             Type::Fn(def) => write!(f, "{def:?}"),
-            Type::NamedFn(defs) => {
-                write!(f, "{{ ")?;
+            Type::NamedFnOverload { defs, .. } => {
+                write!(f, "select<{{ ")?;
                 for def in defs {
                     write!(f, "{def:?}; ")?;
                 }
-                write!(f, "}}")?;
+                write!(f, "}}>")?;
                 Ok(())
             }
             Type::List(element_ty) => write!(f, "[{element_ty:?}]"),

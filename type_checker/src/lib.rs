@@ -1,3 +1,4 @@
+#![feature(if_let_guard)]
 #![allow(unused)]
 #![allow(dead_code)]
 
@@ -16,10 +17,12 @@ use thiserror::Error;
 use crate::{
     stdlib::add_stdlib_types,
     types::{FnType, Type, TypeVar},
+    util::find_unique_match,
 };
 
 mod stdlib;
 pub mod types;
+mod util;
 
 // TODO:
 // - [ ] named and optional params/args
@@ -160,8 +163,8 @@ pub enum TypeErrorKind {
     NotCallable(Type),
     #[error("generics don't match up equally")]
     GenericsMismatch,
-    #[error("arguments don't match up with callee:\n{0:?} != {1:?}")]
-    ArgsMismatch(Vec<String>, Vec<String>),
+    #[error("arguments don't match up with callee:\n{0} != {1}")]
+    ArgsMismatch(usize, usize),
     #[error("use of break statement outside loop")]
     BreakOutsideLoop,
     #[error("use of return statement outside function body")]
@@ -210,7 +213,8 @@ enum Constraint {
     TypeEqual(usize, Type, Type),
     ReturnTyHack(usize, usize, Type, Type, Type),
     CanInstantiateTo(usize, Type, Type),
-    ChooseOverload(ChooseOverloadConstraint),
+    ChooseOperatorOverload(ChooseOperatorOverloadConstraint),
+    ChooseNamedFnOverload(ChooseNamedFnOverloadConstraint),
 }
 
 impl Constraint {
@@ -220,21 +224,36 @@ impl Constraint {
                 node_id,
                 kind: TypeErrorKind::NotEqual(a, b),
             },
-            Constraint::ChooseOverload(choose) => TypeError {
+            Constraint::ChooseOperatorOverload(choose) => TypeError {
                 node_id: choose.node_id,
                 kind: TypeErrorKind::NoOverload,
             },
-            _ => unreachable!(),
+            Constraint::ChooseNamedFnOverload(choose) => TypeError {
+                node_id: choose.node_id,
+                kind: TypeErrorKind::NoOverload,
+            },
+            constraint => {
+                unreachable!("should not happen: convert to error from constraint: {constraint:?}")
+            }
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ChooseOverloadConstraint {
+struct ChooseOperatorOverloadConstraint {
     node_id: usize,
     nodes: Vec<usize>,
     types: Vec<Type>,
     overloads: Vec<Vec<Type>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ChooseNamedFnOverloadConstraint {
+    node_id: usize,
+    choice_var: usize,
+    nodes: Vec<usize>,
+    types: Vec<Type>,
+    overloads: Vec<(usize, Vec<Type>)>,
 }
 
 #[derive(Debug, Clone)]
@@ -280,6 +299,7 @@ impl AddAssign for ConstraintResult {
 #[derive(Debug)]
 struct TypeCheckerCtx {
     unification_table: InPlaceUnificationTable<TypeVar>,
+    overload_choices: Vec<Option<usize>>, // var (num) -> ?choice (index)
     constraints: Vec<(usize, Constraint)>,
     next_loop_id: usize,
     progress: usize,
@@ -295,6 +315,7 @@ impl TypeCheckerCtx {
     pub fn new() -> Self {
         Self {
             unification_table: InPlaceUnificationTable::new(),
+            overload_choices: vec![],
             constraints: vec![],
             next_loop_id: 0,
             progress: 0,
@@ -311,7 +332,13 @@ impl TypeCheckerCtx {
         id
     }
 
-    pub(crate) fn fresh_ty_var(&mut self) -> TypeVar {
+    fn fresh_overload_choice_var(&mut self) -> usize {
+        let v = self.overload_choices.len();
+        self.overload_choices.push(None);
+        v
+    }
+
+    fn fresh_ty_var(&mut self) -> TypeVar {
         let v = self.unification_table.new_key(None);
         self.all_vars.push(v);
         v
@@ -387,6 +414,9 @@ impl TypeCheckerCtx {
         self.progress = 1;
 
         println!("num constraints to check at end: {}", todo.len());
+        for constraint in &todo {
+            println!(" - {constraint:?}");
+        }
 
         while let Some((last_checked, constraint)) = todo.pop_front() {
             // if no progress was made, then apparently this constraint just can't be solved
@@ -437,7 +467,8 @@ impl TypeCheckerCtx {
                     }
                 }
             }
-            Constraint::ChooseOverload(choose) => self.select_overload(choose),
+            Constraint::ChooseOperatorOverload(choose) => self.choose_operator_overload(choose),
+            Constraint::ChooseNamedFnOverload(choose) => self.choose_named_fn_overload(choose),
 
             // this is, well, a hack
             Constraint::ReturnTyHack(last_checked, node_id, a, b, ret_ty) => {
@@ -568,14 +599,141 @@ impl TypeCheckerCtx {
         }
     }
 
-    fn select_overload(
+    fn choose_named_fn_overload(
         &mut self,
-        choose: &ChooseOverloadConstraint,
+        choose: &ChooseNamedFnOverloadConstraint,
     ) -> Result<ConstraintResult, TypeError> {
         let n = choose.nodes.len();
         let num_overloads = choose.overloads.len();
 
-        let mut impossible = (0..num_overloads).map(|_| false).collect::<Vec<_>>();
+        let mut impossible = (0..num_overloads).map(|_| false).collect_vec();
+
+        println!("SELECTING NAMED FN OVERLOAD");
+        println!("overloads:");
+        for (overload_index, types) in &choose.overloads {
+            println!(" - o-{}: {:?}", overload_index, types);
+        }
+
+        for indices in (0..n).powerset() {
+            if indices.len() == 0 {
+                continue;
+            }
+
+            // which overloads are different from all others, per these indices?
+            let check_overloads = (0..num_overloads)
+                .filter(|&i| {
+                    if impossible[i] {
+                        return false;
+                    }
+
+                    return (0..num_overloads).all(|j| {
+                        if i == j {
+                            // vacuously
+                            return true;
+                        }
+
+                        return indices.iter().any(|&ti| {
+                            choose.overloads[i].1[ti].irreconcilable(&choose.overloads[j].1[ti])
+                        });
+                    });
+                })
+                .collect::<Vec<_>>();
+
+            println!("- TC-set {indices:?} -- overloads to check: {check_overloads:?}");
+
+            'check: for i in check_overloads {
+                if impossible[i] {
+                    // already known to be impossible
+                    continue;
+                }
+
+                let mut res_accum = ConstraintResult::Succeed;
+
+                println!("  - checking overload {i}");
+                let snapshot = self.unification_table.snapshot();
+
+                for &ti in &indices {
+                    println!(
+                        "    - checking type-constraint {ti}, unifiability of {:?} =?= {:?}",
+                        self.normalize_ty(choose.types[ti].clone()),
+                        self.normalize_ty(choose.overloads[i].1[ti].clone()),
+                    );
+
+                    match self.check_ty_equal(
+                        choose.nodes[ti],
+                        choose.types[ti].clone(),
+                        choose.overloads[i].1[ti].clone(),
+                    ) {
+                        Err(r) => {
+                            // can't unify
+                            println!("      - failed, bail overload");
+                            self.unification_table.rollback_to(snapshot);
+
+                            println!(
+                                "        overload {i} is deemed IMPOSSIBLE, because of concrete type mismatch between"
+                            );
+                            impossible[i] = true;
+
+                            if impossible.iter().all(|&b| b) {
+                                // println!("  => no overloads are possible");
+                                return Err(TypeError {
+                                    node_id: choose.node_id,
+                                    kind: TypeErrorKind::NoOverload,
+                                });
+                            }
+
+                            continue 'check;
+                        }
+                        Ok(res) => {
+                            res_accum += res;
+                        }
+                    }
+                }
+
+                // success! We'll choose this overload
+                // now just check all the other constraints
+                println!("    success! overload {i} works");
+
+                // not sure if this is necessary
+                self.unification_table.commit(snapshot);
+
+                println!("      indices: {indices:?}");
+                for ti in 0..n {
+                    println!("        - {ti} -- {}", indices.contains(&ti));
+                    if !indices.contains(&ti) {
+                        println!(
+                            "    - unifying type-constraint {ti}: {:?} =?= {:?}",
+                            choose.types[ti].clone(),
+                            choose.overloads[i].1[ti].clone(),
+                        );
+                        res_accum += self.check_ty_equal(
+                            choose.nodes[ti],
+                            choose.types[ti].clone(),
+                            choose.overloads[i].1[ti].clone(),
+                        )?;
+                    }
+                }
+
+                self.progress += 1;
+                let overload_index = choose.overloads[i].0;
+                self.overload_choices[choose.choice_var] = Some(overload_index);
+
+                return Ok(res_accum);
+            }
+        }
+
+        // we didn't succeed at finding an option -- which doesn't mean type-checking has failed
+        Ok(ConstraintResult::NeedsMoreInformation)
+    }
+
+    fn choose_operator_overload(
+        &mut self,
+        choose: &ChooseOperatorOverloadConstraint,
+    ) -> Result<ConstraintResult, TypeError> {
+        let n = choose.nodes.len();
+        let num_overloads = choose.overloads.len();
+
+        let mut impossible = (0..num_overloads).map(|_| false).collect_vec();
 
         // println!("SELECTING OVERLOAD");
 
@@ -603,6 +761,7 @@ impl TypeCheckerCtx {
                     });
                 })
                 .collect::<Vec<_>>();
+
             // println!("- TC-set {indices:?} -- overloads to check: {check_overloads:?}");
 
             'check: for i in check_overloads {
@@ -653,6 +812,8 @@ impl TypeCheckerCtx {
                 // not sure if this is necessary
                 self.unification_table.commit(snapshot);
 
+                let mut r = ConstraintResult::Succeed;
+
                 for ti in 0..n {
                     if !indices.contains(&ti) {
                         // println!(
@@ -660,7 +821,7 @@ impl TypeCheckerCtx {
                         //     choose.types[ti].clone(),
                         //     choose.overloads[i][ti].clone(),
                         // );
-                        self.check_ty_equal(
+                        r += self.check_ty_equal(
                             choose.nodes[ti],
                             choose.types[ti].clone(),
                             choose.overloads[i][ti].clone(),
@@ -668,7 +829,7 @@ impl TypeCheckerCtx {
                     }
                 }
 
-                return Ok(ConstraintResult::Succeed);
+                return Ok(r);
             }
         }
 
@@ -742,10 +903,7 @@ impl TypeCheckerCtx {
                 if a_params.len() != b_params.len() {
                     return Err(TypeError {
                         node_id,
-                        kind: TypeErrorKind::ArgsMismatch(
-                            a_params.into_iter().map(|ty| format!("{ty:?}")).collect(),
-                            b_params.into_iter().map(|ty| format!("{ty:?}")).collect(),
-                        ),
+                        kind: TypeErrorKind::ArgsMismatch(a_params.len(), b_params.len()),
                     });
                 }
 
@@ -837,11 +995,19 @@ impl TypeCheckerCtx {
         match ty {
             Type::Nil | Type::Bool | Type::Str | Type::Int | Type::Float | Type::Regex => ty,
             Type::Fn(def) => Type::Fn(self.normalize_fn_ty(def)),
-            Type::NamedFn(defs) => Type::NamedFn(
-                defs.into_iter()
-                    .map(|def| self.normalize_fn_ty(def))
-                    .collect(),
-            ),
+            Type::NamedFnOverload { defs, choice_var } => {
+                if let Some(overload_index) = self.overload_choices[choice_var] {
+                    Type::Fn(self.normalize_fn_ty(defs[overload_index].clone()))
+                } else {
+                    Type::NamedFnOverload {
+                        defs: defs
+                            .into_iter()
+                            .map(|def| self.normalize_fn_ty(def))
+                            .collect(),
+                        choice_var,
+                    }
+                }
+            }
             Type::List(ty) => Type::List(self.normalize_ty(*ty).into()),
             Type::Tuple(elements) => Type::Tuple(
                 elements
@@ -939,15 +1105,12 @@ impl TypeCheckerCtx {
         }
     }
 
-    fn get_local(&mut self, node_id: usize, env: &Env, name: &str) -> Result<Type, TypeError> {
-        if let Some(mut defs) = env.named_fns.get(name).cloned() {
-            if defs.len() == 1 {
-                return Ok(Type::Fn(defs.pop().unwrap()));
-            } else {
-                todo!("crated")
-            }
-        }
-
+    fn get_assignable_local(
+        &mut self,
+        node_id: usize,
+        env: &Env,
+        name: &str,
+    ) -> Result<Type, TypeError> {
         let Some(ty) = env.locals.get(name).cloned() else {
             return Err(TypeError {
                 node_id,
@@ -956,6 +1119,19 @@ impl TypeCheckerCtx {
         };
 
         Ok(ty)
+    }
+
+    fn get_local(&mut self, node_id: usize, env: &Env, name: &str) -> Result<Type, TypeError> {
+        if let Some(mut defs) = env.named_fns.get(name).cloned() {
+            if defs.len() == 1 {
+                return Ok(Type::Fn(defs.pop().unwrap()));
+            } else {
+                let choice_var = self.fresh_overload_choice_var();
+                return Ok(Type::NamedFnOverload { defs, choice_var });
+            }
+        } else {
+            self.get_assignable_local(node_id, env, name)
+        }
     }
 
     fn assign_extra<E>(
@@ -1368,7 +1544,7 @@ impl TypeCheckerCtx {
     fn infer_location(&mut self, env: &mut Env, loc: &ast::AssignLoc) -> Result<Type, TypeError> {
         match loc {
             ast::AssignLoc::Var(ast::AssignLocVar { id, var }) => {
-                let ty = self.get_local(*id, env, var.as_str())?;
+                let ty = self.get_assignable_local(*id, env, var.as_str())?;
                 self.assign(*id, ty)
             }
             ast::AssignLoc::Index(ast::AssignLocIndex {
@@ -1603,8 +1779,8 @@ impl TypeCheckerCtx {
 
                 match op.as_str() {
                     "-" => {
-                        self.add_constraint(Constraint::ChooseOverload(
-                            ChooseOverloadConstraint {
+                        self.add_constraint(Constraint::ChooseOperatorOverload(
+                            ChooseOperatorOverloadConstraint {
                                 node_id: *id,
                                 nodes: vec![expr.id(), *id],
                                 types: vec![expr_ty.clone(), res_ty.clone()],
@@ -1636,8 +1812,8 @@ impl TypeCheckerCtx {
 
                 match op.as_str() {
                     "==" => {
-                        self.add_constraint(Constraint::ChooseOverload(
-                            ChooseOverloadConstraint {
+                        self.add_constraint(Constraint::ChooseOperatorOverload(
+                            ChooseOperatorOverloadConstraint {
                                 node_id: *id,
                                 nodes: vec![left.id(), right.id(), *id],
                                 types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
@@ -1651,8 +1827,8 @@ impl TypeCheckerCtx {
                         ))?;
                     }
                     "&&" | "||" => {
-                        self.add_constraint(Constraint::ChooseOverload(
-                            ChooseOverloadConstraint {
+                        self.add_constraint(Constraint::ChooseOperatorOverload(
+                            ChooseOperatorOverloadConstraint {
                                 node_id: *id,
                                 nodes: vec![left.id(), right.id(), *id],
                                 types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
@@ -1664,8 +1840,8 @@ impl TypeCheckerCtx {
                         ))?;
                     }
                     ">" | "<" | "<=" | ">=" => {
-                        self.add_constraint(Constraint::ChooseOverload(
-                            ChooseOverloadConstraint {
+                        self.add_constraint(Constraint::ChooseOperatorOverload(
+                            ChooseOperatorOverloadConstraint {
                                 node_id: *id,
                                 nodes: vec![left.id(), right.id(), *id],
                                 types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
@@ -1684,8 +1860,8 @@ impl TypeCheckerCtx {
                         // +: fn(float, float) -> float
                         // +: fn(str, str) -> str
 
-                        self.add_constraint(Constraint::ChooseOverload(
-                            ChooseOverloadConstraint {
+                        self.add_constraint(Constraint::ChooseOperatorOverload(
+                            ChooseOperatorOverloadConstraint {
                                 node_id: *id,
                                 nodes: vec![left.id(), right.id(), *id],
                                 types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
@@ -1700,8 +1876,8 @@ impl TypeCheckerCtx {
                         ))?;
                     }
                     "-" => {
-                        self.add_constraint(Constraint::ChooseOverload(
-                            ChooseOverloadConstraint {
+                        self.add_constraint(Constraint::ChooseOperatorOverload(
+                            ChooseOperatorOverloadConstraint {
                                 node_id: *id,
                                 nodes: vec![left.id(), right.id(), *id],
                                 types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
@@ -1796,72 +1972,181 @@ impl TypeCheckerCtx {
                 }
 
                 let mut certainly_returns = false;
+                let num_args = args.len();
 
-                let (f_ty, cr) = self.infer_expr(env, f, true)?;
+                // let mut arg_types = vec![];
+                // if *postfix {
+                //     // in postfix, the first argument is evaluated before the callee
+                //     arg_types.push(self.infer_expr(env, &args[0].expr, use_result));
+                // }
+
+                let (callee_ty, cr) = self.infer_expr(env, f, true)?;
                 if cr {
                     certainly_returns = true;
                 }
 
-                // f_ty: Type
-                // args: Vec<Type>
+                // remove unnecessary overload indirections -- necessary?
+                let callee_ty = self.normalize_ty(callee_ty);
 
-                let f_ty = match f_ty {
-                    Type::Fn(f_ty) => self.instantiate_fn_ty(f_ty),
+                match callee_ty {
+                    // simplest situation: it's known to be a function with also known type
+                    Type::Fn(f_ty) => {
+                        // instantiate if generic
+                        let f_ty = self.instantiate_fn_ty(f_ty);
+
+                        if f_ty.params.len() != args.len() {
+                            return Err(TypeError {
+                                node_id: f.id(),
+                                kind: TypeErrorKind::ArgsMismatch(f_ty.params.len(), args.len()),
+                            });
+                        }
+
+                        for (i, ast::Argument { id, name, expr }) in args.into_iter().enumerate() {
+                            let (expr_ty, cr) =
+                                self.check_expr(env, expr, f_ty.params[i].clone())?;
+
+                            if cr {
+                                certainly_returns = true;
+                            }
+
+                            self.assign(*id, expr_ty)?;
+                        }
+
+                        return self.assign_extra(
+                            *id,
+                            f_ty.ret.as_ref().clone().into(),
+                            certainly_returns,
+                        );
+                    }
+
+                    // it's unknown what the callee is as of yet
+                    // -> create a new function type skeleton with variables to match up with the args,
+                    //  and then resolve instantiation at a later moment with a constraint
                     Type::TypeVar(v) => {
-                        let f_ty = FnType {
-                            generics: vec![], // TODO -- how ???
-                            params: args
-                                .iter()
-                                .map(|_| Type::TypeVar(self.fresh_ty_var()))
-                                .collect(),
-                            ret: Type::TypeVar(self.fresh_ty_var()).into(),
-                        };
+                        let ret = Type::TypeVar(self.fresh_ty_var());
+                        let mut params = vec![];
+
+                        for (i, ast::Argument { id, name, expr }) in args.into_iter().enumerate() {
+                            let (expr_ty, cr) = self.infer_expr(env, expr, true)?;
+
+                            if cr {
+                                certainly_returns = true;
+                            }
+
+                            self.assign(*id, expr_ty.clone())?;
+                            params.push(expr_ty);
+                        }
 
                         self.add_constraint(Constraint::CanInstantiateTo(
                             f.id(),
                             Type::TypeVar(v),
-                            Type::Fn(f_ty.clone()),
+                            Type::Fn(FnType {
+                                generics: vec![],
+                                params,
+                                ret: ret.clone().into(),
+                            }),
                         ))?;
 
-                        f_ty
+                        return self.assign_extra(*id, ret, certainly_returns);
                     }
+
+                    // it's an undecided overloaded named fn usage, but we're in luck, because
+                    //  there's only one overload that works due to the number of arguments
+                    Type::NamedFnOverload { defs, choice_var }
+                        if let Some(overload_index) =
+                            find_unique_match(&defs, |f_ty| f_ty.params.len() == num_args) =>
+                    {
+                        self.progress += 1;
+                        self.overload_choices[choice_var] = Some(overload_index);
+                        let f_ty = defs[overload_index].clone();
+
+                        // instantiate if generic
+                        let f_ty = self.instantiate_fn_ty(f_ty);
+
+                        if f_ty.params.len() != args.len() {
+                            return Err(TypeError {
+                                node_id: f.id(),
+                                kind: TypeErrorKind::ArgsMismatch(f_ty.params.len(), args.len()),
+                            });
+                        }
+
+                        for (i, ast::Argument { id, name, expr }) in args.into_iter().enumerate() {
+                            let (expr_ty, cr) =
+                                self.check_expr(env, expr, f_ty.params[i].clone())?;
+
+                            if cr {
+                                certainly_returns = true;
+                            }
+
+                            self.assign(*id, expr_ty)?;
+                        }
+
+                        return self.assign_extra(
+                            *id,
+                            f_ty.ret.as_ref().clone().into(),
+                            certainly_returns,
+                        );
+                    }
+
+                    // it's an overloaded named fn, and we don't yet know which one to choose
+                    Type::NamedFnOverload { defs, choice_var } => {
+                        let ret = Type::TypeVar(self.fresh_ty_var());
+                        let mut types = vec![];
+
+                        for ast::Argument { id, name, expr } in args.iter() {
+                            let (expr_ty, cr) = self.infer_expr(env, expr, true)?;
+
+                            if cr {
+                                certainly_returns = true;
+                            }
+
+                            self.assign(*id, expr_ty.clone())?;
+                            types.push(expr_ty);
+                        }
+
+                        let overloads = defs
+                            .into_iter()
+                            .enumerate()
+                            .filter(|(i, f_ty)| f_ty.params.len() == num_args)
+                            .map(|(i, f_ty)| {
+                                let FnType {
+                                    generics,
+                                    mut params,
+                                    ret,
+                                } = self.instantiate_fn_ty(f_ty);
+
+                                params.push(*ret);
+
+                                (i, params)
+                            })
+                            .collect_vec();
+
+                        types.push(ret.clone());
+
+                        let mut node_ids = args.iter().map(|arg| arg.id()).collect_vec();
+                        node_ids.push(*id);
+
+                        self.add_constraint(Constraint::ChooseNamedFnOverload(
+                            ChooseNamedFnOverloadConstraint {
+                                node_id: *id,
+                                choice_var,
+                                nodes: node_ids,
+                                types,
+                                overloads,
+                            },
+                        ))?;
+
+                        return self.assign_extra(*id, ret, certainly_returns);
+                    }
+
+                    // anything else -> can't be called
                     ty => {
                         return Err(TypeError {
                             node_id: *id,
                             kind: TypeErrorKind::NotCallable(ty),
                         });
                     }
-                };
-
-                if f_ty.params.len() != args.len() {
-                    return Err(TypeError {
-                        node_id: f.id(),
-                        kind: TypeErrorKind::ArgsMismatch(
-                            f_ty.params.iter().map(|ty| format!("{ty:?}")).collect(),
-                            args.iter()
-                                .enumerate()
-                                .map(|(i, arg)| format!("arg#{i}"))
-                                .collect(),
-                        ),
-                    });
                 }
-
-                let args = args
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, ast::Argument { id, name, expr })| {
-                        let (expr_ty, cr) = self.check_expr(env, expr, f_ty.params[i].clone())?;
-                        if cr {
-                            certainly_returns = true;
-                        }
-
-                        self.assign(*id, expr_ty)
-                    })
-                    .collect::<Result<Vec<_>, TypeError>>()?;
-
-                println!("ARGS: {:?}", args);
-
-                return self.assign_extra(*id, f_ty.ret.as_ref().clone().into(), certainly_returns);
             }
             ast::Expr::AnonymousFn(ast::AnonymousFnExpr { id, params, body }) => {
                 let mut declare_locals = FxHashMap::default();
@@ -2192,10 +2477,7 @@ impl TypeCheckerCtx {
                 if fn_ty.params.len() != params.len() {
                     return Err(TypeError {
                         node_id: *id,
-                        kind: TypeErrorKind::ArgsMismatch(
-                            fn_ty.params.iter().map(|ty| format!("{ty:?}")).collect(),
-                            params.into_iter().map(|arg| format!("{arg:?}")).collect(),
-                        ),
+                        kind: TypeErrorKind::ArgsMismatch(fn_ty.params.len(), params.len()),
                     });
                 }
 
@@ -2600,5 +2882,6 @@ mod test {
     run_test_cases_in_file!(generics);
     run_test_cases_in_file!(function_calls);
     run_test_cases_in_file!(nullability);
+    run_test_cases_in_file!(named_fn_overloading);
     run_test_cases_in_file!(aoc_examples);
 }

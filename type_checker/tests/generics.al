@@ -16,8 +16,8 @@ some_fn([1,2,3])
 // ok
 // ======
 
-fn some_fn(len: fn<T>([T]) -> int) -> int {
-  len([1, 2, 3])
+fn some_fn(my_len: fn<T>([T]) -> int) -> int {
+  my_len([1, 2, 3])
 }
 
 fn my_len_fn<T>(arr) {
@@ -36,8 +36,8 @@ some_fn(my_len_fn)
 // err
 // ======
 
-fn some_fn(len: fn<T>([T]) -> bool) -> bool {
-  len([1, 2, 3])
+fn some_fn(my_len: fn<T>([T]) -> bool) -> bool {
+  my_len([1, 2, 3])
 }
 
 fn my_len_fn(arr) {
@@ -52,8 +52,8 @@ some_fn(my_len_fn)
 // ok
 // ======
 
-fn some_fn(len: fn<T>([T]) -> int) -> int {
-  len([1, 2, 3])
+fn some_fn(my_len: fn<T>([T]) -> int) -> int {
+  my_len([1, 2, 3])
 }
 
 some_fn(|arr| { 4 })
@@ -63,8 +63,8 @@ some_fn(|arr| { 4 })
 // err
 // ======
 
-fn some_fn(len: fn<T>([T]) -> int) -> int {
-  len([1, 2, 3])
+fn some_fn(my_len: fn<T>([T]) -> int) -> int {
+  my_len([1, 2, 3])
 }
 
 some_fn(|arr| { true })
@@ -74,8 +74,8 @@ some_fn(|arr| { true })
 // err
 // ======
 
-fn some_fn(len: fn<T>([T]) -> int) -> int {
-  len([1, 2, 3])
+fn some_fn(my_len: fn<T>([T]) -> int) -> int {
+  my_len([1, 2, 3])
 }
 
 some_fn(|arr: [bool]| { 4 })
