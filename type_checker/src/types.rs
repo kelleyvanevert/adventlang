@@ -357,7 +357,14 @@ impl Debug for Type {
             Type::Regex => write!(f, "regex"),
             Type::TypeVar(v) => write!(f, "{v:?}"),
             Type::Fn(def) => write!(f, "{def:?}"),
-            Type::NamedFn(defs) => write!(f, "TODO"),
+            Type::NamedFn(defs) => {
+                write!(f, "{{ ")?;
+                for def in defs {
+                    write!(f, "{def:?}; ")?;
+                }
+                write!(f, "}}")?;
+                Ok(())
+            }
             Type::List(element_ty) => write!(f, "[{element_ty:?}]"),
             Type::Tuple(elements) => {
                 write!(f, "(")?;

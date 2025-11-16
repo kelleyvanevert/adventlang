@@ -1,7 +1,11 @@
 #![allow(unused)]
 #![allow(dead_code)]
 
-use std::{collections::VecDeque, fmt::Display};
+use std::{
+    collections::VecDeque,
+    fmt::Display,
+    ops::{Add, AddAssign},
+};
 
 use ena::unify::{InPlaceUnificationTable, UnifyKey};
 use fxhash::{FxHashMap, FxHashSet};
@@ -236,6 +240,39 @@ enum ConstraintResult {
     NeedsMoreInformation,
 }
 
+impl Add for ConstraintResult {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self::Output {
+        match (self, other) {
+            (Self::NeedsMoreInformation, _) => Self::NeedsMoreInformation,
+            (_, Self::NeedsMoreInformation) => Self::NeedsMoreInformation,
+            (Self::Succeed, Self::ResolveTo(cs)) => Self::ResolveTo(cs),
+            (Self::ResolveTo(cs), Self::Succeed) => Self::ResolveTo(cs),
+            (Self::ResolveTo(cs1), Self::ResolveTo(cs2)) => Self::ResolveTo([cs1, cs2].concat()),
+            (Self::Succeed, Self::Succeed) => Self::Succeed,
+        }
+    }
+}
+
+impl AddAssign for ConstraintResult {
+    fn add_assign(&mut self, other: Self) {
+        match (self, &other) {
+            (me, Self::NeedsMoreInformation) => {
+                *me = Self::NeedsMoreInformation;
+            }
+            (me, Self::ResolveTo(_)) if matches!(*me, Self::Succeed) => {
+                *me = other;
+            }
+            (Self::ResolveTo(_), Self::Succeed) => {}
+            (Self::ResolveTo(cs1), Self::ResolveTo(cs2)) => {
+                cs1.extend_from_slice(&cs2);
+            }
+            _ => {}
+        }
+    }
+}
+
 #[derive(Debug)]
 struct TypeCheckerCtx {
     unification_table: InPlaceUnificationTable<TypeVar>,
@@ -372,13 +409,7 @@ impl TypeCheckerCtx {
     fn solve_constraint(&mut self, constraint: &Constraint) -> Result<ConstraintResult, TypeError> {
         match &constraint {
             Constraint::TypeEqual(node_id, left, right) => {
-                self.check_ty_equal(left.clone(), right.clone())
-                    .map_err(|kind| TypeError {
-                        node_id: *node_id,
-                        kind,
-                    })?;
-
-                Ok(ConstraintResult::Succeed)
+                self.check_ty_equal(*node_id, left.clone(), right.clone())
             }
             Constraint::CanInstantiateTo(node_id, scheme, concrete) => {
                 match self.normalize_ty(scheme.clone()) {
@@ -630,13 +661,10 @@ impl TypeCheckerCtx {
                         //     choose.overloads[i][ti].clone(),
                         // );
                         self.check_ty_equal(
+                            choose.nodes[ti],
                             choose.types[ti].clone(),
                             choose.overloads[i][ti].clone(),
-                        )
-                        .map_err(|kind| TypeError {
-                            node_id: choose.nodes[ti],
-                            kind,
-                        })?;
+                        )?;
                     }
                 }
 
@@ -648,23 +676,31 @@ impl TypeCheckerCtx {
         Ok(false)
     }
 
-    fn check_ty_equal(&mut self, left: Type, right: Type) -> Result<(), TypeErrorKind> {
+    fn check_ty_equal(
+        &mut self,
+        node_id: usize,
+        left: Type,
+        right: Type,
+    ) -> Result<ConstraintResult, TypeError> {
         let left = self.normalize_ty(left);
         let right = self.normalize_ty(right);
 
         match (left, right) {
-            (Type::Nil, Type::Nil) => Ok(()),
-            (Type::Bool, Type::Bool) => Ok(()),
-            (Type::Str, Type::Str) => Ok(()),
-            (Type::Int, Type::Int) => Ok(()),
-            (Type::Float, Type::Float) => Ok(()),
-            (Type::Regex, Type::Regex) => Ok(()),
-            (Type::List(a), Type::List(b)) => self.check_ty_equal(*a, *b),
+            (Type::Nil, Type::Nil) => Ok(ConstraintResult::Succeed),
+            (Type::Bool, Type::Bool) => Ok(ConstraintResult::Succeed),
+            (Type::Str, Type::Str) => Ok(ConstraintResult::Succeed),
+            (Type::Int, Type::Int) => Ok(ConstraintResult::Succeed),
+            (Type::Float, Type::Float) => Ok(ConstraintResult::Succeed),
+            (Type::Regex, Type::Regex) => Ok(ConstraintResult::Succeed),
+            (Type::List(a), Type::List(b)) => self.check_ty_equal(node_id, *a, *b),
             (Type::Tuple(a), Type::Tuple(b)) if a.len() == b.len() => {
+                let mut r = ConstraintResult::Succeed;
+
                 for (a, b) in a.into_iter().zip(b.into_iter()) {
-                    self.check_ty_equal(a, b)?;
+                    r += self.check_ty_equal(node_id, a, b)?;
                 }
-                Ok(())
+
+                Ok(r)
             }
             (
                 Type::Dict {
@@ -676,8 +712,10 @@ impl TypeCheckerCtx {
                     val: b_val,
                 },
             ) => {
-                self.check_ty_equal(*a_key, *b_key)?;
-                self.check_ty_equal(*a_val, *b_val)
+                let r_key = self.check_ty_equal(node_id, *a_key, *b_key)?;
+                let r_val = self.check_ty_equal(node_id, *a_val, *b_val)?;
+
+                Ok(r_key + r_val)
             }
             (
                 Type::Fn(FnType {
@@ -692,83 +730,89 @@ impl TypeCheckerCtx {
                 }),
             ) => {
                 if a_generics.len() != b_generics.len() {
-                    println!(
-                        "A: {:?}",
-                        Type::Fn(FnType {
-                            generics: a_generics,
-                            params: a_params,
-                            ret: a_ret,
-                        })
-                    );
-                    println!(
-                        "B: {:?}",
-                        Type::Fn(FnType {
-                            generics: b_generics,
-                            params: b_params,
-                            ret: b_ret,
-                        })
-                    );
-                    return Err(TypeErrorKind::GenericsMismatch);
+                    return Err(TypeError {
+                        node_id,
+                        kind: TypeErrorKind::GenericsMismatch,
+                    });
                 }
 
                 // TODO actually check generics -- ??
 
                 if a_params.len() != b_params.len() {
-                    return Err(TypeErrorKind::ArgsMismatch(
-                        a_params.into_iter().map(|ty| format!("{ty:?}")).collect(),
-                        b_params.into_iter().map(|ty| format!("{ty:?}")).collect(),
-                    ));
+                    return Err(TypeError {
+                        node_id,
+                        kind: TypeErrorKind::ArgsMismatch(
+                            a_params.into_iter().map(|ty| format!("{ty:?}")).collect(),
+                            b_params.into_iter().map(|ty| format!("{ty:?}")).collect(),
+                        ),
+                    });
                 }
+
+                let mut r = ConstraintResult::Succeed;
 
                 for (a, b) in a_params.into_iter().zip(b_params) {
-                    self.check_ty_equal(a, b)?;
+                    r += self.check_ty_equal(node_id, a, b)?;
                 }
 
-                self.check_ty_equal(*a_ret, *b_ret)?;
+                r += self.check_ty_equal(node_id, *a_ret, *b_ret)?;
 
-                Ok(())
+                Ok(r)
             }
             (Type::Nullable { child: a_child }, Type::Nullable { child: b_child }) => {
-                self.check_ty_equal(*a_child, *b_child)
+                self.check_ty_equal(node_id, *a_child, *b_child)
             }
 
-            // nullability
-            // (a, Type::Nil) => Ok(()),
-            // (Type::Nil, b) => Ok(()),
-            // (a, Type::Nullable { child: b_child }) => self.check_ty_equal(a, *b_child),
-            // (Type::Nullable { child: a_child }, b) => self.check_ty_equal(*a_child, b),
-            //
             (Type::TypeVar(x), Type::TypeVar(y)) => {
                 self.progress += 1;
 
                 if self.rigid_vars.contains(&x) && self.rigid_vars.contains(&y) {
                     if x == y {
-                        return Ok(());
+                        return Ok(ConstraintResult::Succeed);
                     } else {
-                        return Err(TypeErrorKind::NotEqual(Type::TypeVar(x), Type::TypeVar(y)));
+                        return Err(TypeError {
+                            node_id,
+                            kind: TypeErrorKind::NotEqual(Type::TypeVar(x), Type::TypeVar(y)),
+                        });
                     }
                 } else {
                     self.unification_table
                         .unify_var_var(x, y)
-                        .map_err(|(l, r)| TypeErrorKind::NotEqual(l, r))
+                        .map_err(|(l, r)| TypeError {
+                            node_id,
+                            kind: TypeErrorKind::NotEqual(l, r),
+                        })?;
+
+                    return Ok(ConstraintResult::Succeed);
                 }
             }
             (Type::TypeVar(v), ty) | (ty, Type::TypeVar(v)) => {
                 if self.rigid_vars.contains(&v) {
-                    return Err(TypeErrorKind::NotEqual(Type::TypeVar(v), ty));
+                    return Err(TypeError {
+                        node_id,
+                        kind: TypeErrorKind::NotEqual(Type::TypeVar(v), ty),
+                    });
                 }
 
-                ty.occurs_check(v)
-                    .map_err(|ty| TypeErrorKind::InfiniteType(v, ty))?;
+                ty.occurs_check(v).map_err(|ty| TypeError {
+                    node_id,
+                    kind: TypeErrorKind::InfiniteType(v, ty),
+                })?;
 
                 // println!("unify {v:?} and {ty:?} succeeded");
 
                 self.progress += 1;
+
                 self.unification_table
                     .unify_var_value(v, Some(ty))
-                    .map_err(|(l, r)| TypeErrorKind::NotEqual(l, r))
+                    .map_err(|(l, r)| TypeErrorKind::NotEqual(l, r));
+
+                Ok(ConstraintResult::Succeed)
             }
-            (left, right) => Err(TypeErrorKind::NotEqual(left, right)),
+
+            (left, right) => Err(TypeError {
+                node_id,
+                kind: TypeErrorKind::NotEqual(left, right),
+            }),
         }
     }
 
@@ -995,11 +1039,6 @@ impl TypeCheckerCtx {
                 ret,
                 body,
             }) => {
-                // allow overloads of named fns -> should end up in a single `Type::Namedfn(overloads)`
-                // if let Some(ty) = env.locals.get(&name.str).cloned() {
-                //     return ty;
-                // }
-
                 let mut typing_child_env = env.clone();
 
                 let generics = generics
@@ -1027,7 +1066,11 @@ impl TypeCheckerCtx {
                     //
                     .collect::<Result<Vec<_>, _>>()?;
 
-                let ret = Type::TypeVar(self.fresh_ty_var());
+                let ret = ret
+                    .as_ref()
+                    .map(|hint| self.convert_hint_to_type(&mut typing_child_env, &hint))
+                    .transpose()?
+                    .unwrap_or_else(|| Type::TypeVar(self.fresh_ty_var()));
 
                 let fn_ty = FnType {
                     generics,
@@ -1036,6 +1079,7 @@ impl TypeCheckerCtx {
                 };
 
                 env.add_named_fn_local(*id, name.str.clone(), fn_ty.clone())?;
+
                 Ok(Type::Fn(fn_ty))
             }
         }
@@ -1063,6 +1107,10 @@ impl TypeCheckerCtx {
                 ret,
                 body,
             }) => {
+                // let Type::Fn(placeholder_fn_ty) = placeholder_ty else {
+                //     unreachable!();
+                // };
+
                 let mut typing_child_env = env.clone();
 
                 let generics = generics
@@ -1748,6 +1796,9 @@ impl TypeCheckerCtx {
                 if cr {
                     certainly_returns = true;
                 }
+
+                // f_ty: Type
+                // args: Vec<Type>
 
                 let f_ty = match f_ty {
                     Type::Fn(f_ty) => self.instantiate_fn_ty(f_ty),
@@ -2545,68 +2596,4 @@ mod test {
     run_test_cases_in_file!(function_calls);
     run_test_cases_in_file!(nullability);
     run_test_cases_in_file!(aoc_examples);
-
-    // #[test]
-    // fn nullability() {
-    //     should_typecheck(
-    //         "
-    //             let h: ?int = 5
-    //             h = nil
-    //         ",
-    //     );
-
-    //     // should_not_typecheck(
-    //     //     "
-    //     //         let h: int = 5
-    //     //         h = nil
-    //     //     ",
-    //     //     "",
-    //     // );
-
-    //     should_typecheck(
-    //         "
-    //             let r = 4
-    //             r = loop {}
-    //             r = 'a: loop { break 'a }
-    //         ",
-    //     );
-
-    //     // should_not_typecheck(
-    //     //     "
-    //     //         if let (a, b, c) = (1, 2) {}
-    //     //     ",
-    //     //     "",
-    //     // );
-
-    //     // should_typecheck(
-    //     //     "
-    //     //         let a = nil
-    //     //         if let [b, c] = a {}
-    //     //     ",
-    //     // );
-    // }
-
-    // #[test]
-    // fn if_let_branches() {
-    //     // should_typecheck(
-    //     //     "
-    //     //         if let h = true {}
-    //     //         if let [a, b] = [2] {}
-    //     //     ",
-    //     // );
-
-    //     // should_not_typecheck(
-    //     //     "
-    //     //         if let (a, b, c) = (1, 2) {}
-    //     //     ",
-    //     //     "",
-    //     // );
-
-    //     // should_typecheck(
-    //     //     "
-    //     //         let a = nil
-    //     //         if let [b, c] = a {}
-    //     //     ",
-    //     // );
-    // }
 }

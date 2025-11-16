@@ -1,6 +1,6 @@
 use parser::parse_type;
 
-use crate::{Env, TypeCheckerCtx};
+use crate::{Env, TypeCheckerCtx, types::Type};
 
 pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
     let stdlib = "
@@ -19,7 +19,7 @@ pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
         find: fn<A>([A], fn(A) -> bool) -> ?A
         sum: fn([int]) -> int
         range: fn(int, int) -> [int]
-        len: fn<A>(A) -> int                             // TODO: split into overloads when supported
+        len: fn<A>(A) -> int                             // TODO: { len: fn(str) -> int; len: fn<A>([A]) -> int }
         starts_with: fn(str, str) -> bool
         slice: fn<B>(str, B) -> str                      // TODO: split into overloads when supported
             slice_arr: fn<A, B>([A], B) -> [A]
@@ -78,8 +78,13 @@ pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
         let (name, hint) = line.trim().split_once(": ").unwrap();
         let hint = hint.split_once("//").map(|t| t.0.trim()).unwrap_or(hint);
 
-        let ty = ctx.convert_hint_to_type(env, &parse_type(hint)).unwrap();
-
-        env.locals.insert(name.to_string(), ty);
+        match ctx.convert_hint_to_type(env, &parse_type(hint)).unwrap() {
+            Type::Fn(def) => {
+                env.add_named_fn_local(0, name.to_string(), def);
+            }
+            ty => {
+                env.add_local(name.to_string(), ty);
+            }
+        };
     }
 }
