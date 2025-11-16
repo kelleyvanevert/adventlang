@@ -433,14 +433,7 @@ impl TypeCheckerCtx {
                     }
                 }
             }
-            Constraint::ChooseOverload(choose) => {
-                if self.select_overload(choose)? {
-                    Ok(ConstraintResult::Succeed)
-                } else {
-                    // solve later
-                    Ok(ConstraintResult::NeedsMoreInformation)
-                }
-            }
+            Constraint::ChooseOverload(choose) => self.select_overload(choose),
 
             // this is, well, a hack
             Constraint::ReturnTyHack(last_checked, node_id, a, b, ret_ty) => {
@@ -571,7 +564,10 @@ impl TypeCheckerCtx {
         }
     }
 
-    fn select_overload(&mut self, choose: &ChooseOverloadConstraint) -> Result<bool, TypeError> {
+    fn select_overload(
+        &mut self,
+        choose: &ChooseOverloadConstraint,
+    ) -> Result<ConstraintResult, TypeError> {
         let n = choose.nodes.len();
         let num_overloads = choose.overloads.len();
 
@@ -668,12 +664,12 @@ impl TypeCheckerCtx {
                     }
                 }
 
-                return Ok(true);
+                return Ok(ConstraintResult::Succeed);
             }
         }
 
         // we didn't succeed at finding an option -- which doesn't mean type-checking has failed
-        Ok(false)
+        Ok(ConstraintResult::NeedsMoreInformation)
     }
 
     fn check_ty_equal(
