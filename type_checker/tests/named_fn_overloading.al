@@ -106,3 +106,10 @@ let a = a + 4
 let a = ["hello"]
 let a = a :len
 let a = a + 4
+
+
+// ======
+// ok
+// ======
+
+let a = -4

@@ -626,7 +626,7 @@ impl TypeCheckerCtx {
                         return false;
                     }
 
-                    return (0..num_overloads).all(|j| {
+                    let different_than_others = (0..num_overloads).all(|j| {
                         if i == j {
                             // vacuously
                             return true;
@@ -636,8 +636,14 @@ impl TypeCheckerCtx {
                             choose.overloads[i].1[ti].irreconcilable(&choose.overloads[j].1[ti])
                         });
                     });
+
+                    // let reconcilable_with_args = indices
+                    //     .iter()
+                    //     .any(|&ti| choose.overloads[i].1[ti].irreconcilable(&choose.types[ti]));
+
+                    different_than_others // && reconcilable_with_args
                 })
-                .collect::<Vec<_>>();
+                .collect_vec();
 
             println!("- TC-set {indices:?} -- overloads to check: {check_overloads:?}");
 
@@ -684,6 +690,7 @@ impl TypeCheckerCtx {
 
                             continue 'check;
                         }
+                        // Ok(ConstraintResult::ResolveTo())
                         Ok(res) => {
                             res_accum += res;
                         }
@@ -760,7 +767,7 @@ impl TypeCheckerCtx {
                             .any(|&ti| choose.overloads[i][ti] != choose.overloads[j][ti]);
                     });
                 })
-                .collect::<Vec<_>>();
+                .collect_vec();
 
             // println!("- TC-set {indices:?} -- overloads to check: {check_overloads:?}");
 
@@ -1070,7 +1077,7 @@ impl TypeCheckerCtx {
 
                         tv
                     })
-                    .collect::<Vec<_>>();
+                    .collect_vec();
 
                 Ok(Type::Fn(FnType {
                     generics,
@@ -1247,7 +1254,7 @@ impl TypeCheckerCtx {
 
                         tv
                     })
-                    .collect::<Vec<_>>();
+                    .collect_vec();
 
                 let params = params
                     .iter()
@@ -1303,10 +1310,6 @@ impl TypeCheckerCtx {
                 ret,
                 body,
             }) => {
-                // let Type::Fn(placeholder_fn_ty) = placeholder_ty else {
-                //     unreachable!();
-                // };
-
                 let mut typing_child_env = env.clone();
 
                 let generics = generics
@@ -1319,7 +1322,7 @@ impl TypeCheckerCtx {
 
                         tv
                     })
-                    .collect::<Vec<_>>();
+                    .collect_vec();
 
                 let mut declare_locals = FxHashMap::default();
 
@@ -1345,7 +1348,6 @@ impl TypeCheckerCtx {
                 let (body_ty, certain_return) =
                     self.infer_block(&mut child_env, body, true, true)?;
 
-                // TODO -> NamedFn
                 let ty = Type::Fn(FnType {
                     generics: generics.clone(),
                     params: params.clone(),
@@ -1523,7 +1525,7 @@ impl TypeCheckerCtx {
                 let element_types = elements
                     .iter()
                     .map(|_| Type::TypeVar(self.fresh_ty_var()))
-                    .collect::<Vec<_>>();
+                    .collect_vec();
 
                 let ty = Type::Tuple(element_types.clone());
 
@@ -1646,7 +1648,7 @@ impl TypeCheckerCtx {
                 let element_types = elements
                     .iter()
                     .map(|_| Type::TypeVar(self.fresh_ty_var()))
-                    .collect::<Vec<_>>();
+                    .collect_vec();
 
                 let ty = Type::Tuple(element_types.clone());
 
@@ -1772,6 +1774,47 @@ impl TypeCheckerCtx {
 
                 return self.assign_extra(*id, expr_ty.nullable(), certainly_returns);
             }
+            // ast::Expr::Unary(ast::UnaryExpr { id, op, expr }) => {
+            //     let (expr_ty, certainly_returns) = self.infer_expr(env, expr, true)?;
+
+            //     let res_ty = Type::TypeVar(self.fresh_ty_var());
+
+            //     let Type::NamedFnOverload { defs, choice_var } =
+            //         // (it would be better if `op` had it's own ID)
+            //         self.get_local(*id, env, op.as_str())?
+            //     else {
+            //         unreachable!()
+            //     };
+
+            //     let overloads = defs
+            //         .into_iter()
+            //         .enumerate()
+            //         .filter(|(i, f_ty)| f_ty.params.len() == 1)
+            //         .map(|(i, f_ty)| {
+            //             let FnType {
+            //                 generics,
+            //                 mut params,
+            //                 ret,
+            //             } = self.instantiate_fn_ty(f_ty);
+
+            //             params.push(*ret);
+
+            //             (i, params)
+            //         })
+            //         .collect_vec();
+
+            //     self.add_constraint(Constraint::ChooseNamedFnOverload(
+            //         ChooseNamedFnOverloadConstraint {
+            //             node_id: *id,
+            //             choice_var,
+            //             nodes: vec![expr.id(), *id],
+            //             types: vec![expr_ty.clone(), res_ty.clone()],
+            //             overloads,
+            //         },
+            //     ))?;
+
+            //     return self.assign_extra(*id, res_ty, certainly_returns);
+            // }
             ast::Expr::Unary(ast::UnaryExpr { id, op, expr }) => {
                 let (expr_ty, certainly_returns) = self.infer_expr(env, expr, true)?;
 
@@ -1796,6 +1839,56 @@ impl TypeCheckerCtx {
 
                 return self.assign_extra(*id, res_ty, certainly_returns);
             }
+            // ast::Expr::Binary(ast::BinaryExpr {
+            //     id,
+            //     left,
+            //     op,
+            //     right,
+            // }) => {
+            //     let (left_ty, left_cr) = self.infer_expr(env, left, true)?;
+            //     let (right_ty, right_cr) = self.infer_expr(env, right, true)?;
+
+            //     // TODO, this is actually a bit trickier because of short-circuiting boolean ops...
+            //     let certainly_returns = left_cr || right_cr;
+
+            //     let res_ty = Type::TypeVar(self.fresh_ty_var());
+
+            //     let Type::NamedFnOverload { defs, choice_var } =
+            //         // (it would be better if `op` had it's own ID)
+            //         self.get_local(*id, env, op.as_str())?
+            //     else {
+            //         unreachable!()
+            //     };
+
+            //     let overloads = defs
+            //         .into_iter()
+            //         .enumerate()
+            //         .filter(|(i, f_ty)| f_ty.params.len() == 2)
+            //         .map(|(i, f_ty)| {
+            //             let FnType {
+            //                 generics,
+            //                 mut params,
+            //                 ret,
+            //             } = self.instantiate_fn_ty(f_ty);
+
+            //             params.push(*ret);
+
+            //             (i, params)
+            //         })
+            //         .collect_vec();
+
+            //     self.add_constraint(Constraint::ChooseNamedFnOverload(
+            //         ChooseNamedFnOverloadConstraint {
+            //             node_id: *id,
+            //             choice_var,
+            //             nodes: vec![left.id(), right.id(), *id],
+            //             types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
+            //             overloads,
+            //         },
+            //     ))?;
+
+            //     return self.assign_extra(*id, res_ty, certainly_returns);
+            // }
             ast::Expr::Binary(ast::BinaryExpr {
                 id,
                 left,
