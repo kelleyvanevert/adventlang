@@ -51,6 +51,7 @@ pub mod types;
 struct Env {
     typevars: FxHashMap<String, TypeVar>,
     locals: FxHashMap<String, Type>,
+    named_fns: FxHashMap<String, Vec<FnType>>,
     loops: FxHashMap<String, usize>, // label -> loop node id
     curr_loop: Option<String>,
     curr_fn: Option<usize>,
@@ -61,6 +62,7 @@ impl Env {
         Self {
             typevars: FxHashMap::default(),
             locals: FxHashMap::default(),
+            named_fns: FxHashMap::default(),
             loops: FxHashMap::default(),
             curr_loop: None,
             curr_fn: None,
@@ -77,20 +79,22 @@ impl Env {
         name: String,
         def: FnType,
     ) -> Result<(), TypeError> {
-        if let Some(ty) = self.locals.get_mut(&name) {
-            match ty {
-                Type::NamedFn(defs) => defs.push(def),
-                _ => {
-                    return Err(TypeError {
-                        node_id,
-                        kind: TypeErrorKind::NamedFnShadow(name, ty.clone()),
-                    });
-                }
-            }
-        } else {
-            // self.locals.insert(name, Type::NamedFn(vec![def]));
-            self.locals.insert(name, Type::Fn(def));
-        }
+        self.named_fns.entry(name).or_default().push(def);
+
+        // if let Some(ty) = self.locals.get_mut(&name) {
+        //     match ty {
+        //         Type::NamedFn(defs) => defs.push(def),
+        //         _ => {
+        //             return Err(TypeError {
+        //                 node_id,
+        //                 kind: TypeErrorKind::NamedFnShadow(name, ty.clone()),
+        //             });
+        //         }
+        //     }
+        // } else {
+        //     // self.locals.insert(name, Type::NamedFn(vec![def]));
+        //     self.locals.insert(name, Type::Fn(def));
+        // }
 
         Ok(())
     }
@@ -713,6 +717,7 @@ impl TypeCheckerCtx {
 
                 Ok(r_key + r_val)
             }
+            // (Type::NamedFn(defs)) => {}
             (
                 Type::Fn(FnType {
                     generics: a_generics,
@@ -932,6 +937,25 @@ impl TypeCheckerCtx {
             )),
             ty => todo!("can't convert typehint to type: {:?}", ty),
         }
+    }
+
+    fn get_local(&mut self, node_id: usize, env: &Env, name: &str) -> Result<Type, TypeError> {
+        if let Some(mut defs) = env.named_fns.get(name).cloned() {
+            if defs.len() == 1 {
+                return Ok(Type::Fn(defs.pop().unwrap()));
+            } else {
+                todo!("crated")
+            }
+        }
+
+        let Some(ty) = env.locals.get(name).cloned() else {
+            return Err(TypeError {
+                node_id,
+                kind: TypeErrorKind::UnknownLocal(name.to_string()),
+            });
+        };
+
+        Ok(ty)
     }
 
     fn assign_extra<E>(
@@ -1344,13 +1368,7 @@ impl TypeCheckerCtx {
     fn infer_location(&mut self, env: &mut Env, loc: &ast::AssignLoc) -> Result<Type, TypeError> {
         match loc {
             ast::AssignLoc::Var(ast::AssignLocVar { id, var }) => {
-                let Some(ty) = env.locals.get(var.as_str()).cloned() else {
-                    return Err(TypeError {
-                        node_id: *id,
-                        kind: TypeErrorKind::UnknownLocal(var.name.clone()),
-                    });
-                };
-
+                let ty = self.get_local(*id, env, var.as_str())?;
                 self.assign(*id, ty)
             }
             ast::AssignLoc::Index(ast::AssignLocIndex {
@@ -1556,7 +1574,6 @@ impl TypeCheckerCtx {
             ast::Expr::Nil(ast::NilExpr { id }) => {
                 let v = Type::TypeVar(self.fresh_ty_var());
                 return self.assign_extra(*id, Type::Nullable { child: v.into() }, false);
-                // return self.assign_extra(*id, Type::Nil, false);
             }
             ast::Expr::Regex(ast::RegexExpr { id, str }) => {
                 return self.assign_extra(*id, Type::Regex, false);
@@ -1571,15 +1588,7 @@ impl TypeCheckerCtx {
                 return self.assign_extra(*id, Type::Float, false);
             }
             ast::Expr::Var(ast::VarExpr { id, var }) => {
-                let Some(ty) = env.locals.get(var.as_str()).cloned() else {
-                    return Err(TypeError {
-                        node_id: *id,
-                        kind: TypeErrorKind::UnknownLocal(var.name.clone()),
-                    });
-                };
-
-                println!("VAR {}: {:?}", var.as_str(), ty);
-
+                let ty = self.get_local(*id, env, var.as_str())?;
                 return self.assign_extra(*id, ty, false);
             }
             ast::Expr::Unary(ast::UnaryExpr { id, op, expr }) if op.as_str() == "some" => {
