@@ -9,7 +9,24 @@ let d = "hello, " + "world"
 let e = [1,2,3][2] + [1.1,2.2,3.3][2]
 let f = 3.1 + (4 + 5)
 
+
+// =========
+// although with full information this would be possible, the information is not at hand while checking the function
+// err: NoOverload
+// =========
+
 fn add(a, b) {
+    a + b
+}
+
+add(3, 3)
+
+
+// =========
+// ok
+// =========
+
+fn add(a: int, b: int) {
     a + b
 }
 

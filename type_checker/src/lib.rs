@@ -606,131 +606,81 @@ impl TypeCheckerCtx {
         let n = choose.nodes.len();
         let num_overloads = choose.overloads.len();
 
-        let mut impossible = (0..num_overloads).map(|_| false).collect_vec();
-
         println!("SELECTING NAMED FN OVERLOAD");
-        println!("overloads:");
-        for (overload_index, types) in &choose.overloads {
-            println!(" - o-{}: {:?}", overload_index, types);
-        }
+        println!("  - arg types: {:?}", choose.types);
 
-        for indices in (0..n).powerset() {
-            if indices.len() == 0 {
-                continue;
+        let mut found = None;
+
+        for i in 0..num_overloads {
+            // TODO: bail out if already deemed impossible in a previous check
+
+            println!(
+                "  - checking overload {i} (index {}): {:?}",
+                choose.overloads[i].0, choose.overloads[i].1
+            );
+
+            let snapshot = self.unification_table.snapshot();
+
+            let mut res = ConstraintResult::Succeed;
+            let mut possible = true;
+
+            'check: for ti in 0..n {
+                match self.check_ty_equal(
+                    choose.nodes[ti],
+                    choose.types[ti].clone(),
+                    choose.overloads[i].1[ti].clone(),
+                ) {
+                    Err(err) => {
+                        possible = false;
+                        break 'check;
+                    }
+                    Ok(r) => {
+                        res += r;
+                    }
+                }
             }
 
-            // which overloads are different from all others, per these indices?
-            let check_overloads = (0..num_overloads)
-                .filter(|&i| {
-                    if impossible[i] {
-                        return false;
-                    }
-
-                    let different_than_others = (0..num_overloads).all(|j| {
-                        if i == j {
-                            // vacuously
-                            return true;
-                        }
-
-                        return indices.iter().any(|&ti| {
-                            choose.overloads[i].1[ti].irreconcilable(&choose.overloads[j].1[ti])
-                        });
-                    });
-
-                    // let reconcilable_with_args = indices
-                    //     .iter()
-                    //     .any(|&ti| choose.overloads[i].1[ti].irreconcilable(&choose.types[ti]));
-
-                    different_than_others // && reconcilable_with_args
-                })
-                .collect_vec();
-
-            println!("- TC-set {indices:?} -- overloads to check: {check_overloads:?}");
-
-            'check: for i in check_overloads {
-                if impossible[i] {
-                    // already known to be impossible
-                    continue;
+            if possible {
+                if found.is_some() {
+                    println!("      - ALSO possible -> choice needs more information");
+                    // already found one, so now there's two that are (still) eligible
+                    self.unification_table.rollback_to(snapshot);
+                    return Ok(ConstraintResult::NeedsMoreInformation);
+                } else {
+                    println!("      - possible");
+                    found = Some(i);
                 }
-
-                let mut res_accum = ConstraintResult::Succeed;
-
-                println!("  - checking overload {i}");
-                let snapshot = self.unification_table.snapshot();
-
-                for &ti in &indices {
-                    println!(
-                        "    - checking type-constraint {ti}, unifiability of {:?} =?= {:?}",
-                        self.normalize_ty(choose.types[ti].clone()),
-                        self.normalize_ty(choose.overloads[i].1[ti].clone()),
-                    );
-
-                    match self.check_ty_equal(
-                        choose.nodes[ti],
-                        choose.types[ti].clone(),
-                        choose.overloads[i].1[ti].clone(),
-                    ) {
-                        Err(r) => {
-                            // can't unify
-                            println!("      - failed, bail overload");
-                            self.unification_table.rollback_to(snapshot);
-
-                            println!(
-                                "        overload {i} is deemed IMPOSSIBLE, because of concrete type mismatch between"
-                            );
-                            impossible[i] = true;
-
-                            if impossible.iter().all(|&b| b) {
-                                // println!("  => no overloads are possible");
-                                return Err(TypeError {
-                                    node_id: choose.node_id,
-                                    kind: TypeErrorKind::NoOverload,
-                                });
-                            }
-
-                            continue 'check;
-                        }
-                        // Ok(ConstraintResult::ResolveTo())
-                        Ok(res) => {
-                            res_accum += res;
-                        }
-                    }
-                }
-
-                // success! We'll choose this overload
-                // now just check all the other constraints
-                println!("    success! overload {i} works");
-
-                // not sure if this is necessary
-                self.unification_table.commit(snapshot);
-
-                println!("      indices: {indices:?}");
-                for ti in 0..n {
-                    println!("        - {ti} -- {}", indices.contains(&ti));
-                    if !indices.contains(&ti) {
-                        println!(
-                            "    - unifying type-constraint {ti}: {:?} =?= {:?}",
-                            choose.types[ti].clone(),
-                            choose.overloads[i].1[ti].clone(),
-                        );
-                        res_accum += self.check_ty_equal(
-                            choose.nodes[ti],
-                            choose.types[ti].clone(),
-                            choose.overloads[i].1[ti].clone(),
-                        )?;
-                    }
-                }
-
-                self.progress += 1;
-                let overload_index = choose.overloads[i].0;
-                self.overload_choices[choose.choice_var] = Some(overload_index);
-
-                return Ok(res_accum);
             }
+
+            self.unification_table.rollback_to(snapshot);
         }
+
+        if let Some(i) = found {
+            println!("  - found! {:?}", choose.overloads[i].1);
+
+            self.progress += 1;
+            let overload_index = choose.overloads[i].0;
+            self.overload_choices[choose.choice_var] = Some(overload_index);
+
+            let mut res = ConstraintResult::Succeed;
+            for ti in 0..n {
+                res += self.check_ty_equal(
+                    choose.nodes[ti],
+                    choose.types[ti].clone(),
+                    choose.overloads[i].1[ti].clone(),
+                )?;
+            }
+
+            return Ok(res);
+        }
+
+        println!("  - NOT found");
 
         // we didn't succeed at finding an option -- which doesn't mean type-checking has failed
-        Ok(ConstraintResult::NeedsMoreInformation)
+        Err(TypeError {
+            node_id: choose.node_id,
+            kind: TypeErrorKind::NoOverload,
+        })
     }
 
     fn choose_operator_overload(
@@ -1774,118 +1724,68 @@ impl TypeCheckerCtx {
 
                 return self.assign_extra(*id, expr_ty.nullable(), certainly_returns);
             }
-            // ast::Expr::Unary(ast::UnaryExpr { id, op, expr }) => {
-            //     let (expr_ty, certainly_returns) = self.infer_expr(env, expr, true)?;
-
-            //     let res_ty = Type::TypeVar(self.fresh_ty_var());
-
-            //     let Type::NamedFnOverload { defs, choice_var } =
-            //         // (it would be better if `op` had it's own ID)
-            //         self.get_local(*id, env, op.as_str())?
-            //     else {
-            //         unreachable!()
-            //     };
-
-            //     let overloads = defs
-            //         .into_iter()
-            //         .enumerate()
-            //         .filter(|(i, f_ty)| f_ty.params.len() == 1)
-            //         .map(|(i, f_ty)| {
-            //             let FnType {
-            //                 generics,
-            //                 mut params,
-            //                 ret,
-            //             } = self.instantiate_fn_ty(f_ty);
-
-            //             params.push(*ret);
-
-            //             (i, params)
-            //         })
-            //         .collect_vec();
-
-            //     self.add_constraint(Constraint::ChooseNamedFnOverload(
-            //         ChooseNamedFnOverloadConstraint {
-            //             node_id: *id,
-            //             choice_var,
-            //             nodes: vec![expr.id(), *id],
-            //             types: vec![expr_ty.clone(), res_ty.clone()],
-            //             overloads,
-            //         },
-            //     ))?;
-
-            //     return self.assign_extra(*id, res_ty, certainly_returns);
-            // }
             ast::Expr::Unary(ast::UnaryExpr { id, op, expr }) => {
                 let (expr_ty, certainly_returns) = self.infer_expr(env, expr, true)?;
 
                 let res_ty = Type::TypeVar(self.fresh_ty_var());
 
-                match op.as_str() {
-                    "-" => {
-                        self.add_constraint(Constraint::ChooseOperatorOverload(
-                            ChooseOperatorOverloadConstraint {
-                                node_id: *id,
-                                nodes: vec![expr.id(), *id],
-                                types: vec![expr_ty.clone(), res_ty.clone()],
-                                overloads: vec![
-                                    vec![Type::Int, Type::Int],
-                                    vec![Type::Float, Type::Float],
-                                ],
-                            },
-                        ))?;
-                    }
-                    _ => todo!("binary operator {op}"),
-                }
+                let Type::NamedFnOverload { defs, choice_var } =
+                    // (it would be better if `op` had it's own ID)
+                    self.get_local(*id, env, op.as_str())?
+                else {
+                    unreachable!()
+                };
+
+                let overloads = defs
+                    .into_iter()
+                    .enumerate()
+                    .filter(|(i, f_ty)| f_ty.params.len() == 1)
+                    .map(|(i, f_ty)| {
+                        let FnType {
+                            generics,
+                            mut params,
+                            ret,
+                        } = self.instantiate_fn_ty(f_ty);
+
+                        params.push(*ret);
+
+                        (i, params)
+                    })
+                    .collect_vec();
+
+                self.add_constraint(Constraint::ChooseNamedFnOverload(
+                    ChooseNamedFnOverloadConstraint {
+                        node_id: *id,
+                        choice_var,
+                        nodes: vec![expr.id(), *id],
+                        types: vec![expr_ty.clone(), res_ty.clone()],
+                        overloads,
+                    },
+                ))?;
 
                 return self.assign_extra(*id, res_ty, certainly_returns);
             }
-            // ast::Expr::Binary(ast::BinaryExpr {
-            //     id,
-            //     left,
-            //     op,
-            //     right,
-            // }) => {
-            //     let (left_ty, left_cr) = self.infer_expr(env, left, true)?;
-            //     let (right_ty, right_cr) = self.infer_expr(env, right, true)?;
-
-            //     // TODO, this is actually a bit trickier because of short-circuiting boolean ops...
-            //     let certainly_returns = left_cr || right_cr;
+            // ast::Expr::Unary(ast::UnaryExpr { id, op, expr }) => {
+            //     let (expr_ty, certainly_returns) = self.infer_expr(env, expr, true)?;
 
             //     let res_ty = Type::TypeVar(self.fresh_ty_var());
 
-            //     let Type::NamedFnOverload { defs, choice_var } =
-            //         // (it would be better if `op` had it's own ID)
-            //         self.get_local(*id, env, op.as_str())?
-            //     else {
-            //         unreachable!()
-            //     };
-
-            //     let overloads = defs
-            //         .into_iter()
-            //         .enumerate()
-            //         .filter(|(i, f_ty)| f_ty.params.len() == 2)
-            //         .map(|(i, f_ty)| {
-            //             let FnType {
-            //                 generics,
-            //                 mut params,
-            //                 ret,
-            //             } = self.instantiate_fn_ty(f_ty);
-
-            //             params.push(*ret);
-
-            //             (i, params)
-            //         })
-            //         .collect_vec();
-
-            //     self.add_constraint(Constraint::ChooseNamedFnOverload(
-            //         ChooseNamedFnOverloadConstraint {
-            //             node_id: *id,
-            //             choice_var,
-            //             nodes: vec![left.id(), right.id(), *id],
-            //             types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
-            //             overloads,
-            //         },
-            //     ))?;
+            //     match op.as_str() {
+            //         "-" => {
+            //             self.add_constraint(Constraint::ChooseOperatorOverload(
+            //                 ChooseOperatorOverloadConstraint {
+            //                     node_id: *id,
+            //                     nodes: vec![expr.id(), *id],
+            //                     types: vec![expr_ty.clone(), res_ty.clone()],
+            //                     overloads: vec![
+            //                         vec![Type::Int, Type::Int],
+            //                         vec![Type::Float, Type::Float],
+            //                     ],
+            //                 },
+            //             ))?;
+            //         }
+            //         _ => todo!("binary operator {op}"),
+            //     }
 
             //     return self.assign_extra(*id, res_ty, certainly_returns);
             // }
@@ -1903,91 +1803,141 @@ impl TypeCheckerCtx {
 
                 let res_ty = Type::TypeVar(self.fresh_ty_var());
 
-                match op.as_str() {
-                    "==" => {
-                        self.add_constraint(Constraint::ChooseOperatorOverload(
-                            ChooseOperatorOverloadConstraint {
-                                node_id: *id,
-                                nodes: vec![left.id(), right.id(), *id],
-                                types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
-                                overloads: vec![
-                                    vec![Type::Str, Type::Str, Type::Bool],
-                                    vec![Type::Int, Type::Int, Type::Bool],
-                                    vec![Type::Float, Type::Float, Type::Bool],
-                                    vec![Type::Bool, Type::Bool, Type::Bool],
-                                ],
-                            },
-                        ))?;
-                    }
-                    "&&" | "||" => {
-                        self.add_constraint(Constraint::ChooseOperatorOverload(
-                            ChooseOperatorOverloadConstraint {
-                                node_id: *id,
-                                nodes: vec![left.id(), right.id(), *id],
-                                types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
-                                overloads: vec![
-                                    //
-                                    vec![Type::Bool, Type::Bool, Type::Bool],
-                                ],
-                            },
-                        ))?;
-                    }
-                    ">" | "<" | "<=" | ">=" => {
-                        self.add_constraint(Constraint::ChooseOperatorOverload(
-                            ChooseOperatorOverloadConstraint {
-                                node_id: *id,
-                                nodes: vec![left.id(), right.id(), *id],
-                                types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
-                                overloads: vec![
-                                    vec![Type::Int, Type::Int, Type::Bool],
-                                    vec![Type::Float, Type::Float, Type::Bool],
-                                ],
-                            },
-                        ))?;
-                    }
-                    "+" | "^" => {
-                        // a + b
-                        // +: fn(int, int) -> int
-                        // +: fn(int, float) -> float
-                        // +: fn(float, int) -> float
-                        // +: fn(float, float) -> float
-                        // +: fn(str, str) -> str
+                let Type::NamedFnOverload { defs, choice_var } =
+                    // (it would be better if `op` had it's own ID)
+                    self.get_local(*id, env, op.as_str())?
+                else {
+                    unreachable!()
+                };
 
-                        self.add_constraint(Constraint::ChooseOperatorOverload(
-                            ChooseOperatorOverloadConstraint {
-                                node_id: *id,
-                                nodes: vec![left.id(), right.id(), *id],
-                                types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
-                                overloads: vec![
-                                    vec![Type::Int, Type::Int, Type::Int],
-                                    vec![Type::Int, Type::Float, Type::Float],
-                                    vec![Type::Float, Type::Int, Type::Float],
-                                    vec![Type::Float, Type::Float, Type::Float],
-                                    vec![Type::Str, Type::Str, Type::Str],
-                                ],
-                            },
-                        ))?;
-                    }
-                    "-" => {
-                        self.add_constraint(Constraint::ChooseOperatorOverload(
-                            ChooseOperatorOverloadConstraint {
-                                node_id: *id,
-                                nodes: vec![left.id(), right.id(), *id],
-                                types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
-                                overloads: vec![
-                                    vec![Type::Int, Type::Int, Type::Int],
-                                    vec![Type::Int, Type::Float, Type::Float],
-                                    vec![Type::Float, Type::Int, Type::Float],
-                                    vec![Type::Float, Type::Float, Type::Float],
-                                ],
-                            },
-                        ))?;
-                    }
-                    _ => todo!("binary operator {op}"),
-                }
+                let overloads = defs
+                    .into_iter()
+                    .enumerate()
+                    .filter(|(i, f_ty)| f_ty.params.len() == 2)
+                    .map(|(i, f_ty)| {
+                        let FnType {
+                            generics,
+                            mut params,
+                            ret,
+                        } = self.instantiate_fn_ty(f_ty);
+
+                        params.push(*ret);
+
+                        (i, params)
+                    })
+                    .collect_vec();
+
+                self.add_constraint(Constraint::ChooseNamedFnOverload(
+                    ChooseNamedFnOverloadConstraint {
+                        node_id: *id,
+                        choice_var,
+                        nodes: vec![left.id(), right.id(), *id],
+                        types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
+                        overloads,
+                    },
+                ))?;
 
                 return self.assign_extra(*id, res_ty, certainly_returns);
             }
+            // ast::Expr::Binary(ast::BinaryExpr {
+            //     id,
+            //     left,
+            //     op,
+            //     right,
+            // }) => {
+            //     let (left_ty, left_cr) = self.infer_expr(env, left, true)?;
+            //     let (right_ty, right_cr) = self.infer_expr(env, right, true)?;
+
+            //     // TODO, this is actually a bit trickier because of short-circuiting boolean ops...
+            //     let certainly_returns = left_cr || right_cr;
+
+            //     let res_ty = Type::TypeVar(self.fresh_ty_var());
+
+            //     match op.as_str() {
+            //         "==" => {
+            //             self.add_constraint(Constraint::ChooseOperatorOverload(
+            //                 ChooseOperatorOverloadConstraint {
+            //                     node_id: *id,
+            //                     nodes: vec![left.id(), right.id(), *id],
+            //                     types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
+            //                     overloads: vec![
+            //                         vec![Type::Str, Type::Str, Type::Bool],
+            //                         vec![Type::Int, Type::Int, Type::Bool],
+            //                         vec![Type::Float, Type::Float, Type::Bool],
+            //                         vec![Type::Bool, Type::Bool, Type::Bool],
+            //                     ],
+            //                 },
+            //             ))?;
+            //         }
+            //         "&&" | "||" => {
+            //             self.add_constraint(Constraint::ChooseOperatorOverload(
+            //                 ChooseOperatorOverloadConstraint {
+            //                     node_id: *id,
+            //                     nodes: vec![left.id(), right.id(), *id],
+            //                     types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
+            //                     overloads: vec![
+            //                         //
+            //                         vec![Type::Bool, Type::Bool, Type::Bool],
+            //                     ],
+            //                 },
+            //             ))?;
+            //         }
+            //         ">" | "<" | "<=" | ">=" => {
+            //             self.add_constraint(Constraint::ChooseOperatorOverload(
+            //                 ChooseOperatorOverloadConstraint {
+            //                     node_id: *id,
+            //                     nodes: vec![left.id(), right.id(), *id],
+            //                     types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
+            //                     overloads: vec![
+            //                         vec![Type::Int, Type::Int, Type::Bool],
+            //                         vec![Type::Float, Type::Float, Type::Bool],
+            //                     ],
+            //                 },
+            //             ))?;
+            //         }
+            //         "+" | "^" => {
+            //             // a + b
+            //             // +: fn(int, int) -> int
+            //             // +: fn(int, float) -> float
+            //             // +: fn(float, int) -> float
+            //             // +: fn(float, float) -> float
+            //             // +: fn(str, str) -> str
+
+            //             self.add_constraint(Constraint::ChooseOperatorOverload(
+            //                 ChooseOperatorOverloadConstraint {
+            //                     node_id: *id,
+            //                     nodes: vec![left.id(), right.id(), *id],
+            //                     types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
+            //                     overloads: vec![
+            //                         vec![Type::Int, Type::Int, Type::Int],
+            //                         vec![Type::Int, Type::Float, Type::Float],
+            //                         vec![Type::Float, Type::Int, Type::Float],
+            //                         vec![Type::Float, Type::Float, Type::Float],
+            //                         vec![Type::Str, Type::Str, Type::Str],
+            //                     ],
+            //                 },
+            //             ))?;
+            //         }
+            //         "-" => {
+            //             self.add_constraint(Constraint::ChooseOperatorOverload(
+            //                 ChooseOperatorOverloadConstraint {
+            //                     node_id: *id,
+            //                     nodes: vec![left.id(), right.id(), *id],
+            //                     types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
+            //                     overloads: vec![
+            //                         vec![Type::Int, Type::Int, Type::Int],
+            //                         vec![Type::Int, Type::Float, Type::Float],
+            //                         vec![Type::Float, Type::Int, Type::Float],
+            //                         vec![Type::Float, Type::Float, Type::Float],
+            //                     ],
+            //                 },
+            //             ))?;
+            //         }
+            //         _ => todo!("binary operator {op}"),
+            //     }
+
+            //     return self.assign_extra(*id, res_ty, certainly_returns);
+            // }
             ast::Expr::List(ast::ListExpr {
                 id,
                 elements,
