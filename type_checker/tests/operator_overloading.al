@@ -80,3 +80,21 @@ fn add(a, b) {
     a + b
 //  ^here
 }
+
+
+// ======
+// err
+// ======
+
+let x = -4
+let x = (--4 == 4) == 4.5
+let x = !true
+
+
+// ======
+// ok
+// ======
+
+let x = -4
+let x = (--4 == 4) == !false
+let x = !true

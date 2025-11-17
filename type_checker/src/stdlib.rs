@@ -109,11 +109,18 @@ pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
         -: fn(int) -> int
         -: fn(float) -> float
 
+        !: fn(bool) -> bool
+
         +: fn(int, int) -> int
         +: fn(int, float) -> float
         +: fn(float, int) -> float
         +: fn(float, float) -> float
         +: fn(str, str) -> str
+
+        ^: fn(int, int) -> int
+        ^: fn(int, float) -> float
+        ^: fn(float, int) -> float
+        ^: fn(float, float) -> float
     ";
 
     for line in stdlib.trim().lines() {
