@@ -2881,7 +2881,9 @@ mod test {
                 let mut test_lines: Vec<&str> = vec![];
 
                 'gather: for (i, line) in lines.enumerate() {
-                    if status == "test" && line.starts_with("// ======") {
+                    if line.starts_with("// skip-all") {
+                        return;
+                    } else if status == "test" && line.starts_with("// ======") {
                         if expectation.len() > 0 {
                             let test_case = (
                                 description.join("\n"),
