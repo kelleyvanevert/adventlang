@@ -132,16 +132,16 @@ impl FnType {
             && self.ret.alpha_eq(&other.ret, &bound)
     }
 
-    pub fn occurs_check(&self, var: TypeVar) -> Result<(), Type> {
+    pub fn occurs_check(&self, var: TypeVar) -> Result<(), FnType> {
         if self.generics.contains(&var) {
             // the variable is shadowed
             return Ok(());
         }
 
         for p in &self.params {
-            p.occurs_check(var).map_err(|_| self.clone());
+            p.occurs_check(var).map_err(|_| self.clone())?;
         }
-        self.ret.occurs_check(var).map_err(|_| self.clone());
+        self.ret.occurs_check(var).map_err(|_| self.clone())?;
         Ok(())
     }
 
@@ -267,7 +267,10 @@ impl Type {
                     Ok(())
                 }
             }
-            Type::Fn(def) => def.occurs_check(var),
+            Type::Fn(def) => {
+                def.occurs_check(var).map_err(|_| self.clone())?;
+                Ok(())
+            }
             Type::NamedFnOverload { defs, .. } => {
                 for def in defs {
                     def.occurs_check(var).map_err(|_| self.clone())?;

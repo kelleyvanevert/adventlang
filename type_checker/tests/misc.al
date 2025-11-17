@@ -9,7 +9,6 @@ fn bla<t>(a: [t]) {
 
 // ======
 // err: InfiniteType
-// skip
 // ======
 
 fn bla<t>(a: fn(t) -> t) {
