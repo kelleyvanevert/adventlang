@@ -11,7 +11,7 @@ use std::{
 use ena::unify::{InPlaceUnificationTable, UnifyKey};
 use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
-use parser::ast::{self, AstNode};
+use parser::ast::{self, AstNode, IfExpr};
 use thiserror::Error;
 
 use crate::{
@@ -1648,6 +1648,56 @@ impl TypeCheckerCtx {
         self.assign(*id, pattern_ty)
     }
 
+    fn infer_if_branch(
+        &mut self,
+        env: &mut Env,
+        branch: &ast::IfBranch,
+        use_result: bool,
+    ) -> Result<
+        (
+            Type,
+            (
+                bool, // condition certainly returns
+                bool, // body certainly returns
+            ),
+        ),
+        TypeError,
+    > {
+        match branch {
+            ast::IfBranch::If(ast::IfThenBranch { id, cond, body }) => {
+                let (cond_ty, cond_cr) = self.check_expr(env, cond, Type::Bool)?;
+
+                let (then_ty, body_cr) =
+                    self.infer_block(&mut env.clone(), body, use_result, false)?;
+
+                let ty = if use_result { then_ty } else { Type::Nil };
+
+                return self.assign_extra(*id, ty, (cond_cr, body_cr));
+            }
+            ast::IfBranch::IfLet(ast::IfLetThenBranch {
+                id,
+                pattern,
+                expr,
+                body,
+            }) => {
+                let mut declare_locals = FxHashMap::default();
+                let pattern_ty =
+                    self.infer_declare_pattern(env, pattern, &mut declare_locals, true)?;
+
+                let (expr_ty, expr_cr) = self.check_expr(env, expr, pattern_ty.nullable())?;
+
+                let mut then_child_env = env.clone();
+                then_child_env.add_locals(declare_locals);
+                let (then_ty, body_cr) =
+                    self.infer_block(&mut then_child_env, body, use_result, false)?;
+
+                let ty = if use_result { then_ty } else { Type::Nil };
+
+                return self.assign_extra(*id, ty, (expr_cr, body_cr));
+            }
+        }
+    }
+
     fn infer_expr(
         &mut self,
         env: &mut Env,
@@ -2210,105 +2260,64 @@ impl TypeCheckerCtx {
 
                 return self.assign_extra(*id, ty, false);
             }
-            ast::Expr::IfLet(ast::IfLetExpr {
-                id,
-                pattern,
-                expr,
-                then,
-                else_if,
-                else_then,
-            }) => {
-                let mut declare_locals = FxHashMap::default();
-                let pattern_ty =
-                    self.infer_declare_pattern(env, pattern, &mut declare_locals, true)?;
-
-                let (expr_ty, mut certainly_returns) =
-                    self.check_expr(env, expr, pattern_ty.nullable())?;
-
-                let mut then_child_env = env.clone();
-                then_child_env.add_locals(declare_locals);
-                let (then_ty, then_returns) =
-                    self.infer_block(&mut then_child_env, then, use_result, false)?;
-
-                let mut els = None;
-                if let Some(expr) = else_if {
-                    els = Some((expr.id(), self.infer_expr(&mut env.clone(), expr, true)?));
-                } else if let Some(block) = else_then {
-                    els = Some((
-                        expr.id(),
-                        self.infer_block(&mut env.clone(), block, true, false)?,
-                    ));
-                }
-
-                let mut ty = if use_result {
-                    if els.is_some() {
-                        then_ty.clone()
-                    } else {
-                        then_ty.clone().nullable()
-                    }
-                } else {
-                    Type::Nil
-                };
-
-                if let Some((node_id, (t, else_returns))) = els {
-                    if use_result {
-                        ty = t.clone();
-                        self.add_constraint(Constraint::TypeEqual(node_id, then_ty.clone(), t))?;
-                    }
-                    if then_returns && else_returns {
-                        certainly_returns = true;
-                    }
-                }
-
-                return self.assign_extra(*id, ty, certainly_returns);
-            }
             ast::Expr::If(ast::IfExpr {
                 id,
-                cond,
-                then,
-                else_if,
-                else_then,
+                if_branches,
+                else_branch,
             }) => {
-                let (cond_ty, mut certainly_returns) = self.check_expr(env, cond, Type::Bool)?;
+                let fully_branched = else_branch.is_some();
 
-                let (then_ty, then_returns) =
-                    self.infer_block(&mut env.clone(), then, use_result, false)?;
+                let (then_ty, (first_cond_certain_return, first_body_certain_return)) =
+                    self.infer_if_branch(env, &if_branches[0], use_result)?;
 
-                let mut els = None;
-                if let Some(expr) = else_if {
-                    els = Some((expr.id(), self.infer_expr(&mut env.clone(), expr, true)?));
-                } else if let Some(block) = else_then {
-                    els = Some((
-                        expr.id(),
-                        self.infer_block(&mut env.clone(), block, true, false)?,
-                    ));
+                let mut branch_bodies_cr = vec![first_body_certain_return];
+
+                for i in 1..if_branches.len() {
+                    let (next_branch_ty, (_, body_cr)) =
+                        self.infer_if_branch(env, &if_branches[i], use_result)?;
+
+                    branch_bodies_cr.push(body_cr);
+
+                    if use_result {
+                        self.add_constraint(Constraint::TypeEqual(
+                            if_branches[i].id(),
+                            then_ty.clone(),
+                            next_branch_ty,
+                        ))?;
+                    }
+                }
+
+                if let Some(block) = else_branch.as_ref() {
+                    let (next_branch_ty, body_cr) =
+                        self.infer_block(env, block, use_result, false)?;
+
+                    branch_bodies_cr.push(body_cr);
+
+                    if use_result {
+                        self.add_constraint(Constraint::TypeEqual(
+                            block.id(),
+                            then_ty.clone(),
+                            next_branch_ty,
+                        ))?;
+                    }
                 }
 
                 let mut ty = if use_result {
-                    if els.is_some() {
-                        then_ty.clone()
+                    if else_branch.is_some() {
+                        then_ty
                     } else {
-                        then_ty.clone().nullable()
+                        then_ty.nullable()
                     }
                 } else {
                     Type::Nil
                 };
 
-                if let Some((node_id, (t, else_returns))) = els {
-                    if use_result {
-                        ty = t.clone();
-                        println!(
-                            "IF ELSE BRANCH EQ CHECK. THEN: {:?}, ELSE: {:?}",
-                            then_ty, t
-                        );
-                        self.add_constraint(Constraint::TypeEqual(node_id, then_ty.clone(), t))?;
-                    }
-                    if then_returns && else_returns {
-                        certainly_returns = true;
-                    }
-                }
-
-                return self.assign_extra(*id, ty, certainly_returns);
+                return self.assign_extra(
+                    *id,
+                    ty,
+                    first_cond_certain_return
+                        || (fully_branched && branch_bodies_cr.iter().all(|&b| b)),
+                );
             }
             ast::Expr::While(ast::WhileExpr {
                 id,
@@ -2622,7 +2631,7 @@ impl TypeCheckerCtx {
 #[cfg(test)]
 mod test {
     use itertools::Itertools;
-    use parser::{ParseResult, ast::SExpPrintJob, parse_document_ts, parse_type};
+    use parser::{TSParseResult, ast::SExpPrintJob, parse_document_ts, parse_type};
     use tree_sitter::{Node, Tree};
 
     use crate::{Env, TypeCheckerCtx, TypeError, TypeErrorKind, types::Type};
@@ -2737,7 +2746,7 @@ mod test {
         }
     }
 
-    fn print_type_error(parse_result: ParseResult, err: TypeError) {
+    fn print_type_error(parse_result: TSParseResult, err: TypeError) {
         let error_node = parse_result.find_cst_node(err.node_id);
 
         let start_byte = error_node.start_byte();

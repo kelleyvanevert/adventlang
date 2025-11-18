@@ -1048,7 +1048,7 @@
     }
   },
   {
-    "type": "if_expr",
+    "type": "if_branch",
     "named": true,
     "fields": {
       "body": {
@@ -1071,7 +1071,23 @@
           }
         ]
       },
-      "else": {
+      "pattern": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "_declare_pattern",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "if_expr",
+    "named": true,
+    "fields": {
+      "else_branch": {
         "multiple": false,
         "required": false,
         "types": [
@@ -1081,22 +1097,12 @@
           }
         ]
       },
-      "else_if": {
-        "multiple": false,
-        "required": false,
+      "if_branch": {
+        "multiple": true,
+        "required": true,
         "types": [
           {
-            "type": "if_expr",
-            "named": true
-          }
-        ]
-      },
-      "pattern": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "_declare_pattern",
+            "type": "if_branch",
             "named": true
           }
         ]

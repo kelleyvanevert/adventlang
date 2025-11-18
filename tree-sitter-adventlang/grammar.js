@@ -76,7 +76,6 @@ module.exports = grammar({
 
     // I don't actually understand how these conflict could occur
     [$.while_expr, $.parenthesized_expr],
-    [$.if_expr, $.parenthesized_expr],
     [$.do_while_expr, $.parenthesized_expr],
 
     [$.assign_list, $.list_expr],
@@ -356,18 +355,16 @@ module.exports = grammar({
       field("body", $.block_expr),
     ),
 
-    if_expr: $ => seq(
-      // optional(seq(field("label", $.label), ":")),
+    if_branch: $ => seq(
       "if",
-      maybeParenthesized(seq(optional(seq("let", field("pattern", $._declare_pattern), "=")), field("cond", $._expr))),
+      seq(optional(seq("let", field("pattern", $._declare_pattern), "=")), field("cond", $._expr)),
       field("body", $.block_expr),
-      optional(seq(
-        "else",
-        choice(
-          field("else_if", $.if_expr),
-          field("else", $.block_expr),
-        ),
-      )),
+    ),
+
+    if_expr: $ => seq(
+      field("if_branch", $.if_branch),
+      repeat(seq("else", field("if_branch", $.if_branch))),
+      optional(seq("else", field("else_branch", $.block_expr))),
     ),
 
     loop_expr: $ => seq(

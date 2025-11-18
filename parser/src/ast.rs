@@ -421,19 +421,25 @@ ast_nodes! {
         body: Block,
     }
 
-    struct IfLetExpr {
-        pattern: DeclarePattern,
-        expr: Box<Expr>,
-        then: Block,
-        else_if: Option<Box<Expr>>,
-        else_then: Option<Block>,
+    struct IfExpr {
+        if_branches: Vec<IfBranch>,
+        else_branch: Option<Block>,
     }
 
-    struct IfExpr {
+    enum IfBranch {
+        IfLet(IfLetThenBranch),
+        If(IfThenBranch),
+    }
+
+    struct IfLetThenBranch {
+        pattern: DeclarePattern,
+        expr: Box<Expr>,
+        body: Block,
+    }
+
+    struct IfThenBranch {
         cond: Box<Expr>,
-        then: Block,
-        else_if: Option<Box<Expr>>,
-        else_then: Option<Block>,
+        body: Block,
     }
 
     struct WhileLetExpr {
@@ -490,7 +496,6 @@ ast_nodes! {
         Call(CallExpr),
         AnonymousFn(AnonymousFnExpr),
         If(IfExpr),
-        IfLet(IfLetExpr),
         While(WhileExpr),
         WhileLet(WhileLetExpr),
         Do(DoExpr),

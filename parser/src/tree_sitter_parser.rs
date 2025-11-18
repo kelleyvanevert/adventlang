@@ -3,14 +3,14 @@ use tree_sitter::{Node, Tree};
 use crate::ast::*;
 
 #[derive(Debug, Clone)]
-pub struct ParseResult<'a> {
+pub struct TSParseResult<'a> {
     pub source: &'a str,
     ast_node_origin: Vec<usize>,
     pub tree: Tree,
     pub document: Document,
 }
 
-impl<'a> ParseResult<'a> {
+impl<'a> TSParseResult<'a> {
     pub fn find_cst_node(&'a self, ast_node_id: usize) -> Node<'a> {
         let Some(cst_node_id) = self.ast_node_origin.get(ast_node_id).cloned() else {
             panic!("Could not find CST node ID associated to AST node ID {ast_node_id}");
@@ -40,7 +40,7 @@ fn find_node_by_id(node: Node, target_id: usize) -> Option<Node> {
     None
 }
 
-pub fn parse_document_ts<'a>(source: &'a str) -> Option<ParseResult<'a>> {
+pub fn parse_document_ts<'a>(source: &'a str) -> Option<TSParseResult<'a>> {
     let mut parser = tree_sitter::Parser::new();
     let language = tree_sitter_adventlang::LANGUAGE;
     parser
@@ -58,7 +58,7 @@ pub fn parse_document_ts<'a>(source: &'a str) -> Option<ParseResult<'a>> {
     let mut converter = Converter::new(source);
     let document = converter.as_doc(root_node);
 
-    Some(ParseResult {
+    Some(TSParseResult {
         source,
         tree,
         document,
@@ -68,7 +68,7 @@ pub fn parse_document_ts<'a>(source: &'a str) -> Option<ParseResult<'a>> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{ParseResult, tree_sitter_parser::parse_document_ts};
+    use crate::{TSParseResult, tree_sitter_parser::parse_document_ts};
 
     #[test]
     fn test() {
@@ -87,7 +87,7 @@ mod tests {
         // let source = "arr []= 7";
         let source = "arr[2] []= 7";
 
-        let ParseResult { document, .. } = parse_document_ts(source).expect("can parse");
+        let TSParseResult { document, .. } = parse_document_ts(source).expect("can parse");
 
         // let doc2 = parse_document(source).expect("can parse original");
 
@@ -535,30 +535,28 @@ impl<'a> Converter<'a> {
                 range: node.map_child("range", |node| self.as_expr(node).into()),
                 body: node.map_child("body", |node| self.as_block(node)),
             }),
-            "if_expr" => {
-                let cond = node.map_child("cond", |node| self.as_expr(node).into());
-                let then = node.map_child("body", |node| self.as_block(node));
-                let else_if = node.map_opt_child("else_if", |node| self.as_expr(node).into());
-                let else_then = node.map_opt_child("else", |node| self.as_block(node));
+            "if_expr" => Expr::If(IfExpr {
+                id: self.fresh_ast_node_id(node),
+                if_branches: node.map_children("if_branch", |branch| {
+                    let cond = branch.map_child("cond", |n| self.as_expr(n).into());
+                    let body = branch.map_child("body", |n| self.as_block(n));
 
-                match node.map_opt_child("pattern", |node| self.as_declare_pattern(node)) {
-                    None => Expr::If(IfExpr {
-                        id: self.fresh_ast_node_id(node),
-                        cond,
-                        then,
-                        else_if,
-                        else_then,
-                    }),
-                    Some(pattern) => Expr::IfLet(IfLetExpr {
-                        id: self.fresh_ast_node_id(node),
-                        pattern,
-                        expr: cond,
-                        then,
-                        else_if,
-                        else_then,
-                    }),
-                }
-            }
+                    match branch.map_opt_child("pattern", |n| self.as_declare_pattern(n)) {
+                        None => IfBranch::If(IfThenBranch {
+                            id: self.fresh_ast_node_id(branch),
+                            cond,
+                            body,
+                        }),
+                        Some(pattern) => IfBranch::IfLet(IfLetThenBranch {
+                            id: self.fresh_ast_node_id(node),
+                            pattern,
+                            expr: cond,
+                            body,
+                        }),
+                    }
+                }),
+                else_branch: node.map_opt_child("else_branch", |node| self.as_block(node)),
+            }),
             _ => panic!("can't interpret as expr: {:?}", node),
         }
     }

@@ -401,7 +401,7 @@ where
     }
 }
 
-fn if_expr(s: State) -> ParseResult<State, Expr> {
+fn if_branch(s: State) -> ParseResult<State, IfBranch> {
     map(
         seq((
             tag("if"),
@@ -416,42 +416,31 @@ fn if_expr(s: State) -> ParseResult<State, Expr> {
             ))),
             ws0,
             delimited(seq((char('{'), ws0)), block_contents, seq((ws0, char('}')))),
-            optional(preceded(
-                seq((ws0, tag("else"), ws0)),
-                alt((
-                    map(if_expr, Either::Left),
-                    map(
-                        delimited(
-                            seq((ws0, char('{'), ws0)),
-                            block_contents,
-                            seq((ws0, char('}'))),
-                        ),
-                        Either::Right,
-                    ),
-                )),
+        )),
+        |(_, _, (pattern, cond), _, body)| match pattern {
+            None => IfBranch::If(IfThenBranch::new_simple(cond.into(), body)),
+            Some(pattern) => {
+                IfBranch::IfLet(IfLetThenBranch::new_simple(pattern, cond.into(), body))
+            }
+        },
+    )
+    .parse(s)
+}
+
+fn if_expr(s: State) -> ParseResult<State, Expr> {
+    map(
+        seq((
+            if_branch,
+            many0(preceded(seq((ws0, tag("else"), ws0)), if_branch)),
+            optional(delimited(
+                seq((ws0, tag("else"), ws0, char('{'), ws0)),
+                block_contents,
+                seq((ws0, char('}'))),
             )),
         )),
-        |(_, _, (pattern, cond), _, then, further)| {
-            let else_if = match further.clone() {
-                Some(Either::Left(if_expr)) => Some(if_expr.into()),
-                _ => None,
-            };
-
-            let else_then = match further {
-                Some(Either::Right(else_block)) => Some(else_block),
-                _ => None,
-            };
-
-            match pattern {
-                None => Expr::If(IfExpr::new_simple(cond.into(), then, else_if, else_then)),
-                Some(pattern) => Expr::IfLet(IfLetExpr::new_simple(
-                    pattern,
-                    cond.into(),
-                    then,
-                    else_if,
-                    else_then,
-                )),
-            }
+        |(first_if_branch, mut if_branches, else_branch)| {
+            if_branches.insert(0, first_if_branch);
+            Expr::If(IfExpr::new_simple(if_branches, else_branch))
         },
     )
     .parse(s)

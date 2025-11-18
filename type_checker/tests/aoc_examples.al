@@ -320,17 +320,17 @@ fn bonus(input: str) {
     let end = seed + num
     while seed < end {
       let n = seed
-      let skip = MAX_INT
+      let skp = MAX_INT // renamed to skp so searching sk?pped tests is easier
       for let m in mappers {
         let t = m(n)
         // n = t[0] // TODO tuple indexing
         n = t :fst
-        // skip = t[1] :min skip // TODO tuple indexing
-        skip = t :snd :min skip
+        // skp = t[1] :min skp // TODO tuple indexing
+        skp = t :snd :min skp
       }
 
       loc = loc :min n
-      seed += skip
+      seed += skp
     }
   }
 

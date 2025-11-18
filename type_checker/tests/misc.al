@@ -115,20 +115,24 @@ bla(|| { return 42 })
 
 // ======
 // ok
-// skip -- TODO: fix if-else-if branch nullability
 // ======
 
-fn bla() {
-  if true {
-    return 2
-  } else if true {
-    return 2
-  } else if true {
-    return 2
-  }
-
-  return 2
+let r: ?nil = if true {
+  let a = 2
 }
+
+let r: nil = if true {
+  let a = 2
+} else {
+  let a = 2
+}
+
+let r: ?nil = if true {
+  let a = 2
+} else if true {
+  let a = 2
+}
+
 
 
 // ======
