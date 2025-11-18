@@ -902,6 +902,9 @@ impl TypeCheckerCtx {
         let right = self.normalize_ty(right);
 
         match (left, right) {
+            // hack
+            (Type::Never, _) | (_, Type::Never) => Ok(ConstraintResult::Succeed),
+
             (Type::Nil, Type::Nil) => Ok(ConstraintResult::Succeed),
             (Type::Bool, Type::Bool) => Ok(ConstraintResult::Succeed),
             (Type::Str, Type::Str) => Ok(ConstraintResult::Succeed),
@@ -1048,6 +1051,7 @@ impl TypeCheckerCtx {
     // do something with double nullability?
     fn normalize_ty(&mut self, ty: Type) -> Type {
         match ty {
+            Type::Never => ty,
             Type::Nil | Type::Bool | Type::Str | Type::Int | Type::Float | Type::Regex => ty,
             Type::Fn(def) => Type::Fn(self.normalize_fn_ty(def)),
             Type::NamedFnOverload { defs, choice_var } => {
@@ -2536,8 +2540,11 @@ impl TypeCheckerCtx {
                 let (_, certainly_returns) =
                     self.infer_block(&mut child_env, body, false, false)?;
 
-                let f = Type::TypeVar(self.fresh_ty_var());
-                let break_expr_ty = self.types.entry(*id).or_insert(f).clone();
+                // let fallback = Type::Nil;
+                // let fallback = Type::TypeVar(self.fresh_ty_var());
+                let fallback = Type::Never;
+
+                let break_expr_ty = self.types.entry(*id).or_insert(fallback).clone();
                 Ok((break_expr_ty, certainly_returns))
             }
             ast::Expr::For(ast::ForExpr {

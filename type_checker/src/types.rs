@@ -37,6 +37,7 @@ pub enum Type {
         child: Box<Type>,
     },
     TypeVar(TypeVar),
+    Never,
 }
 
 impl EqUnifyValue for Type {}
@@ -246,6 +247,7 @@ impl Type {
 
     pub fn is_concrete(&self, bound: &Vec<TypeVar>) -> bool {
         match self {
+            Type::Never => true,
             Type::Nil | Type::Bool | Type::Str | Type::Int | Type::Float | Type::Regex => true,
             Type::TypeVar(v) => bound.contains(v),
             Type::Fn(def) => def.is_concrete(bound),
@@ -259,6 +261,7 @@ impl Type {
 
     pub fn occurs_check(&self, var: TypeVar) -> Result<(), Type> {
         match self {
+            Type::Never => Ok(()),
             Type::Nil | Type::Bool | Type::Str | Type::Int | Type::Float | Type::Regex => Ok(()),
             Type::TypeVar(v) => {
                 if *v == var {
@@ -301,6 +304,7 @@ impl Type {
 
     pub fn substitute_vars(&mut self, sub: &FxHashMap<TypeVar, TypeVar>) {
         match self {
+            Type::Never => {}
             Type::Bool | Type::Int | Type::Float | Type::Regex | Type::Str | Type::Nil => {}
             Type::TypeVar(v) => {
                 if let Some(new_v) = sub.get(v).cloned() {
@@ -343,6 +347,7 @@ impl Type {
         // *self = Type::Bool;
 
         match self {
+            Type::Never => {}
             Type::Bool | Type::Int | Type::Float | Type::Regex | Type::Str | Type::Nil => {}
             Type::TypeVar(v) => {
                 if bound.contains(v) {
@@ -398,6 +403,7 @@ impl Type {
 impl Debug for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Type::Never => write!(f, "!"),
             Type::Nil => write!(f, "nil"),
             Type::Bool => write!(f, "bool"),
             Type::Str => write!(f, "str"),

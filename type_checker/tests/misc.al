@@ -162,7 +162,7 @@ fn bonus() {
 
 
 // ======
-// loop type
+// loop type -- it has type `never` now, but, I kinda hacked it, and I'm not sure it's really correct
 // ok
 // ======
 
