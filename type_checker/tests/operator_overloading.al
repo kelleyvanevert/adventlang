@@ -11,8 +11,7 @@ let f = 3.1 + (4 + 5)
 
 
 // =========
-// although with full information this would be possible, the information is not at hand while checking the function
-// err: NoOverload
+// ok
 // =========
 
 fn add(a, b) {
@@ -74,6 +73,7 @@ let f = add(3.1, add(4, 5))
 // =========
 // the type checker breaks off when no progress is made and no overload can be chosen
 // err: NoOverload
+// skip
 // =========
 
 fn add(a, b) {

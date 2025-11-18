@@ -35,3 +35,14 @@ d[1] = "three"
 
 let v: bool = d[2]
 d[2] = true
+
+
+// ======
+// indexing (and assigning into?) strings
+// ok
+// ======
+
+let d = "kelley"
+
+let v: str = d[0]
+d[0] = "s" // not sure if I even really want to support this :P

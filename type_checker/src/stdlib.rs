@@ -11,14 +11,6 @@ pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
         assert: fn(bool) -> nil
 
 
-        // BUILTINS
-        // ======
-
-        []: fn<K, V>(dict[K, V], K) -> V
-        []: fn<T>([T], int) -> T
-        // ...todo somehow phrase tuple indexing??
-
-
         // STRINGS
         // ======
 
@@ -46,6 +38,9 @@ pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
         int: fn(str) -> int
         bool: fn<A>(A) -> bool
         float: fn<A>(A) -> float
+        clone: fn<A>(A) -> A
+
+        dict: fn<K, V>([(K, V)]) -> dict[K, V]
 
 
         // LISTS
@@ -59,6 +54,8 @@ pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
         find_map: fn<A, B>([A], fn(A) -> B) -> ?B
         find: fn<A>([A], fn(A) -> bool) -> ?A
         any: fn<A>([A], fn(A) -> bool) -> bool
+        all: fn<A>([A], fn(A) -> bool) -> bool
+        all: fn([bool]) -> bool
         fold: fn<T, R>([T], R, fn(R, T) -> R) -> R
         enumerate: fn<T>([T]) -> [(int, T)]
         sort_by_key: fn<T, K>([T], fn(T) -> K) -> [T]

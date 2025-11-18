@@ -177,10 +177,18 @@ pub enum TypeErrorKind {
     CannotIndex(Type),
     #[error("invalid tuple index")]
     InvalidTupleIndex,
+    #[error("node did not end up with a concrete type: {0:?}")]
+    NotConcrete(Type),
+    #[error(
+        "return type does not match up; explicit return type {0:?}; body type: {1:?}; expected type: {2:?}"
+    )]
+    ReturnTypeDoesNotMatch(Type, Type, Type),
     #[error("local not defined: {0}")]
     UnknownLocal(String),
     #[error("typevar not defined: {0}")]
     UnknownTypeVar(String),
+    #[error("could not solve all constraints: {0:?}")]
+    UnsolvedConstraints(Vec<Constraint>),
 }
 
 impl TypeErrorKind {
@@ -208,24 +216,67 @@ impl TypeErrorKind {
                 ty.substitute(bound, unification_table);
             }
             Self::ArgsMismatch(_, _) => {}
-            Self::CannotIndex(_) => {}
+            Self::CannotIndex(ty) => {
+                ty.substitute(bound, unification_table);
+            }
             Self::InvalidTupleIndex => {}
+            Self::NotConcrete(ty) => {
+                ty.substitute(bound, unification_table);
+            }
             Self::UnknownLocal(_) => {}
             Self::UnknownTypeVar(_) => {}
+            Self::UnsolvedConstraints(constraints) => {
+                for constraint in constraints {
+                    constraint.substitute(bound, unification_table);
+                }
+            }
+            Self::ReturnTypeDoesNotMatch(a, b, ret_ty) => {
+                a.substitute(bound, unification_table);
+                b.substitute(bound, unification_table);
+                ret_ty.substitute(bound, unification_table);
+            }
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Constraint {
+pub enum Constraint {
     TypeEqual(usize, Type, Type),
-    ReturnTyHack(usize, usize, Type, Type, Type),
+    ReturnTyHack(usize, Type, Type, Type),
     CanInstantiateTo(usize, Type, Type),
     ChooseOverload(ChooseOverloadConstraint),
     CheckIndex(CheckIndexConstraint),
 }
 
 impl Constraint {
+    fn substitute(
+        &mut self,
+        bound: &mut Vec<TypeVar>,
+        unification_table: &mut InPlaceUnificationTable<TypeVar>,
+    ) {
+        match self {
+            Constraint::TypeEqual(node_id, a, b) => {
+                a.substitute(bound, unification_table);
+                b.substitute(bound, unification_table);
+            }
+            Constraint::ReturnTyHack(node_id, a, b, ret_ty) => {
+                a.substitute(bound, unification_table);
+                b.substitute(bound, unification_table);
+                ret_ty.substitute(bound, unification_table);
+            }
+            Constraint::CanInstantiateTo(node_id, scheme, concrete) => {
+                scheme.substitute(bound, unification_table);
+                concrete.substitute(bound, unification_table);
+            }
+            Constraint::ChooseOverload(choose) => {
+                choose.substitute(bound, unification_table);
+            }
+            Constraint::CheckIndex(check) => {
+                check.substitute(bound, unification_table);
+            }
+        }
+    }
+
     fn to_error(self) -> TypeError {
         match self {
             Constraint::TypeEqual(node_id, a, b) => TypeError {
@@ -236,6 +287,10 @@ impl Constraint {
                 node_id: choose.node_id,
                 kind: TypeErrorKind::NoOverload,
             },
+            Constraint::ReturnTyHack(node_id, a, b, ret_ty) => TypeError {
+                node_id,
+                kind: TypeErrorKind::ReturnTypeDoesNotMatch(a, b, ret_ty),
+            },
             constraint => {
                 unreachable!("should not happen: convert to error from constraint: {constraint:?}")
             }
@@ -244,7 +299,7 @@ impl Constraint {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct CheckIndexConstraint {
+pub struct CheckIndexConstraint {
     node_id: usize,
     container_node_id: usize,
     container_type: Type,
@@ -254,13 +309,42 @@ struct CheckIndexConstraint {
     element_type: Type,
 }
 
+impl CheckIndexConstraint {
+    fn substitute(
+        &mut self,
+        bound: &mut Vec<TypeVar>,
+        unification_table: &mut InPlaceUnificationTable<TypeVar>,
+    ) {
+        self.container_type.substitute(bound, unification_table);
+        self.index_type.substitute(bound, unification_table);
+        self.element_type.substitute(bound, unification_table);
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ChooseOverloadConstraint {
+pub struct ChooseOverloadConstraint {
     node_id: usize,
     choice_var: usize,
     nodes: Vec<usize>,
     types: Vec<Type>,
     overloads: Vec<(usize, Vec<Type>)>,
+}
+
+impl ChooseOverloadConstraint {
+    fn substitute(
+        &mut self,
+        bound: &mut Vec<TypeVar>,
+        unification_table: &mut InPlaceUnificationTable<TypeVar>,
+    ) {
+        for ty in &mut self.types {
+            ty.substitute(bound, unification_table);
+        }
+        for (_, types) in &mut self.overloads {
+            for ty in types {
+                ty.substitute(bound, unification_table);
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -307,7 +391,7 @@ impl AddAssign for ConstraintResult {
 struct TypeCheckerCtx {
     unification_table: InPlaceUnificationTable<TypeVar>,
     overload_choices: Vec<Option<usize>>, // var (num) -> ?choice (index)
-    constraints: Vec<(usize, Constraint)>,
+    constraints: Vec<Constraint>,
     next_loop_id: usize,
     progress: usize,
 
@@ -379,12 +463,21 @@ impl TypeCheckerCtx {
         // substitute throughout the doc
         // typed_doc.substitute(&mut vec![], &mut self.unification_table);
         // println!("SUBSTITUTE THROUGHOUT THE DOCUMENT");
-        for (_, ty) in &mut self.types {
+        for (&node_id, ty) in &mut self.types {
             // *self.normalize_ty(ty.clone());
             let orig = ty.clone();
             ty.substitute(&mut vec![], &mut self.unification_table);
+
+            // if !ty.is_concrete(&mut vec![]) {
+            //     return Err(TypeError {
+            //         node_id,
+            //         kind: TypeErrorKind::NotConcrete(ty.clone()),
+            //     });
+            // }
             // println!("- substituted {orig:?}  =>  {ty:?}");
         }
+
+        // self.debug_disjoint_sets();
 
         // self.types = FxHashMap::from_iter(
         //     self.types
@@ -403,7 +496,7 @@ impl TypeCheckerCtx {
         match self.solve_constraint(&constraint)? {
             ConstraintResult::Succeed => {}
             ConstraintResult::NeedsMoreInformation => {
-                self.constraints.push((self.progress, constraint));
+                self.constraints.push(constraint);
             }
             ConstraintResult::ResolveTo(resulting_constraints) => {
                 for constraint in resulting_constraints {
@@ -415,34 +508,75 @@ impl TypeCheckerCtx {
     }
 
     fn solve_constraints(&mut self) -> Result<(), TypeError> {
-        let mut todo = VecDeque::from(self.constraints.clone());
-
-        // so that it's initially bigger than `last_progress`
-        self.progress = 1;
-
-        println!("num constraints to check at end: {}", todo.len());
-        for constraint in &todo {
+        println!(
+            "num constraints to check at end: {}",
+            self.constraints.len()
+        );
+        for constraint in &self.constraints {
             println!(" - {constraint:?}");
         }
 
-        while let Some((last_checked, constraint)) = todo.pop_front() {
-            // if no progress was made, then apparently this constraint just can't be solved
-            if last_checked >= self.progress {
-                return Err(constraint.to_error());
-            }
+        loop {
+            let mut queue = std::mem::take(&mut self.constraints);
+            let mut did_work = false;
 
-            match self.solve_constraint(&constraint)? {
-                ConstraintResult::Succeed => {}
-                ConstraintResult::NeedsMoreInformation => {
-                    todo.push_back((self.progress, constraint));
-                }
-                ConstraintResult::ResolveTo(resulting_constraints) => {
-                    for constraint in resulting_constraints {
-                        todo.push_front((0, constraint));
+            for constraint in queue {
+                match self.solve_constraint(&constraint)? {
+                    ConstraintResult::Succeed => {
+                        did_work = true;
+                    }
+                    ConstraintResult::NeedsMoreInformation => {
+                        self.constraints.push(constraint);
+                    }
+                    ConstraintResult::ResolveTo(resulting_constraints) => {
+                        did_work = true;
+                        self.constraints.extend(resulting_constraints);
                     }
                 }
             }
+
+            if self.constraints.len() == 0 {
+                // done!
+                return Ok(());
+            }
+
+            if !did_work {
+                return Err(self.constraints[0].clone().to_error());
+                // return Err(TypeError {
+                //     node_id: 0,
+                //     kind: TypeErrorKind::UnsolvedConstraints(self.constraints.clone()),
+                // });
+            }
         }
+
+        // let mut todo = VecDeque::from(self.constraints.clone());
+
+        // // so that it's initially bigger than `last_progress`
+        // self.progress = 1;
+
+        // println!("num constraints to check at end: {}", todo.len());
+        // for constraint in &todo {
+        //     println!(" - {constraint:?}");
+        // }
+
+        // while let Some((last_checked, constraint)) = todo.pop_front() {
+        //     // if no progress was made, then apparently this constraint just can't be solved
+        //     if last_checked >= self.progress {
+        //         return Err(constraint.to_error());
+        //     }
+
+        //     match self.solve_constraint(&constraint)? {
+        //         ConstraintResult::Succeed => {}
+        //         ConstraintResult::NeedsMoreInformation => {
+        //             todo.push_back((self.progress, constraint));
+        //         }
+        //         ConstraintResult::ResolveTo(resulting_constraints) => {
+        //             for constraint in resulting_constraints {
+        //                 todo.push_front((0, constraint));
+        //             }
+        //         }
+        //     }
+        // }
 
         Ok(())
     }
@@ -478,17 +612,22 @@ impl TypeCheckerCtx {
             Constraint::CheckIndex(check) => self.check_index(check),
 
             // this is, well, a hack
-            Constraint::ReturnTyHack(last_checked, node_id, a, b, ret_ty) => {
-                TypeCheckerCtx::solve_fn_return_ty_hack(*node_id, a, b, ret_ty)
+            Constraint::ReturnTyHack(node_id, a, b, ret_ty) => {
+                TypeCheckerCtx::solve_fn_return_ty_hack(
+                    *node_id,
+                    self.normalize_ty(a.clone()),
+                    self.normalize_ty(b.clone()),
+                    self.normalize_ty(ret_ty.clone()),
+                )
             }
         }
     }
 
     fn solve_fn_return_ty_hack(
         node_id: usize,
-        a: &Type,
-        b: &Type,
-        ret_ty: &Type,
+        a: Type,
+        b: Type,
+        ret_ty: Type,
     ) -> Result<ConstraintResult, TypeError> {
         match (a, b) {
             (Type::TypeVar(x), other) | (other, Type::TypeVar(x)) => {
@@ -549,9 +688,9 @@ impl TypeCheckerCtx {
             }
 
             // now: both sides are not nil, and also not nullable, and not vars
-            _ => Ok(ConstraintResult::ResolveTo(vec![
-                Constraint::TypeEqual(node_id, a.clone(), b.clone()),
-                Constraint::TypeEqual(node_id, b.clone(), ret_ty.clone()),
+            (a, b) => Ok(ConstraintResult::ResolveTo(vec![
+                Constraint::TypeEqual(node_id, a, b.clone()),
+                Constraint::TypeEqual(node_id, b, ret_ty.clone()),
             ])),
         }
     }
@@ -693,6 +832,13 @@ impl TypeCheckerCtx {
     fn check_index(&mut self, check: &CheckIndexConstraint) -> Result<ConstraintResult, TypeError> {
         match self.normalize_ty(check.container_type.clone()) {
             Type::TypeVar(_) => Ok(ConstraintResult::NeedsMoreInformation),
+
+            Type::Str => Ok(ConstraintResult::ResolveTo(vec![
+                // the index is an int
+                Constraint::TypeEqual(check.index_node_id, check.index_type.clone(), Type::Int),
+                // and the result is a str (char)
+                Constraint::TypeEqual(check.node_id, check.element_type.clone(), Type::Str),
+            ])),
 
             Type::List(el_ty) => Ok(ConstraintResult::ResolveTo(vec![
                 // the index is an int
@@ -1289,7 +1435,6 @@ impl TypeCheckerCtx {
                     } else if let Some(return_expr_ty) = self.fn_return_ty.get(id).cloned() {
                         // unify return_expr_ty and body_ty, then unify result with res_ty
                         self.add_constraint(Constraint::ReturnTyHack(
-                            0,
                             body.id(),
                             return_expr_ty,
                             body_ty,
@@ -2237,7 +2382,6 @@ impl TypeCheckerCtx {
                     } else if let Some(return_expr_ty) = self.fn_return_ty.get(id).cloned() {
                         // unify return_expr_ty and body_ty, then unify result with res_ty
                         self.add_constraint(Constraint::ReturnTyHack(
-                            0,
                             body.id(),
                             return_expr_ty,
                             body_ty,
@@ -2392,7 +2536,8 @@ impl TypeCheckerCtx {
                 let (_, certainly_returns) =
                     self.infer_block(&mut child_env, body, false, false)?;
 
-                let break_expr_ty = self.types.entry(*id).or_insert(Type::Nil).clone();
+                let f = Type::TypeVar(self.fresh_ty_var());
+                let break_expr_ty = self.types.entry(*id).or_insert(f).clone();
                 Ok((break_expr_ty, certainly_returns))
             }
             ast::Expr::For(ast::ForExpr {
@@ -2542,7 +2687,6 @@ impl TypeCheckerCtx {
                     } else if let Some(return_expr_ty) = self.fn_return_ty.get(id).cloned() {
                         // unify return_expr_ty and body_ty, then unify result with res_ty
                         self.add_constraint(Constraint::ReturnTyHack(
-                            0,
                             body.id(),
                             return_expr_ty,
                             body_ty,
@@ -2747,6 +2891,12 @@ mod test {
     }
 
     fn print_type_error(parse_result: TSParseResult, err: TypeError) {
+        if err.node_id == 0 {
+            // if there's no relevant node ID, don't show the source code
+            println!("{}", err);
+            return;
+        }
+
         let error_node = parse_result.find_cst_node(err.node_id);
 
         let start_byte = error_node.start_byte();

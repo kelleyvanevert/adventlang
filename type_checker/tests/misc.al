@@ -143,3 +143,35 @@ let r: ?nil = if true {
 let a = 42
 print("a {a}")
 let b = a + 4
+
+
+// ======
+// the return-ty-hack constraint needs to normalize to working (niche bug)
+// ok
+// ======
+
+fn my_id<R>(init: R) -> R {
+  init
+}
+
+fn bonus() {
+  if true {
+    return my_id(1)
+  }
+}
+
+
+// ======
+// loop type
+// ok
+// ======
+
+fn main() {
+  loop {
+    if true {
+      return 42
+    }
+  }
+}
+
+let n: int = main()

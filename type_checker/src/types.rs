@@ -247,7 +247,7 @@ impl Type {
     pub fn is_concrete(&self, bound: &Vec<TypeVar>) -> bool {
         match self {
             Type::Nil | Type::Bool | Type::Str | Type::Int | Type::Float | Type::Regex => true,
-            Type::TypeVar(v) => false,
+            Type::TypeVar(v) => bound.contains(v),
             Type::Fn(def) => def.is_concrete(bound),
             Type::NamedFnOverload { defs, .. } => defs.iter().all(|el| el.is_concrete(bound)),
             Type::List(element_ty) => element_ty.is_concrete(bound),
