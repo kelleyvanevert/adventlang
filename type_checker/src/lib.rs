@@ -32,6 +32,7 @@ mod util;
 // - [ ] choose either `do-expr` or `block-expr`, not both
 // - [ ] indexing tuples
 // - [ ] underspecified types ("fn", "dict")
+// - [ ] improve (un)certain return analysis / typing rules (it's a bit of a mess)
 //
 // DOING:
 //
@@ -172,6 +173,10 @@ pub enum TypeErrorKind {
     ReturnOutsideFn,
     #[error("named fn shadows local {0} with type {1:?}")]
     NamedFnShadow(String, Type),
+    #[error("cannot index container type: {0:?}")]
+    CannotIndex(Type),
+    #[error("invalid tuple index")]
+    InvalidTupleIndex,
     #[error("local not defined: {0}")]
     UnknownLocal(String),
     #[error("typevar not defined: {0}")]
@@ -203,6 +208,8 @@ impl TypeErrorKind {
                 ty.substitute(bound, unification_table);
             }
             Self::ArgsMismatch(_, _) => {}
+            Self::CannotIndex(_) => {}
+            Self::InvalidTupleIndex => {}
             Self::UnknownLocal(_) => {}
             Self::UnknownTypeVar(_) => {}
         }
@@ -215,6 +222,7 @@ enum Constraint {
     ReturnTyHack(usize, usize, Type, Type, Type),
     CanInstantiateTo(usize, Type, Type),
     ChooseOverload(ChooseOverloadConstraint),
+    CheckIndex(CheckIndexConstraint),
 }
 
 impl Constraint {
@@ -233,6 +241,17 @@ impl Constraint {
             }
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CheckIndexConstraint {
+    node_id: usize,
+    container_node_id: usize,
+    container_type: Type,
+    index_node_id: usize,
+    index_type: Type,
+    literal_index_int_value: Option<i64>,
+    element_type: Type,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -456,6 +475,7 @@ impl TypeCheckerCtx {
                 }
             }
             Constraint::ChooseOverload(choose) => self.choose_named_fn_overload(choose),
+            Constraint::CheckIndex(check) => self.check_index(check),
 
             // this is, well, a hack
             Constraint::ReturnTyHack(last_checked, node_id, a, b, ret_ty) => {
@@ -668,6 +688,62 @@ impl TypeCheckerCtx {
             node_id: choose.node_id,
             kind: TypeErrorKind::NoOverload,
         })
+    }
+
+    fn check_index(&mut self, check: &CheckIndexConstraint) -> Result<ConstraintResult, TypeError> {
+        match self.normalize_ty(check.container_type.clone()) {
+            Type::TypeVar(_) => Ok(ConstraintResult::NeedsMoreInformation),
+
+            Type::List(el_ty) => Ok(ConstraintResult::ResolveTo(vec![
+                // the index is an int
+                Constraint::TypeEqual(check.index_node_id, check.index_type.clone(), Type::Int),
+                // and the result is the list's element type
+                Constraint::TypeEqual(
+                    check.node_id,
+                    check.element_type.clone(),
+                    el_ty.as_ref().clone(),
+                ),
+            ])),
+
+            Type::Dict { key, val } => Ok(ConstraintResult::ResolveTo(vec![
+                // the index is a key
+                Constraint::TypeEqual(
+                    check.index_node_id,
+                    check.index_type.clone(),
+                    key.as_ref().clone(),
+                ),
+                // and the result is a value
+                Constraint::TypeEqual(
+                    check.node_id,
+                    check.element_type.clone(),
+                    val.as_ref().clone(),
+                ),
+            ])),
+
+            Type::Tuple(element_types) => match check.literal_index_int_value.clone() {
+                None => Err(TypeError {
+                    node_id: check.node_id,
+                    kind: TypeErrorKind::InvalidTupleIndex,
+                }),
+                Some(k) if k < 0 || k >= element_types.len() as i64 => Err(TypeError {
+                    node_id: check.node_id,
+                    kind: TypeErrorKind::InvalidTupleIndex,
+                }),
+                Some(k) => Ok(ConstraintResult::ResolveTo(vec![
+                    // and the result is a value
+                    Constraint::TypeEqual(
+                        check.node_id,
+                        check.element_type.clone(),
+                        element_types[k as usize].clone(),
+                    ),
+                ])),
+            },
+
+            _ => Err(TypeError {
+                node_id: check.node_id,
+                kind: TypeErrorKind::CannotIndex(check.container_type.clone()),
+            }),
+        }
     }
 
     fn check_ty_equal(
@@ -934,6 +1010,14 @@ impl TypeCheckerCtx {
                     .map(|hint| self.convert_hint_to_type(env, hint))
                     .collect::<Result<Vec<_>, _>>()?,
             )),
+            ast::TypeHint::Dict(ast::DictTypeHint {
+                id,
+                key_ty,
+                value_ty,
+            }) => Ok(Type::Dict {
+                key: self.convert_hint_to_type(env, key_ty)?.into(),
+                val: self.convert_hint_to_type(env, value_ty)?.into(),
+            }),
             ty => todo!("can't convert typehint to type: {:?}", ty),
         }
     }
@@ -1369,6 +1453,7 @@ impl TypeCheckerCtx {
         }
     }
 
+    // TODO: deal with certain return
     fn infer_location(&mut self, env: &mut Env, loc: &ast::AssignLoc) -> Result<Type, TypeError> {
         match loc {
             ast::AssignLoc::Var(ast::AssignLocVar { id, var }) => {
@@ -1380,18 +1465,28 @@ impl TypeCheckerCtx {
                 container,
                 index,
             }) => {
-                let container_ty = self.infer_location(env, container)?;
-                let element_ty = Type::TypeVar(self.fresh_ty_var());
+                let container_type = self.infer_location(env, container)?;
+                let (index_type, certain_return) = self.infer_expr(env, index, true)?;
+                // TODO: deal with certain return of index expr
 
-                self.add_constraint(Constraint::TypeEqual(
-                    *id,
-                    container_ty,
-                    Type::List(element_ty.clone().into()),
-                ))?;
+                let element_type = Type::TypeVar(self.fresh_ty_var());
 
-                self.check_expr(env, index, Type::Int)?;
+                let literal_index_int_value = match index {
+                    ast::Expr::Int(ast::IntExpr { id, value }) => Some(*value),
+                    _ => None,
+                };
 
-                self.assign(*id, element_ty)
+                self.add_constraint(Constraint::CheckIndex(CheckIndexConstraint {
+                    node_id: *id,
+                    container_node_id: container.id(),
+                    container_type,
+                    index_node_id: index.id(),
+                    index_type,
+                    literal_index_int_value,
+                    element_type: element_type.clone(),
+                }))?;
+
+                self.assign(*id, element_type)
             }
             ast::AssignLoc::Member(_) => todo!(),
         }
@@ -1521,7 +1616,12 @@ impl TypeCheckerCtx {
 
                 todo!()
             }
-            ast::DeclarePattern::Tuple(sdf) => todo!(),
+            ast::DeclarePattern::Tuple(ast::DeclareTuple { id, elements }) => Ok(Type::Tuple(
+                elements
+                    .iter()
+                    .map(|el| self.forward_declare_declarable(env, el))
+                    .collect::<Result<Vec<_>, _>>()?,
+            )),
         }
     }
 
@@ -1791,8 +1891,41 @@ impl TypeCheckerCtx {
 
                 return self.assign_extra(*id, Type::Tuple(element_types), certainly_returns);
             }
-            ast::Expr::Dict(_) => {
-                todo!()
+            ast::Expr::Dict(ast::DictExpr { id, entries }) => {
+                let mut certainly_returns = false;
+
+                let key_ty = Type::TypeVar(self.fresh_ty_var());
+                let val_ty = Type::TypeVar(self.fresh_ty_var());
+                let list_ty = Type::Dict {
+                    key: key_ty.clone().into(),
+                    val: val_ty.clone().into(),
+                };
+
+                for ast::DictEntry { id, key, value } in entries {
+                    match &key.key {
+                        ast::DictKeyKind::Expr(key_expr) => {
+                            let (_, cr) = self.check_expr(env, key_expr, key_ty.clone())?;
+                            if cr {
+                                certainly_returns = true;
+                            }
+                        }
+                        ast::DictKeyKind::Identifier(key_id) => {
+                            let key_local_ty = self.get_local(key.id, env, key_id.as_str())?;
+                            self.add_constraint(Constraint::TypeEqual(
+                                key.id,
+                                key_local_ty,
+                                key_ty.clone(),
+                            ));
+                        }
+                    }
+
+                    let (_, cr) = self.check_expr(env, value, val_ty.clone())?;
+                    if cr {
+                        certainly_returns = true;
+                    }
+                }
+
+                return self.assign_extra(*id, list_ty, certainly_returns);
             }
             ast::Expr::Index(ast::IndexExpr {
                 id,
@@ -1804,14 +1937,27 @@ impl TypeCheckerCtx {
                     todo!()
                 }
 
-                let element_ty = Type::TypeVar(self.fresh_ty_var());
-                let list_ty = Type::List(element_ty.clone().into());
+                let (container_type, c_cr) = self.infer_expr(env, expr, true)?;
+                let (index_type, i_cr) = self.infer_expr(env, index, true)?;
 
-                let (_, e_cr) = self.check_expr(env, expr, list_ty)?;
+                let element_type = Type::TypeVar(self.fresh_ty_var());
 
-                let (_, i_cr) = self.check_expr(env, index, Type::Int)?;
+                let literal_index_int_value = match index.as_ref() {
+                    ast::Expr::Int(ast::IntExpr { id, value }) => Some(*value),
+                    _ => None,
+                };
 
-                return self.assign_extra(*id, element_ty, e_cr || i_cr);
+                self.add_constraint(Constraint::CheckIndex(CheckIndexConstraint {
+                    node_id: *id,
+                    container_node_id: expr.id(),
+                    container_type,
+                    index_node_id: index.id(),
+                    index_type,
+                    literal_index_int_value,
+                    element_type: element_type.clone(),
+                }))?;
+
+                return self.assign_extra(*id, element_type, c_cr || i_cr);
             }
             ast::Expr::Member(_) => {
                 todo!()
@@ -2076,7 +2222,8 @@ impl TypeCheckerCtx {
                 let pattern_ty =
                     self.infer_declare_pattern(env, pattern, &mut declare_locals, true)?;
 
-                let (expr_ty, mut certainly_returns) = self.check_expr(env, expr, pattern_ty)?;
+                let (expr_ty, mut certainly_returns) =
+                    self.check_expr(env, expr, pattern_ty.nullable())?;
 
                 let mut then_child_env = env.clone();
                 then_child_env.add_locals(declare_locals);
@@ -2741,5 +2888,6 @@ mod test {
     run_test_cases_in_file!(function_calls);
     run_test_cases_in_file!(nullability);
     run_test_cases_in_file!(named_fn_overloading);
+    run_test_cases_in_file!(lists_dicts_tuples_indexing);
     run_test_cases_in_file!(aoc_examples);
 }

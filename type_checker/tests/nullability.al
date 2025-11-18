@@ -15,9 +15,21 @@ if let [x] = "kelley" :match /kel/ {
 // ok
 // ======
 
+let tuples = [("a", 1), ("b", 2)]
+if let (l, n) = tuples :find |(l, n)| { n == 2 } {
+  print("found")
+}
+
+
+// ======
+// ok
+// ======
+
 if let m = "kelley" :match /kel/ {
   print("found: {m[0]}")
 }
+
+
 // ======
 // err
 // ======

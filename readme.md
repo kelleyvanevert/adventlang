@@ -53,19 +53,19 @@ But, 2025 might be the year! In April and May I spent some time investigating an
 Status:
 
 - [x] 100% create a new parser using Tree-sitter (it's 150x as fast!)
-- [ ] 70% create a type checker
+- [ ] 90% create a type checker
   - [x] basic unification setup
   - [x] loops, labels, breaking, typing blocks
   - [x] function definitions and calls
-  - [ ] named and optional arguments for functions
   - [x] pretty error messages and good testing infrastructure
   - [x] generics (parametric polymorphism)
-  - [x] operator overloading (ad-hoc polymorphism)
-  - [ ] named fn overloading (ad-hoc polymorphism)
+  - [x] overloading (ad-hoc polymorphism)
   - [x] nullability
   - [ ] coalescing
-  - [ ] automatic conversions (?) / allowing non-bools in conditions
   - [ ] while-let, do-while
+  - postponed nice-to-haves:
+    - named and optional arguments for functions
+    - automatic conversions (?) / allowing non-bools in conditions
 - [ ] 0% create a compiler using LLVM
 
 Compromises:
