@@ -404,7 +404,6 @@ assert(bonus(example_input) == 71503)
 // - [ ] fix (un)certain return analysis
 //
 // ok
-// skip
 // ======
 
 const example_input = "
@@ -584,6 +583,8 @@ fn bonus(input: str) {
       return three_of_a_kind
     } else if jokers >= 1 {
       return one_pair
+    } else { /// TODO: WHY IS THIS NEEDED???? -- the type checker says `nil != ?nil` if I remove this (useless) branch
+      return high_card
     }
 
     return high_card

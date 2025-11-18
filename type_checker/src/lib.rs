@@ -2297,6 +2297,10 @@ impl TypeCheckerCtx {
                 if let Some((node_id, (t, else_returns))) = els {
                     if use_result {
                         ty = t.clone();
+                        println!(
+                            "IF ELSE BRANCH EQ CHECK. THEN: {:?}, ELSE: {:?}",
+                            then_ty, t
+                        );
                         self.add_constraint(Constraint::TypeEqual(node_id, then_ty.clone(), t))?;
                     }
                     if then_returns && else_returns {

@@ -114,6 +114,24 @@ bla(|| { return 42 })
 
 
 // ======
+// ok
+// skip -- TODO: fix if-else-if branch nullability
+// ======
+
+fn bla() {
+  if true {
+    return 2
+  } else if true {
+    return 2
+  } else if true {
+    return 2
+  }
+
+  return 2
+}
+
+
+// ======
 // there was a bug where the interpolations would have the same AST nodes as the parent
 // ok
 // ======
