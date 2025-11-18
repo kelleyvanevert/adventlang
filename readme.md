@@ -44,9 +44,9 @@ fn map<A, B>(arr: [A], f: fn(A) -> B): [B] {
 
 ...and apply it as a postfix or infix operator, like `a :map f`.
 
-So, the next year, 2023, I did Advent of Code while creating an interpreted language "on the go". Every next day, I'd add whatever features the language needed, in order to solve the challenge of that particular day. I was able to get to ± day 17 in this way, until performance became a problem and I switched back to solving the challenges (only) in Rust.
+So, the next year, 2023, I did Advent of Code while creating this language "on the go", as an _interpreted language_. Every next day, I'd add whatever features the language needed, in order to solve the challenge of that particular day. (The first few days, lots of language features, and later on, just extra stdlib functionality.) I was able to get to ± day 17 in this way, until performance became a problem and I switched back to solving the challenges (only) in Rust.
 
-My plans were to create a compile language for the next year. But because that's just so much harder, you really need to prepare in advance and can't "wing it" like I did with the interpreted version of 2023, I didn't get around to it.
+My plans were to create a _compiled language_ the next year. But because that's just so much harder, and you really need to prepare in advance and can't "wing it" like I did with the interpreted version of 2023, I didn't get around to it.
 
 But, 2025 might be the year! In April and May I spent some time investigating and creating some minimal proof-of-concepts with LLVM, as well as thinking a lot about the type system. One crucial big missing feature is a type checker, which I started working on in October. (I was also convined by Blaž to use Zed, which meant I needed to first create a new Tree-sitter parser as well, so as to allow Zed syntax highlighting.) With some effort and luck, I might be able to participate in Advent of Code 2025 with a compiled version of Adventlang! 🤘
 
