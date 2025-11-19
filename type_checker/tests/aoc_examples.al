@@ -691,7 +691,7 @@ fn bonus(input: str) {
   let looping = as :map |_| { 0 }
   loop {
     for let j in range(0, as:len) {
-      if !looping[j] {
+      if looping[j] == 0 {
         at[j] = rules[ at[j] ] [ path[i % path:len] ]
       }
     }
@@ -699,7 +699,7 @@ fn bonus(input: str) {
     i += 1
 
     for let j in range(0, as:len) {
-      if !looping[j] {
+      if looping[j] == 0 {
         if at[j][2] == "Z" {
           print("  {as[j]} reached {at[j]} in {i} (and we happen to know it'll loop after)")
           looping[j] = i

@@ -182,7 +182,7 @@ pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
                 env.add_named_fn_local(0, name.to_string(), def);
             }
             ty => {
-                env.add_local(name.to_string(), ctx.fresh_local_id(), ty);
+                env.add_local(name.to_string(), (ctx.fresh_local_id(), ty));
             }
         };
     }
