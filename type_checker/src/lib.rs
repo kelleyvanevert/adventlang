@@ -174,7 +174,14 @@ pub enum TypeErrorKind {
     #[error("named fn shadows local {0} with type {1:?}")]
     NamedFnShadow(String, Type),
     #[error("cannot index container type: {0:?}")]
-    CannotIndex(Type),
+    CannotIndexContainer(Type),
+    #[error("cannot index container of type {container_type:?} with index of type {index_type:?}")]
+    CannotIndex {
+        container_type: Type,
+        index_type: Type,
+    },
+    #[error("cannot instantiate function {scheme:?} to {concrete:?}")]
+    CannotInstantiate { scheme: Type, concrete: Type },
     #[error("invalid tuple index")]
     InvalidTupleIndex,
     #[error("node did not end up with a concrete type: {0:?}")]
@@ -187,8 +194,8 @@ pub enum TypeErrorKind {
     UnknownLocal(String),
     #[error("typevar not defined: {0}")]
     UnknownTypeVar(String),
-    #[error("could not solve all constraints: {0:?}")]
-    UnsolvedConstraints(Vec<Constraint>),
+    #[error("could not solve all constraints, which led to these errors: {0:?}")]
+    UnsolvedConstraints(Vec<TypeError>),
 }
 
 impl TypeErrorKind {
@@ -216,8 +223,19 @@ impl TypeErrorKind {
                 ty.substitute(bound, unification_table);
             }
             Self::ArgsMismatch(_, _) => {}
-            Self::CannotIndex(ty) => {
+            Self::CannotIndexContainer(ty) => {
                 ty.substitute(bound, unification_table);
+            }
+            Self::CannotIndex {
+                container_type,
+                index_type,
+            } => {
+                container_type.substitute(bound, unification_table);
+                index_type.substitute(bound, unification_table);
+            }
+            Self::CannotInstantiate { scheme, concrete } => {
+                scheme.substitute(bound, unification_table);
+                concrete.substitute(bound, unification_table);
             }
             Self::InvalidTupleIndex => {}
             Self::NotConcrete(ty) => {
@@ -240,7 +258,7 @@ impl TypeErrorKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Constraint {
+enum Constraint {
     TypeEqual(usize, Type, Type),
     ReturnTyHack(usize, Type, Type, Type),
     CanInstantiateTo(usize, Type, Type),
@@ -291,15 +309,23 @@ impl Constraint {
                 node_id,
                 kind: TypeErrorKind::ReturnTypeDoesNotMatch(a, b, ret_ty),
             },
-            constraint => {
-                unreachable!("should not happen: convert to error from constraint: {constraint:?}")
-            }
+            Constraint::CheckIndex(check) => TypeError {
+                node_id: check.node_id,
+                kind: TypeErrorKind::CannotIndex {
+                    container_type: check.container_type,
+                    index_type: check.index_type,
+                },
+            },
+            Constraint::CanInstantiateTo(node_id, scheme, concrete) => TypeError {
+                node_id,
+                kind: TypeErrorKind::CannotInstantiate { scheme, concrete },
+            },
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CheckIndexConstraint {
+struct CheckIndexConstraint {
     node_id: usize,
     container_node_id: usize,
     container_type: Type,
@@ -322,7 +348,7 @@ impl CheckIndexConstraint {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ChooseOverloadConstraint {
+struct ChooseOverloadConstraint {
     node_id: usize,
     choice_var: usize,
     nodes: Vec<usize>,
@@ -541,11 +567,22 @@ impl TypeCheckerCtx {
             }
 
             if !did_work {
-                return Err(self.constraints[0].clone().to_error());
-                // return Err(TypeError {
-                //     node_id: 0,
-                //     kind: TypeErrorKind::UnsolvedConstraints(self.constraints.clone()),
-                // });
+                // return Err(self.constraints[0].clone().to_error());
+
+                if self.constraints.len() == 1 {
+                    return Err(self.constraints[0].clone().to_error());
+                }
+
+                return Err(TypeError {
+                    node_id: 0,
+                    kind: TypeErrorKind::UnsolvedConstraints(
+                        self.constraints
+                            .iter()
+                            .cloned()
+                            .map(|contraint| contraint.to_error())
+                            .collect_vec(),
+                    ),
+                });
             }
         }
 
@@ -887,7 +924,7 @@ impl TypeCheckerCtx {
 
             _ => Err(TypeError {
                 node_id: check.node_id,
-                kind: TypeErrorKind::CannotIndex(check.container_type.clone()),
+                kind: TypeErrorKind::CannotIndexContainer(check.container_type.clone()),
             }),
         }
     }
@@ -2837,7 +2874,7 @@ mod test {
                         }
                     );
                     ctx.debug_disjoint_sets();
-                    print_type_error(parse_result, err);
+                    print_type_error(&parse_result, err);
                     panic!();
                 }
 
@@ -2875,7 +2912,7 @@ mod test {
                             println!("- expected: {:?} != {:?}", a, b);
                             println!("- encountered: {:?} != {:?}", le, ri);
                             println!("====================");
-                            print_type_error(parse_result, err);
+                            print_type_error(&parse_result, err);
                             panic!();
                         }
                     }
@@ -2889,7 +2926,7 @@ mod test {
                         println!("- expected: {expected_err}");
                         println!("- encountered: {kind:?}");
                         println!("====================");
-                        print_type_error(parse_result, err);
+                        print_type_error(&parse_result, err);
                         panic!()
                     }
                 }
@@ -2897,7 +2934,15 @@ mod test {
         }
     }
 
-    fn print_type_error(parse_result: TSParseResult, err: TypeError) {
+    fn print_type_error(parse_result: &TSParseResult, err: TypeError) {
+        if let TypeErrorKind::UnsolvedConstraints(errors) = err.kind {
+            println!("MULTIPLE ERRORS:");
+            for err in errors {
+                print_type_error(parse_result, err);
+            }
+            return;
+        }
+
         if err.node_id == 0 {
             // if there's no relevant node ID, don't show the source code
             println!("{}", err);
