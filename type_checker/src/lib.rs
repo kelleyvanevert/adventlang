@@ -11,7 +11,10 @@ use std::{
 use ena::unify::{InPlaceUnificationTable, UnifyKey};
 use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
-use parser::ast::{self, AstNode, IfExpr};
+use parser::{
+    TSParseResult,
+    ast::{self, AstNode, IfExpr},
+};
 use thiserror::Error;
 
 use crate::{
@@ -26,17 +29,17 @@ mod util;
 
 // TODO:
 // - [ ] named and optional params/args
-// - [ ] dicts + members
 // - [ ] coalescing
 // - [ ] while-let, do-while
 // - [ ] choose either `do-expr` or `block-expr`, not both
-// - [ ] indexing tuples
 // - [ ] underspecified types ("fn", "dict")
 // - [ ] improve (un)certain return analysis / typing rules (it's a bit of a mess)
 //
 // DOING:
 //
 // DONE:
+// - [x] dicts + members
+// - [x] indexing tuples
 // - [x] if-let, while, do, for
 // - [x] overloading + unary/binary operators
 // - [x] nullability
@@ -414,7 +417,7 @@ impl AddAssign for ConstraintResult {
 }
 
 #[derive(Debug)]
-struct TypeCheckerCtx {
+pub struct TypeCheckerCtx {
     unification_table: InPlaceUnificationTable<TypeVar>,
     overload_choices: Vec<Option<usize>>, // var (num) -> ?choice (index)
     constraints: Vec<Constraint>,
@@ -2816,13 +2819,66 @@ impl TypeCheckerCtx {
     }
 }
 
+pub fn print_type_error(parse_result: &TSParseResult, err: TypeError) {
+    if let TypeErrorKind::UnsolvedConstraints(errors) = err.kind {
+        println!("MULTIPLE ERRORS:");
+        for err in errors {
+            print_type_error(parse_result, err);
+        }
+        return;
+    }
+
+    if err.node_id == 0 {
+        // if there's no relevant node ID, don't show the source code
+        println!("{}", err);
+        return;
+    }
+
+    let error_node = parse_result.find_cst_node(err.node_id);
+
+    let start_byte = error_node.start_byte();
+    let end_byte = error_node.end_byte();
+    let start_pos = error_node.start_position();
+    let end_pos = error_node.end_position();
+
+    // Split source into lines
+    let lines: Vec<&str> = parse_result.source.lines().collect();
+
+    // Calculate which lines to show
+    let context_lines = 3;
+    let error_line = start_pos.row;
+    let first_line = error_line.saturating_sub(context_lines);
+    let last_line = (error_line + context_lines).min(lines.len() - 1);
+
+    // Add line numbers and source lines
+    for line_no in first_line..=last_line {
+        if line_no < lines.len() {
+            println!("{:4} | {}", line_no + 1, lines[line_no]);
+
+            // Add error annotation on the line after the error
+            if line_no == error_line {
+                // Calculate the column position for the caret
+                let column = start_pos.column;
+                let spaces = " ".repeat(4 + 3 + column); // 4 for line no, 3 for " | "
+                let carets = "^".repeat(if start_pos.row == end_pos.row {
+                    end_pos.column - start_pos.column
+                } else {
+                    1
+                });
+
+                println!("{}{} {}", spaces, carets, err);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use itertools::Itertools;
     use parser::{AdventlangParser, TSParseResult, ast::SExpPrintJob, parse_type};
     use tree_sitter::{Node, Tree};
 
-    use crate::{Env, TypeCheckerCtx, TypeError, TypeErrorKind, types::Type};
+    use crate::{Env, TypeCheckerCtx, TypeError, TypeErrorKind, print_type_error, types::Type};
 
     fn run_test_case(
         test_file_name: &str,
@@ -2929,59 +2985,6 @@ mod test {
                         print_type_error(&parse_result, err);
                         panic!()
                     }
-                }
-            }
-        }
-    }
-
-    fn print_type_error(parse_result: &TSParseResult, err: TypeError) {
-        if let TypeErrorKind::UnsolvedConstraints(errors) = err.kind {
-            println!("MULTIPLE ERRORS:");
-            for err in errors {
-                print_type_error(parse_result, err);
-            }
-            return;
-        }
-
-        if err.node_id == 0 {
-            // if there's no relevant node ID, don't show the source code
-            println!("{}", err);
-            return;
-        }
-
-        let error_node = parse_result.find_cst_node(err.node_id);
-
-        let start_byte = error_node.start_byte();
-        let end_byte = error_node.end_byte();
-        let start_pos = error_node.start_position();
-        let end_pos = error_node.end_position();
-
-        // Split source into lines
-        let lines: Vec<&str> = parse_result.source.lines().collect();
-
-        // Calculate which lines to show
-        let context_lines = 3;
-        let error_line = start_pos.row;
-        let first_line = error_line.saturating_sub(context_lines);
-        let last_line = (error_line + context_lines).min(lines.len() - 1);
-
-        // Add line numbers and source lines
-        for line_no in first_line..=last_line {
-            if line_no < lines.len() {
-                println!("{:4} | {}", line_no + 1, lines[line_no]);
-
-                // Add error annotation on the line after the error
-                if line_no == error_line {
-                    // Calculate the column position for the caret
-                    let column = start_pos.column;
-                    let spaces = " ".repeat(4 + 3 + column); // 4 for line no, 3 for " | "
-                    let carets = "^".repeat(if start_pos.row == end_pos.row {
-                        end_pos.column - start_pos.column
-                    } else {
-                        1
-                    });
-
-                    println!("{}{} {}", spaces, carets, err);
                 }
             }
         }

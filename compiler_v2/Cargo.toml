@@ -14,4 +14,3 @@ indenter = "0.3.3"
 safer-ffi = "0.1.13"
 hexdump = "0.1.2"
 parser = { path = "../parser" }
-type_checker = { path = "../type_checker" }
