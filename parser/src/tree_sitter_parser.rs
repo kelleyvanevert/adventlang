@@ -55,37 +55,8 @@ impl AdventlangParser {
         Self { ts_parser }
     }
 
-    pub fn parse_type(&mut self, source: &str) -> Option<TypeHint> {
-        let source = format!("let x: {source} = nil");
-
-        // self.ts_parser.reset();
-        let tree = self.ts_parser.parse(&source, None).unwrap();
-
-        let root_node = tree.root_node();
-
-        if root_node.has_error() {
-            panic!();
-        }
-
-        let mut converter = Converter::new(&source);
-        let mut document = converter.as_doc(root_node);
-
-        match document.body.stmts.remove(0) {
-            Stmt::Declare(DeclareStmt {
-                pattern:
-                    DeclarePattern::Single(DeclareSingle {
-                        ty: Some(mut ty), ..
-                    }),
-                ..
-            }) => {
-                ty.strip_ids();
-                Some(ty)
-            }
-            _ => unreachable!(),
-        }
-    }
-
     pub fn parse_document<'a>(&mut self, source: &'a str) -> Option<TSParseResult<'a>> {
+        // self.ts_parser.reset();
         let tree = self.ts_parser.parse(source, None).unwrap();
 
         let root_node = tree.root_node();
@@ -103,6 +74,28 @@ impl AdventlangParser {
             document,
             ast_node_origin: converter.ast_node_origin,
         })
+    }
+
+    pub fn parse_type(&mut self, source: &str) -> Option<TypeHint> {
+        let source = format!("let x: {source} = nil");
+
+        let Some(mut res) = self.parse_document(&source) else {
+            return None;
+        };
+
+        match res.document.body.stmts.remove(0) {
+            Stmt::Declare(DeclareStmt {
+                pattern:
+                    DeclarePattern::Single(DeclareSingle {
+                        ty: Some(mut ty), ..
+                    }),
+                ..
+            }) => {
+                ty.strip_ids();
+                Some(ty)
+            }
+            _ => unreachable!(),
+        }
     }
 }
 
