@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use ena::unify::{EqUnifyValue, InPlaceUnificationTable, UnifyValue};
+use ena::unify::{EqUnifyValue, InPlaceUnificationTable, UnifyKey, UnifyValue};
 use fxhash::FxHashMap;
 use parser::ast;
 
@@ -42,23 +42,21 @@ pub enum Type {
 
 impl EqUnifyValue for Type {}
 
-// impl UnifyValue for Type {
-//     type Error = (Type, Type);
+impl UnifyKey for TypeVar {
+    type Value = Option<Type>;
 
-//     fn unify_values(a: &Self, b: &Self) -> Result<Self, Self::Error> {
-//         match (a, b) {
-//             (Type::TypeVar(x), b) => Ok(b.clone()),
-//             (a, Type::TypeVar(y)) => Ok(a.clone()),
-//             (a, b) => {
-//                 if a == b {
-//                     Ok(a.clone())
-//                 } else {
-//                     Err((a.clone(), b.clone()))
-//                 }
-//             }
-//         }
-//     }
-// }
+    fn from_index(u: u32) -> Self {
+        Self(u)
+    }
+
+    fn index(&self) -> u32 {
+        self.0
+    }
+
+    fn tag() -> &'static str {
+        "TypeVar"
+    }
+}
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct FnType {
