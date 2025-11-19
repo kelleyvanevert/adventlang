@@ -58,7 +58,7 @@ mod util;
 #[derive(Debug, Clone)]
 struct Env {
     typevars: FxHashMap<String, TypeVar>,
-    locals: FxHashMap<String, Type>,
+    locals: FxHashMap<String, (usize, Type)>, // (unique id, type)
     named_fns: FxHashMap<String, Vec<FnType>>,
     loops: FxHashMap<String, usize>, // label -> loop node id
     curr_loop: Option<String>,
@@ -77,8 +77,8 @@ impl Env {
         }
     }
 
-    fn add_local(&mut self, name: String, ty: Type) {
-        self.locals.insert(name, ty);
+    fn add_local(&mut self, name: String, id: usize, ty: Type) {
+        self.locals.insert(name, (id, ty));
     }
 
     fn add_named_fn_local(
@@ -107,35 +107,23 @@ impl Env {
         Ok(())
     }
 
-    fn add_locals(&mut self, new_locals: FxHashMap<String, Type>) {
+    fn add_locals(&mut self, new_locals: FxHashMap<String, (usize, Type)>) {
         self.locals.extend(new_locals);
     }
 
     /// Create a new subscope to be used for a function body
     ///  (resets loop bookkeeping)
-    fn new_child_fn_scope(&self, node_id: usize, declare_locals: FxHashMap<String, Type>) -> Env {
+    fn new_child_fn_scope(
+        &self,
+        node_id: usize,
+        declare_locals: FxHashMap<String, (usize, Type)>,
+    ) -> Env {
         let mut child_env = self.clone();
         child_env.add_locals(declare_locals);
         child_env.curr_loop = None;
         child_env.loops = FxHashMap::default();
         child_env.curr_fn = Some(node_id);
         child_env
-    }
-}
-
-impl UnifyKey for TypeVar {
-    type Value = Option<Type>;
-
-    fn from_index(u: u32) -> Self {
-        Self(u)
-    }
-
-    fn index(&self) -> u32 {
-        self.0
-    }
-
-    fn tag() -> &'static str {
-        "TypeVar"
     }
 }
 
@@ -422,6 +410,7 @@ pub struct TypeCheckerCtx {
     overload_choices: Vec<Option<usize>>, // var (num) -> ?choice (index)
     constraints: Vec<Constraint>,
     next_loop_id: usize,
+    next_local_id: usize,
     progress: usize,
 
     // node id -> type
@@ -438,12 +427,19 @@ impl TypeCheckerCtx {
             overload_choices: vec![],
             constraints: vec![],
             next_loop_id: 0,
+            next_local_id: 0,
             progress: 0,
             types: FxHashMap::default(),
             all_vars: vec![],
             rigid_vars: FxHashSet::default(),
             fn_return_ty: FxHashMap::default(),
         }
+    }
+
+    fn fresh_local_id(&mut self) -> usize {
+        let id = self.next_local_id;
+        self.next_local_id += 1;
+        id
     }
 
     fn fresh_loop_label(&mut self) -> String {
@@ -1218,7 +1214,7 @@ impl TypeCheckerCtx {
         env: &Env,
         name: &str,
     ) -> Result<Type, TypeError> {
-        let Some(ty) = env.locals.get(name).cloned() else {
+        let Some((_, ty)) = env.locals.get(name).cloned() else {
             return Err(TypeError {
                 node_id,
                 kind: TypeErrorKind::UnknownLocal(name.to_string()),
@@ -1331,7 +1327,12 @@ impl TypeCheckerCtx {
             ast::Item::ConstItem(ast::ConstItem { id, name, expr }) => {
                 let placeholder_ty = Type::TypeVar(self.fresh_ty_var());
 
-                env.add_local(name.str.clone(), placeholder_ty.clone());
+                env.add_local(
+                    name.str.clone(),
+                    self.fresh_local_id(),
+                    placeholder_ty.clone(),
+                );
+
                 Ok(placeholder_ty)
             }
             ast::Item::NamedFn(ast::NamedFnItem {
@@ -1685,7 +1686,7 @@ impl TypeCheckerCtx {
         &mut self,
         env: &mut Env,
         pattern: &ast::DeclarePattern,
-        declare_locals: &mut FxHashMap<String, Type>,
+        declare_locals: &mut FxHashMap<String, (usize, Type)>,
         if_let_guarded: bool,
     ) -> Result<Type, TypeError> {
         match pattern {
@@ -1701,7 +1702,10 @@ impl TypeCheckerCtx {
                     .transpose()?
                     .unwrap_or_else(|| Type::TypeVar(self.fresh_ty_var()));
 
-                if let Some(_) = declare_locals.insert(var.as_str().to_string(), ty.clone()) {
+                if let Some(_) = declare_locals.insert(
+                    var.as_str().to_string(),
+                    (self.fresh_local_id(), ty.clone()),
+                ) {
                     panic!(
                         "double declared variable in same declaration: {:?}",
                         declare_locals
@@ -1736,7 +1740,10 @@ impl TypeCheckerCtx {
                         .transpose()?
                         .unwrap_or_else(|| Type::TypeVar(self.fresh_ty_var()));
 
-                    if let Some(_) = declare_locals.insert(var.as_str().to_string(), ty.clone()) {
+                    if let Some(_) = declare_locals.insert(
+                        var.as_str().to_string(),
+                        (self.fresh_local_id(), ty.clone()),
+                    ) {
                         panic!(
                             "double declared variable in same declaration: {:?}",
                             declare_locals
@@ -1818,7 +1825,7 @@ impl TypeCheckerCtx {
         &mut self,
         env: &mut Env,
         declarable: &ast::Declarable,
-        declare_locals: &mut FxHashMap<String, Type>,
+        declare_locals: &mut FxHashMap<String, (usize, Type)>,
         if_let_guarded: bool,
     ) -> Result<Type, TypeError> {
         let ast::Declarable {
