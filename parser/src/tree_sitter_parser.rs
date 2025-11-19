@@ -40,35 +40,75 @@ fn find_node_by_id(node: Node, target_id: usize) -> Option<Node> {
     None
 }
 
-pub fn parse_document_ts<'a>(source: &'a str) -> Option<TSParseResult<'a>> {
-    let mut parser = tree_sitter::Parser::new();
-    let language = tree_sitter_adventlang::LANGUAGE;
-    parser
-        .set_language(&language.into())
-        .expect("Error loading Adventlang parser");
+pub struct AdventlangParser {
+    ts_parser: tree_sitter::Parser,
+}
 
-    let tree = parser.parse(source, None).unwrap();
+impl AdventlangParser {
+    pub fn new() -> Self {
+        let mut ts_parser = tree_sitter::Parser::new();
+        let language = tree_sitter_adventlang::LANGUAGE;
+        ts_parser
+            .set_language(&language.into())
+            .expect("Error loading Adventlang parser");
 
-    let root_node = tree.root_node();
-
-    if root_node.has_error() {
-        return None;
+        Self { ts_parser }
     }
 
-    let mut converter = Converter::new(source);
-    let document = converter.as_doc(root_node);
+    pub fn parse_type(&mut self, source: &str) -> Option<TypeHint> {
+        let source = format!("let x: {source} = nil");
 
-    Some(TSParseResult {
-        source,
-        tree,
-        document,
-        ast_node_origin: converter.ast_node_origin,
-    })
+        // self.ts_parser.reset();
+        let tree = self.ts_parser.parse(&source, None).unwrap();
+
+        let root_node = tree.root_node();
+
+        if root_node.has_error() {
+            panic!();
+        }
+
+        let mut converter = Converter::new(&source);
+        let mut document = converter.as_doc(root_node);
+
+        match document.body.stmts.remove(0) {
+            Stmt::Declare(DeclareStmt {
+                pattern:
+                    DeclarePattern::Single(DeclareSingle {
+                        ty: Some(mut ty), ..
+                    }),
+                ..
+            }) => {
+                ty.strip_ids();
+                Some(ty)
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn parse_document<'a>(&mut self, source: &'a str) -> Option<TSParseResult<'a>> {
+        let tree = self.ts_parser.parse(source, None).unwrap();
+
+        let root_node = tree.root_node();
+
+        if root_node.has_error() {
+            return None;
+        }
+
+        let mut converter = Converter::new(source);
+        let document = converter.as_doc(root_node);
+
+        Some(TSParseResult {
+            source,
+            tree,
+            document,
+            ast_node_origin: converter.ast_node_origin,
+        })
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{TSParseResult, tree_sitter_parser::parse_document_ts};
+    use crate::{AdventlangParser, TSParseResult};
 
     #[test]
     fn test() {
@@ -87,7 +127,9 @@ mod tests {
         // let source = "arr []= 7";
         let source = "arr[2] []= 7";
 
-        let TSParseResult { document, .. } = parse_document_ts(source).expect("can parse");
+        let TSParseResult { document, .. } = AdventlangParser::new()
+            .parse_document(source)
+            .expect("can parse");
 
         // let doc2 = parse_document(source).expect("can parse original");
 

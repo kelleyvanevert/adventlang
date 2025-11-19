@@ -1,4 +1,4 @@
-use parser::parse_type;
+use parser::AdventlangParser;
 
 use crate::{Env, TypeCheckerCtx, types::Type};
 
@@ -164,6 +164,8 @@ pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
         <<: fn(int, int) -> int
     ";
 
+    let mut parser = AdventlangParser::new();
+
     for line in stdlib.trim().lines() {
         if line.trim().len() == 0 || line.trim().starts_with("//") {
             continue;
@@ -172,7 +174,10 @@ pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
         let (name, hint) = line.trim().split_once(": ").unwrap();
         let hint = hint.split_once("//").map(|t| t.0.trim()).unwrap_or(hint);
 
-        match ctx.convert_hint_to_type(env, &parse_type(hint)).unwrap() {
+        match ctx
+            .convert_hint_to_type(env, &parser.parse_type(hint).unwrap())
+            .unwrap()
+        {
             Type::Fn(def) => {
                 env.add_named_fn_local(0, name.to_string(), def);
             }

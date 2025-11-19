@@ -5,7 +5,7 @@ mod tests {
     use pretty_assertions::assert_eq;
     use test_case::test_case;
 
-    use parser::{ast::StripIds, parse_document, parse_document_ts};
+    use parser::{AdventlangParser, ast::StripIds, parse_document};
 
     #[test_case("2023_day01")]
     #[test_case("2023_day02")]
@@ -35,7 +35,8 @@ mod tests {
 
         let doc1 = parse_document(&content).expect("Can parse with parser combinators");
 
-        let mut doc2 = parse_document_ts(&content)
+        let mut doc2 = AdventlangParser::new()
+            .parse_document(&content)
             .expect("Can parse with Tree-sitter")
             .document;
 
@@ -77,6 +78,8 @@ mod tests {
             "2024_day08",
         ];
 
+        let mut ts_parser = AdventlangParser::new();
+
         let contents = tests.map(|name| {
             std::fs::read_to_string(format!("./aoc/{name}.al")).expect("can read aoc file")
         });
@@ -92,7 +95,7 @@ mod tests {
         let using_tree_sitter = {
             let t0 = Instant::now();
             for source in &contents {
-                parse_document_ts(source).expect("can parse");
+                ts_parser.parse_document(source).expect("can parse");
             }
             t0.elapsed()
         };

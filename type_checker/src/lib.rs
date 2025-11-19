@@ -2819,7 +2819,7 @@ impl TypeCheckerCtx {
 #[cfg(test)]
 mod test {
     use itertools::Itertools;
-    use parser::{TSParseResult, ast::SExpPrintJob, parse_document_ts, parse_type};
+    use parser::{AdventlangParser, TSParseResult, ast::SExpPrintJob, parse_type};
     use tree_sitter::{Node, Tree};
 
     use crate::{Env, TypeCheckerCtx, TypeError, TypeErrorKind, types::Type};
@@ -2832,7 +2832,7 @@ mod test {
         error_location: Option<(usize, usize)>,
         source: &str,
     ) {
-        let Some(parse_result) = parse_document_ts(&source) else {
+        let Some(parse_result) = AdventlangParser::new().parse_document(&source) else {
             panic!("Can't parse test case source, file: `{test_file_name}`, line {lineno}");
         };
 
