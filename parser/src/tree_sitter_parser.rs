@@ -142,7 +142,7 @@ impl<'a> Converter<'a> {
     fn new(source: &'a str) -> Self {
         Self {
             source,
-            next_ast_node_id: 0,
+            next_ast_node_id: 1,
             ast_node_origin: vec![],
         }
     }
@@ -159,13 +159,14 @@ impl<'a> Converter<'a> {
     fn as_doc(&mut self, node: Node) -> Document {
         Document {
             id: self.fresh_ast_node_id(node),
-            body: self.as_block(node),
+            body: self.as_block(node, false),
         }
     }
 
-    fn as_block(&mut self, node: Node) -> Block {
+    fn as_block(&mut self, node: Node, is_fn_body: bool) -> Block {
         let mut block = Block {
             id: self.fresh_ast_node_id(node),
+            is_fn_body,
             items: vec![],
             stmts: vec![],
         };
@@ -455,7 +456,7 @@ impl<'a> Converter<'a> {
             "block_expr" => Expr::Do(DoExpr {
                 id: self.fresh_ast_node_id(node),
                 label: None,
-                body: self.as_block(node),
+                body: self.as_block(node, false),
             }),
             "regular_call_expr" => Expr::Call(CallExpr {
                 id: self.fresh_ast_node_id(node),
@@ -519,12 +520,12 @@ impl<'a> Converter<'a> {
             "anonymous_fn" => Expr::AnonymousFn(AnonymousFnExpr {
                 id: self.fresh_ast_node_id(node),
                 params: node.map_children("param", |node| self.as_declarable(node)),
-                body: node.map_child("body", |node| self.as_block(node)),
+                body: node.map_child("body", |node| self.as_block(node, true)),
             }),
             "do_while_expr" => {
                 let id = self.fresh_ast_node_id(node);
                 let label = node.map_opt_child("label", |node| self.as_label(node));
-                let body = node.map_child("body", |node| self.as_block(node));
+                let body = node.map_child("body", |node| self.as_block(node, false));
                 let cond = node.map_opt_child("cond", |node| self.as_expr(node));
 
                 match cond {
@@ -540,7 +541,7 @@ impl<'a> Converter<'a> {
             "while_expr" => {
                 let label = node.map_opt_child("label", |node| self.as_label(node));
                 let cond = node.map_child("cond", |node| self.as_expr(node).into());
-                let body = node.map_child("body", |node| self.as_block(node));
+                let body = node.map_child("body", |node| self.as_block(node, false));
 
                 match node.map_opt_child("pattern", |node| self.as_declare_pattern(node).into()) {
                     None => Expr::While(WhileExpr {
@@ -561,20 +562,20 @@ impl<'a> Converter<'a> {
             "loop_expr" => Expr::Loop(LoopExpr {
                 id: self.fresh_ast_node_id(node),
                 label: node.map_opt_child("label", |node| self.as_label(node)),
-                body: node.map_child("body", |node| self.as_block(node)),
+                body: node.map_child("body", |node| self.as_block(node, false)),
             }),
             "for_expr" => Expr::For(ForExpr {
                 id: self.fresh_ast_node_id(node),
                 label: node.map_opt_child("label", |node| self.as_label(node)),
                 pattern: node.map_child("pattern", |node| self.as_declare_pattern(node)),
                 range: node.map_child("range", |node| self.as_expr(node).into()),
-                body: node.map_child("body", |node| self.as_block(node)),
+                body: node.map_child("body", |node| self.as_block(node, false)),
             }),
             "if_expr" => Expr::If(IfExpr {
                 id: self.fresh_ast_node_id(node),
                 if_branches: node.map_children("if_branch", |branch| {
                     let cond = branch.map_child("cond", |n| self.as_expr(n).into());
-                    let body = branch.map_child("body", |n| self.as_block(n));
+                    let body = branch.map_child("body", |n| self.as_block(n, false));
 
                     match branch.map_opt_child("pattern", |n| self.as_declare_pattern(n)) {
                         None => IfBranch::If(IfThenBranch {
@@ -590,7 +591,7 @@ impl<'a> Converter<'a> {
                         }),
                     }
                 }),
-                else_branch: node.map_opt_child("else_branch", |node| self.as_block(node)),
+                else_branch: node.map_opt_child("else_branch", |node| self.as_block(node, false)),
             }),
             _ => panic!("can't interpret as expr: {:?}", node),
         }
@@ -732,7 +733,7 @@ impl<'a> Converter<'a> {
                 generics: node.map_children("generic", |node| self.as_typevar(node)),
                 ret: node.map_opt_child("return", |node| self.as_type(node)),
                 params: node.map_children("param", |node| self.as_declarable(node)),
-                body: node.map_child("body", |node| self.as_block(node)),
+                body: node.map_child("body", |node| self.as_block(node, true)),
             }),
             "const_item" => Item::ConstItem(ConstItem {
                 id: self.fresh_ast_node_id(node),

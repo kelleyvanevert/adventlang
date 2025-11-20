@@ -371,7 +371,11 @@ fn anonymous_fn(s: State) -> ParseResult<State, Expr> {
                 ),
                 |s| !s.constrained,
             ),
-            delimited(seq((char('{'), ws0)), block_contents, seq((ws0, char('}')))),
+            delimited(
+                seq((char('{'), ws0)),
+                block_contents(true),
+                seq((ws0, char('}'))),
+            ),
         )),
         |(params, body)| {
             Expr::AnonymousFn(AnonymousFnExpr::new_simple(
@@ -415,7 +419,11 @@ fn if_branch(s: State) -> ParseResult<State, IfBranch> {
                 constrained(true, expr),
             ))),
             ws0,
-            delimited(seq((char('{'), ws0)), block_contents, seq((ws0, char('}')))),
+            delimited(
+                seq((char('{'), ws0)),
+                block_contents(false),
+                seq((ws0, char('}'))),
+            ),
         )),
         |(_, _, (pattern, cond), _, body)| match pattern {
             None => IfBranch::If(IfThenBranch::new_simple(cond.into(), body)),
@@ -434,7 +442,7 @@ fn if_expr(s: State) -> ParseResult<State, Expr> {
             many0(preceded(seq((ws0, tag("else"), ws0)), if_branch)),
             optional(delimited(
                 seq((ws0, tag("else"), ws0, char('{'), ws0)),
-                block_contents,
+                block_contents(false),
                 seq((ws0, char('}'))),
             )),
         )),
@@ -452,7 +460,11 @@ fn do_while_expr(s: State) -> ParseResult<State, Expr> {
             optional(terminated(label, seq((tag(":"), ws0)))),
             tag("do"),
             ws0,
-            delimited(seq((char('{'), ws0)), block_contents, seq((ws0, char('}')))),
+            delimited(
+                seq((char('{'), ws0)),
+                block_contents(false),
+                seq((ws0, char('}'))),
+            ),
             optional(preceded(
                 seq((ws0, tag("while"), slws1)),
                 maybe_parenthesized(constrained(true, expr)),
@@ -472,7 +484,11 @@ fn loop_expr(s: State) -> ParseResult<State, Expr> {
             optional(terminated(label, seq((char(':'), ws0)))),
             tag("loop"),
             ws0,
-            delimited(seq((char('{'), ws0)), block_contents, seq((ws0, char('}')))),
+            delimited(
+                seq((char('{'), ws0)),
+                block_contents(false),
+                seq((ws0, char('}'))),
+            ),
         )),
         |(label, _, _, body)| Expr::Loop(LoopExpr::new_simple(label, body)),
     )
@@ -494,7 +510,11 @@ fn while_expr(s: State) -> ParseResult<State, Expr> {
                 constrained(true, expr),
             ))),
             ws0,
-            delimited(seq((char('{'), ws0)), block_contents, seq((ws0, char('}')))),
+            delimited(
+                seq((char('{'), ws0)),
+                block_contents(false),
+                seq((ws0, char('}'))),
+            ),
         )),
         |(label, _, _, (pattern, cond), _, body)| match pattern {
             None => Expr::While(WhileExpr::new_simple(label, cond.into(), body)),
@@ -522,7 +542,11 @@ fn for_expr(s: State) -> ParseResult<State, Expr> {
                 constrained(true, expr),
             ))),
             ws0,
-            delimited(seq((char('{'), ws0)), block_contents, seq((ws0, char('}')))),
+            delimited(
+                seq((char('{'), ws0)),
+                block_contents(false),
+                seq((ws0, char('}'))),
+            ),
         )),
         |(label, _, _, (_, _, pattern, _, _, _, range), _, body)| {
             Expr::For(ForExpr::new_simple(label, pattern, range.into(), body))
@@ -1387,7 +1411,7 @@ fn named_fn_item(s: State) -> ParseResult<State, NamedFnItem> {
             optional(seq((tag("->"), ws0, typespec, ws0))),
             tag("{"),
             ws0,
-            block_contents,
+            block_contents(true),
             ws0,
             tag("}"),
         )),
@@ -1427,39 +1451,51 @@ fn stmt_or_item(s: State) -> ParseResult<State, Either<Stmt, Item>> {
     alt((map(stmt, Either::Left), map(item, Either::Right))).parse(s)
 }
 
-fn block_contents(s: State) -> ParseResult<State, Block> {
-    let sep = regex(r"^[ \t]*([;\n][ \t]*)+");
+// fn char<'a>(c: char) -> impl Parser<State<'a>, Output = char> {
+//     move |s: State<'a>| {
+//         if s.input.starts_with(c) {
+//             Some((s.slice(1), c))
+//         } else {
+//             None
+//         }
+//     }
+// }
 
-    map(
-        optional(seq((
-            stmt_or_item,
-            many0(preceded(many0(sep), stmt_or_item)),
-        ))),
-        |m| {
-            let mut block = Block {
-                id: 0,
-                items: vec![],
-                stmts: vec![],
-            };
+fn block_contents<'a>(is_fn_body: bool) -> impl Parser<State<'a>, Output = Block> {
+    move |s: State<'a>| {
+        let sep = regex(r"^[ \t]*([;\n][ \t]*)+");
+        map(
+            optional(seq((
+                stmt_or_item,
+                many0(preceded(many0(sep), stmt_or_item)),
+            ))),
+            |m| {
+                let mut block = Block {
+                    id: 0,
+                    is_fn_body,
+                    items: vec![],
+                    stmts: vec![],
+                };
 
-            if let Some((first, rest)) = m {
-                match first {
-                    Either::Left(stmt) => block.stmts.push(stmt),
-                    Either::Right(item) => block.items.push(item),
-                }
-
-                for el in rest {
-                    match el {
+                if let Some((first, rest)) = m {
+                    match first {
                         Either::Left(stmt) => block.stmts.push(stmt),
                         Either::Right(item) => block.items.push(item),
                     }
-                }
-            }
 
-            block
-        },
-    )
-    .parse(s)
+                    for el in rest {
+                        match el {
+                            Either::Left(stmt) => block.stmts.push(stmt),
+                            Either::Right(item) => block.items.push(item),
+                        }
+                    }
+                }
+
+                block
+            },
+        )
+        .parse(s)
+    }
 }
 
 fn remove_comments(input: &str) -> String {
@@ -1517,9 +1553,10 @@ fn remove_comments(input: &str) -> String {
 }
 
 fn document(s: State) -> ParseResult<State, Document> {
-    map(seq((ws0, block_contents, ws0, eof)), |(_, body, _, _)| {
-        Document { id: 0, body }
-    })
+    map(
+        seq((ws0, block_contents(false), ws0, eof)),
+        |(_, body, _, _)| Document { id: 0, body },
+    )
     .parse(s)
 }
 

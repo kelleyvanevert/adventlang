@@ -66,7 +66,7 @@ mod util;
 #[derive(Debug, Clone)]
 struct Env {
     typevars: FxHashMap<String, TypeVar>,
-    locals: FxHashMap<String, (usize, Type)>, // (unique id, type)
+    locals: FxHashMap<String, (usize, Type)>, // (declaring node id, type)
     named_fns: FxHashMap<String, Vec<FnType>>,
 
     /// maps labels to loop node IDs
@@ -91,8 +91,8 @@ impl Env {
         }
     }
 
-    fn add_local(&mut self, name: String, (id, ty): (usize, Type)) {
-        self.locals.insert(name, (id, ty));
+    fn add_local(&mut self, name: String, (node_id, ty): (usize, Type)) {
+        self.locals.insert(name, (node_id, ty));
     }
 
     fn add_locals(&mut self, new_locals: FxHashMap<String, (usize, Type)>) {
@@ -442,9 +442,10 @@ pub struct TypeCheckerCtx {
     // It maps function declaration node ids to their explicitly returned type(s).
     fn_return_ty: FxHashMap<usize, Type>,
 
-    // Each local declaration is given a unique ID, which can be used for
-    //  dependency analysis.
-    next_local_id: usize,
+    // This is an analysis of which variables and functions depend on each other,
+    //  which can hopefully remove the need for `const`, and allow nested `fn`
+    //  items to work nicely.
+    dependencies: FxHashSet<(usize, usize)>,
 }
 
 impl TypeCheckerCtx {
@@ -457,14 +458,8 @@ impl TypeCheckerCtx {
             all_vars: vec![],
             rigid_vars: FxHashSet::default(),
             fn_return_ty: FxHashMap::default(),
-            next_local_id: 0,
+            dependencies: FxHashSet::default(),
         }
-    }
-
-    fn fresh_local_id(&mut self) -> usize {
-        let id = self.next_local_id;
-        self.next_local_id += 1;
-        id
     }
 
     fn fresh_overload_choice_var(&mut self) -> usize {
@@ -1273,10 +1268,7 @@ impl TypeCheckerCtx {
             ast::Item::ConstItem(ast::ConstItem { id, name, expr }) => {
                 let placeholder_ty = Type::TypeVar(self.fresh_ty_var(false));
 
-                env.add_local(
-                    name.str.clone(),
-                    (self.fresh_local_id(), placeholder_ty.clone()),
-                );
+                env.add_local(name.str.clone(), (*id, placeholder_ty.clone()));
 
                 Ok(placeholder_ty)
             }
@@ -1648,10 +1640,9 @@ impl TypeCheckerCtx {
                     .transpose()?
                     .unwrap_or_else(|| Type::TypeVar(self.fresh_ty_var(false)));
 
-                if let Some(_) = declare_locals.insert(
-                    var.as_str().to_string(),
-                    (self.fresh_local_id(), ty.clone()),
-                ) {
+                if let Some(_) =
+                    declare_locals.insert(var.as_str().to_string(), (var.id(), ty.clone()))
+                {
                     panic!(
                         "double declared variable in same declaration: {:?}",
                         declare_locals
@@ -1686,10 +1677,9 @@ impl TypeCheckerCtx {
                         .transpose()?
                         .unwrap_or_else(|| Type::TypeVar(self.fresh_ty_var(false)));
 
-                    if let Some(_) = declare_locals.insert(
-                        var.as_str().to_string(),
-                        (self.fresh_local_id(), ty.clone()),
-                    ) {
+                    if let Some(_) =
+                        declare_locals.insert(var.as_str().to_string(), (var.id(), ty.clone()))
+                    {
                         panic!(
                             "double declared variable in same declaration: {:?}",
                             declare_locals

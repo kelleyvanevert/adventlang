@@ -559,6 +559,7 @@ ast_nodes! {
     }
 
     struct Block {
+        '_ is_fn_body: bool,
         items: Vec<Item>,
         stmts: Vec<Stmt>,
     }
