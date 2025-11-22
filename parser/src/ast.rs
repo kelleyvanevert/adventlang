@@ -517,11 +517,6 @@ ast_nodes! {
         expr: Expr,
     }
 
-    enum Item {
-        NamedFn(NamedFnItem),
-        ConstItem(ConstItem),
-    }
-
     struct BreakStmt {
         label: Option<Label>,
         expr: Option<Expr>,
@@ -550,6 +545,8 @@ ast_nodes! {
     }
 
     enum Stmt {
+        NamedFn(NamedFnItem),
+        ConstItem(ConstItem),
         Break(BreakStmt),
         Continue(ContinueStmt),
         Return(ReturnStmt),
@@ -560,7 +557,6 @@ ast_nodes! {
 
     struct Block {
         '_ is_fn_body: bool,
-        items: Vec<Item>,
         stmts: Vec<Stmt>,
     }
 

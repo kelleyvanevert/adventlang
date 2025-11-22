@@ -508,13 +508,13 @@ fn bonus(input: str) {
     "A": 14,
   }
 
-  let convert_base = |hand: str| {
+  fn convert_base(hand: str) {
     hand :chars :reverse :enumerate
       :map |(i, d)| { digits[d] << (i * 4) }
       :sum
   }
 
-  let hand_type = |hand: str| {
+  fn hand_type(hand: str) {
     let counts = range(0, 16) :map |i| { (i, 0) }
     for let k in hand :chars :map |d| { digits[d] } {
       counts[k][1] += 1
@@ -587,7 +587,7 @@ fn bonus(input: str) {
     return high_card
   }
 
-  let score_hand = |hand: str| {
+  fn score_hand(hand: str) {
     convert_base(hand) + (hand_type(hand) << 20)
   }
 

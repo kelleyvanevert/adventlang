@@ -167,13 +167,11 @@ impl<'a> Converter<'a> {
         let mut block = Block {
             id: self.fresh_ast_node_id(node),
             is_fn_body,
-            items: vec![],
             stmts: vec![],
         };
 
         for child in node.children(&mut node.walk()) {
             match child.kind() {
-                "named_fn_item" | "const_item" => block.items.push(self.as_item(child)),
                 "{" | "}" => {}
                 "line_comment" => {}
                 _ => block.stmts.push(self.as_stmt(child)),
@@ -725,9 +723,9 @@ impl<'a> Converter<'a> {
         }
     }
 
-    fn as_item(&mut self, node: Node) -> Item {
+    fn as_stmt(&mut self, node: Node) -> Stmt {
         match node.kind() {
-            "named_fn_item" => Item::NamedFn(NamedFnItem {
+            "named_fn_item" => Stmt::NamedFn(NamedFnItem {
                 id: self.fresh_ast_node_id(node),
                 name: node.map_child("name", |node| self.as_identifier(node)),
                 generics: node.map_children("generic", |node| self.as_typevar(node)),
@@ -735,17 +733,11 @@ impl<'a> Converter<'a> {
                 params: node.map_children("param", |node| self.as_declarable(node)),
                 body: node.map_child("body", |node| self.as_block(node, true)),
             }),
-            "const_item" => Item::ConstItem(ConstItem {
+            "const_item" => Stmt::ConstItem(ConstItem {
                 id: self.fresh_ast_node_id(node),
                 name: node.map_child("name", |node| self.as_identifier(node)),
                 expr: node.map_child("expr", |node| self.as_expr(node)),
             }),
-            _ => panic!("can't interpret as item: {:?}", node),
-        }
-    }
-
-    fn as_stmt(&mut self, node: Node) -> Stmt {
-        match node.kind() {
             "expr_stmt" => Stmt::Expr(ExprStmt {
                 id: self.fresh_ast_node_id(node),
                 expr: self.as_expr(node.child(0).unwrap()),

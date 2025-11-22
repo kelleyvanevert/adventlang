@@ -1342,6 +1342,8 @@ fn declare_stmt(s: State) -> ParseResult<State, Stmt> {
 
 fn stmt(s: State) -> ParseResult<State, Stmt> {
     alt((
+        map(const_item, Stmt::ConstItem),
+        map(named_fn_item, Stmt::NamedFn),
         continue_stmt,
         break_stmt,
         return_stmt,
@@ -1436,21 +1438,6 @@ fn const_item(s: State) -> ParseResult<State, ConstItem> {
     .parse(s)
 }
 
-fn item(s: State) -> ParseResult<State, Item> {
-    alt((
-        map(const_item, Item::ConstItem),
-        map(named_fn_item, Item::NamedFn),
-        // declare_stmt,
-        // assign_stmt,
-        // map(expr, |expr| Stmt::Expr { expr: expr.into() }),
-    ))
-    .parse(s)
-}
-
-fn stmt_or_item(s: State) -> ParseResult<State, Either<Stmt, Item>> {
-    alt((map(stmt, Either::Left), map(item, Either::Right))).parse(s)
-}
-
 // fn char<'a>(c: char) -> impl Parser<State<'a>, Output = char> {
 //     move |s: State<'a>| {
 //         if s.input.starts_with(c) {
@@ -1465,29 +1452,19 @@ fn block_contents<'a>(is_fn_body: bool) -> impl Parser<State<'a>, Output = Block
     move |s: State<'a>| {
         let sep = regex(r"^[ \t]*([;\n][ \t]*)+");
         map(
-            optional(seq((
-                stmt_or_item,
-                many0(preceded(many0(sep), stmt_or_item)),
-            ))),
+            optional(seq((stmt, many0(preceded(many0(sep), stmt))))),
             |m| {
                 let mut block = Block {
                     id: 0,
                     is_fn_body,
-                    items: vec![],
                     stmts: vec![],
                 };
 
                 if let Some((first, rest)) = m {
-                    match first {
-                        Either::Left(stmt) => block.stmts.push(stmt),
-                        Either::Right(item) => block.items.push(item),
-                    }
+                    block.stmts.push(first);
 
-                    for el in rest {
-                        match el {
-                            Either::Left(stmt) => block.stmts.push(stmt),
-                            Either::Right(item) => block.items.push(item),
-                        }
+                    for stmt in rest {
+                        block.stmts.push(stmt);
                     }
                 }
 

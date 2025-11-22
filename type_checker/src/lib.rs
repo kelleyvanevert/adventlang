@@ -1217,19 +1217,20 @@ impl TypeCheckerCtx {
         let mut ty = Type::Nil;
         let mut certain_return = false;
 
-        let mut item_placeholder_types = vec![];
-        for item in &block.items {
-            item_placeholder_types.push(self.forward_declare_item(env, item)?);
-        }
-
-        for (i, item) in block.items.iter().enumerate() {
-            self.infer_item(env, item, item_placeholder_types[i].clone())?;
+        let mut placeholder_types = vec![];
+        for stmt in &block.stmts {
+            placeholder_types.push(self.forward_declare_stmt(env, stmt)?);
         }
 
         let num_stmts = block.stmts.len();
         for (i, stmt) in block.stmts.iter().enumerate() {
             let is_last = i + 1 == num_stmts;
-            let (stmt_ty, returns) = self.infer_stmt(env, stmt, use_result && is_last)?;
+            let (stmt_ty, returns) = self.infer_stmt(
+                env,
+                stmt,
+                use_result && is_last,
+                placeholder_types[i].clone(),
+            )?;
             if returns {
                 certain_return = returns;
             }
@@ -1263,16 +1264,20 @@ impl TypeCheckerCtx {
         self.assign_extra(block.id(), ty, certain_return)
     }
 
-    fn forward_declare_item(&mut self, env: &mut Env, item: &ast::Item) -> Result<Type, TypeError> {
-        match item {
-            ast::Item::ConstItem(ast::ConstItem { id, name, expr }) => {
+    fn forward_declare_stmt(
+        &mut self,
+        env: &mut Env,
+        stmt: &ast::Stmt,
+    ) -> Result<Option<Type>, TypeError> {
+        match stmt {
+            ast::Stmt::ConstItem(ast::ConstItem { id, name, expr }) => {
                 let placeholder_ty = Type::TypeVar(self.fresh_ty_var(false));
 
                 env.add_local(name.str.clone(), (*id, placeholder_ty.clone()));
 
-                Ok(placeholder_ty)
+                Ok(Some(placeholder_ty))
             }
-            ast::Item::NamedFn(ast::NamedFnItem {
+            ast::Stmt::NamedFn(ast::NamedFnItem {
                 id,
                 name,
                 generics,
@@ -1321,26 +1326,32 @@ impl TypeCheckerCtx {
 
                 env.add_named_fn_local(*id, name.str.clone(), fn_ty.clone());
 
-                Ok(Type::Fn(fn_ty))
+                Ok(Some(Type::Fn(fn_ty)))
             }
+            _ => Ok(None),
         }
     }
 
-    fn infer_item(
+    fn infer_stmt(
         &mut self,
         env: &mut Env,
-        item: &ast::Item,
-        placeholder_ty: Type,
-    ) -> Result<Type, TypeError> {
-        match item {
-            ast::Item::ConstItem(ast::ConstItem { id, name, expr }) => {
-                let (ty, _) = self.infer_expr(env, expr, true)?;
+        stmt: &ast::Stmt,
+        use_result: bool,
+        placeholder_ty: Option<Type>,
+    ) -> Result<(Type, bool), TypeError> {
+        match stmt {
+            ast::Stmt::ConstItem(ast::ConstItem { id, name, expr }) => {
+                let (ty, cr) = self.infer_expr(env, expr, true)?;
 
-                self.add_constraint(Constraint::TypeEqual(*id, ty.clone(), placeholder_ty))?;
+                self.add_constraint(Constraint::TypeEqual(
+                    *id,
+                    ty.clone(),
+                    placeholder_ty.expect("placeholder type exists for const item"),
+                ))?;
 
-                self.assign(*id, ty)
+                self.assign_extra(*id, ty, cr)
             }
-            ast::Item::NamedFn(ast::NamedFnItem {
+            ast::Stmt::NamedFn(ast::NamedFnItem {
                 id,
                 name,
                 generics,
@@ -1431,20 +1442,14 @@ impl TypeCheckerCtx {
                     }
                 }
 
-                self.add_constraint(Constraint::TypeEqual(*id, ty.clone(), placeholder_ty))?;
+                self.add_constraint(Constraint::TypeEqual(
+                    *id,
+                    ty.clone(),
+                    placeholder_ty.expect("placeholder type exists for named fn"),
+                ))?;
 
-                self.assign(*id, Type::Nil)
+                self.assign_extra(*id, Type::Nil, false)
             }
-        }
-    }
-
-    fn infer_stmt(
-        &mut self,
-        env: &mut Env,
-        stmt: &ast::Stmt,
-        use_result: bool,
-    ) -> Result<(Type, bool), TypeError> {
-        match stmt {
             ast::Stmt::Break(ast::BreakStmt { id, label, expr }) => {
                 let (expr_ty, expr_certainly_returns) = expr
                     .as_ref()
