@@ -24,7 +24,7 @@ pub enum Type {
     Regex,
     Fn(FnType),
     NamedFnOverload {
-        defs: Vec<FnType>,
+        defs: Vec<(usize, FnType)>,
         choice_var: usize,
     },
     List(Box<Type>),
@@ -60,6 +60,7 @@ impl UnifyKey for TypeVar {
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct FnType {
+    pub body_node_id: usize,
     pub generics: Vec<TypeVar>,
     pub params: Vec<Type>,
     pub ret: Box<Type>,
@@ -249,7 +250,7 @@ impl Type {
             Type::Nil | Type::Bool | Type::Str | Type::Int | Type::Float | Type::Regex => true,
             Type::TypeVar(v) => bound.contains(v),
             Type::Fn(def) => def.is_concrete(bound),
-            Type::NamedFnOverload { defs, .. } => defs.iter().all(|el| el.is_concrete(bound)),
+            Type::NamedFnOverload { defs, .. } => defs.iter().all(|(_, el)| el.is_concrete(bound)),
             Type::List(element_ty) => element_ty.is_concrete(bound),
             Type::Tuple(elements) => elements.iter().all(|el| el.is_concrete(bound)),
             Type::Dict { key, val } => key.is_concrete(bound) && val.is_concrete(bound),
@@ -273,7 +274,7 @@ impl Type {
                 Ok(())
             }
             Type::NamedFnOverload { defs, .. } => {
-                for def in defs {
+                for (_, def) in defs {
                     def.occurs_check(var).map_err(|_| self.clone())?;
                 }
                 Ok(())
@@ -313,7 +314,7 @@ impl Type {
                 def.substitute_vars(sub);
             }
             Type::NamedFnOverload { defs, .. } => {
-                for def in defs {
+                for (_, def) in defs {
                     def.substitute_vars(sub);
                 }
             }
@@ -390,7 +391,7 @@ impl Type {
                 def.substitute(bound, unification_table);
             }
             Type::NamedFnOverload { defs, .. } => {
-                for def in defs {
+                for (_, def) in defs {
                     def.substitute(bound, unification_table);
                 }
             }

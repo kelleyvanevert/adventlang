@@ -606,6 +606,7 @@ assert(bonus(example_input) == 5905)
 // ======
 // 2023 day 8
 // ok
+// skip
 // ======
 
 const example_input = "

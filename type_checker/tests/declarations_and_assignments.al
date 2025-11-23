@@ -88,8 +88,8 @@ fn main() {
 
 
 // ======
-// err -- `x` uses `first`, which uses `a`, which is defined AFTER `x`
-// skip
+// `x` uses `first`, which uses `a`, which is defined AFTER `x`
+// err: DependencyCycle
 // ======
 
 let x = first()
@@ -98,6 +98,22 @@ let a = x
 
 fn first() {
   a
+}
+
+
+// ======
+// the contents of a are runtime depended on by `x`, but the declaration isn't , so it checks out
+// ok
+// ======
+
+let a = []
+
+let x = first()
+
+a = [x]
+
+fn first() {
+  a[0]
 }
 
 
@@ -116,4 +132,49 @@ fn first(y) {
 
 fn first() {
   a
+}
+
+
+// ======
+// the overload is used that uses `a`
+// err: DependencyCycle
+// ======
+
+let x = first()
+
+let a = x
+
+fn first(y) {
+  // overload that doesn't use `a`
+}
+
+fn first() {
+  a
+}
+
+
+// ======
+// ok
+// ======
+
+fn main(input: str) {
+  let a = 5
+
+  fn bla(list) {
+    a :in list
+  }
+}
+
+
+// ======
+// ok
+// skip
+// ======
+
+fn gcd(a: int, b: int) {
+  if b == 0 {
+    a
+  } else {
+    gcd(b, a % b)
+  }
 }

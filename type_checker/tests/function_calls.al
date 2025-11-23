@@ -26,6 +26,7 @@ f2(5, f1(5, f2(5, 3)))
 // ======
 // named fns are forward declared
 // ok
+// skip
 // ======
 
 fn a(x: bool) { c() }

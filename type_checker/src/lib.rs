@@ -67,7 +67,7 @@ mod util;
 struct Env {
     typevars: FxHashMap<String, TypeVar>,
     locals: FxHashMap<String, (usize, Type)>, // (declaring node id, type)
-    named_fns: FxHashMap<String, Vec<FnType>>,
+    named_fns: FxHashMap<String, Vec<(usize, FnType)>>, // name -> Vec<(declaring node id, type)>
 
     /// maps labels to loop node IDs
     loops: FxHashMap<String, usize>,
@@ -100,7 +100,7 @@ impl Env {
     }
 
     fn add_named_fn_local(&mut self, node_id: usize, name: String, def: FnType) {
-        self.named_fns.entry(name).or_default().push(def);
+        self.named_fns.entry(name).or_default().push((node_id, def));
     }
 
     /// Create a new subscope to be used for a function body
@@ -173,6 +173,8 @@ pub enum TypeErrorKind {
         "return type does not match up; explicit return type {0:?}; body type: {1:?}; expected type: {2:?}"
     )]
     ReturnTypeDoesNotMatch(Type, Type, Type),
+    #[error("found a circular dependency: {}", cycle.join("\n"))]
+    DependencyCycle { cycle: Vec<String> },
     #[error("local not defined: {0}")]
     UnknownLocal(String),
     #[error("unknown loop label: {0}")]
@@ -226,6 +228,7 @@ impl TypeErrorKind {
             Self::NotConcrete(ty) => {
                 ty.substitute(bound, unification_table);
             }
+            Self::DependencyCycle { .. } => {}
             Self::UnknownLocal(_) => {}
             Self::UnknownLoopLabel(_) => {}
             Self::UnknownTypeVar(_) => {}
@@ -339,7 +342,12 @@ struct ChooseOverloadConstraint {
     choice_var: usize,
     nodes: Vec<usize>,
     types: Vec<Type>,
-    overloads: Vec<(usize, Vec<Type>)>,
+    overloads: Vec<(
+        usize,     // overload index
+        usize,     // defining node id
+        usize,     // body node id
+        Vec<Type>, // param types + ret type
+    )>,
 }
 
 impl ChooseOverloadConstraint {
@@ -351,7 +359,7 @@ impl ChooseOverloadConstraint {
         for ty in &mut self.types {
             ty.substitute(bound, unification_table);
         }
-        for (_, types) in &mut self.overloads {
+        for (_, _, _, types) in &mut self.overloads {
             for ty in types {
                 ty.substitute(bound, unification_table);
             }
@@ -395,6 +403,20 @@ impl AddAssign for ConstraintResult {
                 cs1.extend_from_slice(&cs2);
             }
             _ => {}
+        }
+    }
+}
+
+#[derive(Debug)]
+struct Deps {
+    // node id `x` -> depends on node ids `ys`
+    deps: FxHashMap<usize, FxHashSet<usize>>,
+}
+
+impl Deps {
+    pub fn new() -> Self {
+        Self {
+            deps: Default::default(),
         }
     }
 }
@@ -445,7 +467,8 @@ pub struct TypeCheckerCtx {
     // This is an analysis of which variables and functions depend on each other,
     //  which can hopefully remove the need for `const`, and allow nested `fn`
     //  items to work nicely.
-    dependencies: FxHashSet<(usize, usize)>,
+    dependencies: FxHashMap<usize, FxHashSet<usize>>,
+    dep_labels: FxHashMap<usize, String>,
 }
 
 impl TypeCheckerCtx {
@@ -453,12 +476,13 @@ impl TypeCheckerCtx {
         Self {
             unification_table: InPlaceUnificationTable::new(),
             constraints: vec![],
-            types: FxHashMap::default(),
+            types: Default::default(),
             overload_choices: vec![],
             all_vars: vec![],
-            rigid_vars: FxHashSet::default(),
-            fn_return_ty: FxHashMap::default(),
-            dependencies: FxHashSet::default(),
+            rigid_vars: Default::default(),
+            fn_return_ty: Default::default(),
+            dependencies: Default::default(),
+            dep_labels: Default::default(),
         }
     }
 
@@ -483,7 +507,7 @@ impl TypeCheckerCtx {
         let mut env = Env::new();
         add_stdlib_types(&mut env, self);
 
-        let mut typed_doc = self.infer_doc(&mut env, doc)?;
+        self.infer_doc(&mut env, doc)?;
 
         self.solve_constraints()
             // make sure that the best-effort substitution that we produced is included in the error report
@@ -511,12 +535,51 @@ impl TypeCheckerCtx {
 
         // self.debug_disjoint_sets();
 
-        // self.types = FxHashMap::from_iter(
-        //     self.types
-        //         .clone()
-        //         .into_iter()
-        //         .map(|(id, ty)| (id, self.normalize_ty(ty.clone()))),
-        // );
+        // Not super necessary
+        self.types = FxHashMap::from_iter(
+            self.types
+                .clone()
+                .into_iter()
+                .map(|(id, ty)| (id, self.normalize_ty(ty.clone()))),
+        );
+
+        // Analyse declaration dependency order
+        // self.dep_check_doc(&mut Deps::new(), doc)?;
+        for &id in self.dependencies.keys() {
+            self.dep_check(id, vec![])?;
+        }
+
+        Ok(())
+    }
+
+    fn dep_check(&self, id: usize, mut prev: Vec<usize>) -> Result<(), TypeError> {
+        if prev.contains(&id) {
+            // println!("");
+            // println!("Cycle detected:");
+            prev.push(id);
+            // for prev_id in prev {
+            //     println!("- {}  {:?}", prev_id, self.dep_labels.get(&prev_id));
+            // }
+            // panic!("cycle");
+
+            return Err(TypeError {
+                node_id: 0,
+                kind: TypeErrorKind::DependencyCycle {
+                    cycle: prev
+                        .into_iter()
+                        .map(|id| format!("- {}  {:?}", id, self.dep_labels.get(&id)))
+                        .collect_vec(),
+                },
+            });
+        }
+
+        prev.push(id);
+
+        if let Some(dependencies) = self.dependencies.get(&id) {
+            for &dep in dependencies {
+                self.dep_check(dep, prev.clone())?;
+            }
+        }
 
         Ok(())
     }
@@ -758,7 +821,7 @@ impl TypeCheckerCtx {
                 match self.check_ty_equal(
                     choose.nodes[ti],
                     choose.types[ti].clone(),
-                    choose.overloads[i].1[ti].clone(),
+                    choose.overloads[i].3[ti].clone(),
                 ) {
                     Err(err) => {
                         possible = false;
@@ -796,7 +859,7 @@ impl TypeCheckerCtx {
                 res += self.check_ty_equal(
                     choose.nodes[ti],
                     choose.types[ti].clone(),
-                    choose.overloads[i].1[ti].clone(),
+                    choose.overloads[i].3[ti].clone(),
                 )?;
             }
 
@@ -925,11 +988,13 @@ impl TypeCheckerCtx {
                     generics: a_generics,
                     params: a_params,
                     ret: a_ret,
+                    ..
                 }),
                 Type::Fn(FnType {
                     generics: b_generics,
                     params: b_params,
                     ret: b_ret,
+                    ..
                 }),
             ) => {
                 if a_generics.len() != b_generics.len() {
@@ -1013,12 +1078,14 @@ impl TypeCheckerCtx {
     fn normalize_fn_ty(
         &mut self,
         FnType {
+            body_node_id,
             generics,
             params,
             ret,
         }: FnType,
     ) -> FnType {
         FnType {
+            body_node_id,
             generics,
             params: params.into_iter().map(|ty| self.normalize_ty(ty)).collect(),
             ret: self.normalize_ty(*ret).into(),
@@ -1033,12 +1100,12 @@ impl TypeCheckerCtx {
             Type::Fn(def) => Type::Fn(self.normalize_fn_ty(def)),
             Type::NamedFnOverload { defs, choice_var } => {
                 if let Some(overload_index) = self.overload_choices[choice_var] {
-                    Type::Fn(self.normalize_fn_ty(defs[overload_index].clone()))
+                    Type::Fn(self.normalize_fn_ty(defs[overload_index].1.clone()))
                 } else {
                     Type::NamedFnOverload {
                         defs: defs
                             .into_iter()
-                            .map(|def| self.normalize_fn_ty(def))
+                            .map(|(def_node_id, def)| (def_node_id, self.normalize_fn_ty(def)))
                             .collect(),
                         choice_var,
                     }
@@ -1109,6 +1176,7 @@ impl TypeCheckerCtx {
                     .collect_vec();
 
                 Ok(Type::Fn(FnType {
+                    body_node_id: 0, // TODO: check: should never be used
                     generics,
                     params: params
                         .into_iter()
@@ -1154,24 +1222,33 @@ impl TypeCheckerCtx {
         node_id: usize,
         env: &Env,
         name: &str,
-    ) -> Result<Type, TypeError> {
-        let Some((_, ty)) = env.locals.get(name).cloned() else {
+    ) -> Result<(usize, Type), TypeError> {
+        let Some(id_and_ty) = env.locals.get(name).cloned() else {
             return Err(TypeError {
                 node_id,
                 kind: TypeErrorKind::UnknownLocal(name.to_string()),
             });
         };
 
-        Ok(ty)
+        Ok(id_and_ty)
     }
 
-    fn get_local(&mut self, node_id: usize, env: &Env, name: &str) -> Result<Type, TypeError> {
+    fn get_local(
+        &mut self,
+        node_id: usize,
+        env: &Env,
+        name: &str,
+    ) -> Result<(usize, Type), TypeError> {
         if let Some(mut defs) = env.named_fns.get(name).cloned() {
             if defs.len() == 1 {
-                return Ok(Type::Fn(defs.pop().unwrap()));
+                let (def_node_id, fn_ty) = defs.pop().unwrap();
+                return Ok((def_node_id, Type::Fn(fn_ty)));
             } else {
                 let choice_var = self.fresh_overload_choice_var();
-                return Ok(Type::NamedFnOverload { defs, choice_var });
+                return Ok((
+                    0, // hack -- don't use
+                    Type::NamedFnOverload { defs, choice_var },
+                ));
             }
         } else {
             self.get_assignable_local(node_id, env, name)
@@ -1197,8 +1274,101 @@ impl TypeCheckerCtx {
         self.assign_extra(id, ty, ()).map(|t| t.0)
     }
 
+    // fn dep_check_doc(&mut self, deps: &mut Deps, doc: &ast::Document) -> Result<(), TypeError> {
+    //     self.dep_check_block(deps, &doc.body)?;
+
+    //     Ok(())
+    // }
+
+    // fn dep_check_block(&mut self, deps: &mut Deps, block: &ast::Block) -> Result<(), TypeError> {
+    //     for stmt in &block.stmts {
+    //         self.dep_check_stmt(deps, stmt)?;
+    //     }
+
+    //     Ok(())
+    // }
+
+    // fn dep_check_stmt(&mut self, deps: &mut Deps, stmt: &ast::Stmt) -> Result<(), TypeError> {
+    //     match stmt {
+    //         ast::Stmt::ConstItem(ast::ConstItem { id, name, expr }) => {
+    //             // TODO
+    //         }
+    //         ast::Stmt::NamedFn(ast::NamedFnItem {
+    //             id,
+    //             name,
+    //             generics,
+    //             params,
+    //             ret,
+    //             body,
+    //         }) => {
+    //             // TODO
+    //         }
+    //         ast::Stmt::Break(ast::BreakStmt { id, label, expr }) => {
+    //             // TODO
+    //         }
+    //         ast::Stmt::Continue(ast::ContinueStmt { id, label }) => {
+    //             // TODO
+    //         }
+    //         ast::Stmt::Return(ast::ReturnStmt { id, expr }) => {
+    //             // TODO
+    //         }
+    //         ast::Stmt::Declare(ast::DeclareStmt { id, pattern, expr }) => {
+    //             // TODO
+    //             self.dep_check_expr(deps, expr)?;
+    //         }
+    //         ast::Stmt::Assign(ast::AssignStmt { id, pattern, expr }) => {
+    //             // TODO
+    //         }
+    //         ast::Stmt::Expr(ast::ExprStmt { id, expr }) => {
+    //             // TODO
+    //             self.dep_check_expr(deps, expr)?;
+    //         }
+    //     }
+
+    //     Ok(())
+    // }
+
+    // fn dep_check_expr(&mut self, deps: &mut Deps, expr: &ast::Expr) -> Result<(), TypeError> {
+    //     match expr {
+    //         ast::Expr::Str(_)
+    //         | ast::Expr::Nil(_)
+    //         | ast::Expr::Regex(_)
+    //         | ast::Expr::Bool(_)
+    //         | ast::Expr::Int(_)
+    //         | ast::Expr::Float(_) => {}
+
+    //         ast::Expr::Var(ast::VarExpr { id, var }) => {
+    //             //
+    //         }
+    //         ast::Expr::Unary(_) => {}
+    //         ast::Expr::Binary(_) => {}
+    //         ast::Expr::List(_) => {}
+    //         ast::Expr::Tuple(_) => {}
+    //         ast::Expr::Dict(_) => {}
+    //         ast::Expr::Index(_) => {}
+    //         ast::Expr::Member(_) => {}
+    //         ast::Expr::Call(_) => {}
+    //         ast::Expr::AnonymousFn(_) => {}
+    //         ast::Expr::If(_) => {}
+    //         ast::Expr::While(_) => {}
+    //         ast::Expr::WhileLet(_) => {}
+    //         ast::Expr::Do(_) => {}
+    //         ast::Expr::DoWhile(_) => {}
+    //         ast::Expr::Loop(_) => {}
+    //         ast::Expr::For(_) => {}
+    //     }
+
+    //     Ok(())
+    // }
+
+    fn depends(&mut self, dependents: &Vec<usize>, dependency: usize) {
+        for &x in dependents {
+            (*self.dependencies.entry(x).or_default()).insert(dependency);
+        }
+    }
+
     fn infer_doc(&mut self, env: &mut Env, doc: &ast::Document) -> Result<(), TypeError> {
-        self.infer_block(env, &doc.body, false, false)?;
+        self.infer_block(env, &doc.body, &vec![], false, false)?;
 
         Ok(())
     }
@@ -1207,6 +1377,7 @@ impl TypeCheckerCtx {
         &mut self,
         env: &mut Env,
         block: &ast::Block,
+        dependents: &Vec<usize>,
         use_result: bool,
         as_function_body: bool,
     ) -> Result<(Type, bool), TypeError> {
@@ -1228,6 +1399,7 @@ impl TypeCheckerCtx {
             let (stmt_ty, returns) = self.infer_stmt(
                 env,
                 stmt,
+                dependents,
                 use_result && is_last,
                 placeholder_types[i].clone(),
             )?;
@@ -1319,6 +1491,7 @@ impl TypeCheckerCtx {
                     .unwrap_or_else(|| Type::TypeVar(self.fresh_ty_var(false)));
 
                 let fn_ty = FnType {
+                    body_node_id: body.id(),
                     generics,
                     params,
                     ret: ret.into(),
@@ -1336,12 +1509,20 @@ impl TypeCheckerCtx {
         &mut self,
         env: &mut Env,
         stmt: &ast::Stmt,
+        dependents: &Vec<usize>,
         use_result: bool,
         placeholder_ty: Option<Type>,
     ) -> Result<(Type, bool), TypeError> {
         match stmt {
             ast::Stmt::ConstItem(ast::ConstItem { id, name, expr }) => {
-                let (ty, cr) = self.infer_expr(env, expr, true)?;
+                self.dep_labels
+                    .insert(*id, format!("const {}", name.as_str()));
+
+                self.depends(dependents, *id);
+
+                let (ty, cr) = self.infer_expr(env, expr, &vec![*id], true)?;
+
+                // (local was already added to `env` in `forward_declare_stmt`)
 
                 self.add_constraint(Constraint::TypeEqual(
                     *id,
@@ -1349,7 +1530,7 @@ impl TypeCheckerCtx {
                     placeholder_ty.expect("placeholder type exists for const item"),
                 ))?;
 
-                self.assign_extra(*id, ty, cr)
+                self.assign_extra(*id, Type::Nil, cr)
             }
             ast::Stmt::NamedFn(ast::NamedFnItem {
                 id,
@@ -1359,6 +1540,16 @@ impl TypeCheckerCtx {
                 ret,
                 body,
             }) => {
+                self.dep_labels
+                    .insert(*id, format!("named fn {}", name.as_str()));
+
+                self.dep_labels.insert(
+                    body.id(),
+                    format!("invocation of named fn {}", name.as_str()),
+                );
+
+                self.depends(dependents, *id);
+
                 let mut typing_child_env = env.clone();
 
                 let generics = generics
@@ -1381,6 +1572,7 @@ impl TypeCheckerCtx {
                         self.infer_declarable(
                             &mut typing_child_env,
                             decl,
+                            &vec![body.id()],
                             &mut declare_locals,
                             false,
                         )
@@ -1395,9 +1587,10 @@ impl TypeCheckerCtx {
 
                 let mut child_env = typing_child_env.new_child_fn_scope(*id, declare_locals);
                 let (body_ty, certain_return) =
-                    self.infer_block(&mut child_env, body, true, true)?;
+                    self.infer_block(&mut child_env, body, &vec![body.id()], true, true)?;
 
                 let ty = Type::Fn(FnType {
+                    body_node_id: body.id(),
                     generics: generics.clone(),
                     params: params.clone(),
                     ret: ret_ty.clone().into(),
@@ -1451,9 +1644,13 @@ impl TypeCheckerCtx {
                 self.assign_extra(*id, Type::Nil, false)
             }
             ast::Stmt::Break(ast::BreakStmt { id, label, expr }) => {
+                self.dep_labels.insert(*id, format!("break stmt"));
+
+                self.depends(dependents, *id);
+
                 let (expr_ty, expr_certainly_returns) = expr
                     .as_ref()
-                    .map(|expr| self.infer_expr(env, expr, true))
+                    .map(|expr| self.infer_expr(env, expr, &vec![*id], true))
                     .transpose()?
                     .unwrap_or((Type::Nil, false));
 
@@ -1484,9 +1681,13 @@ impl TypeCheckerCtx {
                 return self.assign_extra(*id, Type::Nil, false);
             }
             ast::Stmt::Return(ast::ReturnStmt { id, expr }) => {
+                self.dep_labels.insert(*id, format!("return stmt"));
+
+                self.depends(dependents, *id);
+
                 let (expr_ty, _) = expr
                     .as_ref()
-                    .map(|expr| self.infer_expr(env, expr, true))
+                    .map(|expr| self.infer_expr(env, expr, &vec![*id], true))
                     .transpose()?
                     .unwrap_or((Type::Nil, false));
 
@@ -1507,22 +1708,46 @@ impl TypeCheckerCtx {
             }
             ast::Stmt::Declare(ast::DeclareStmt { id, pattern, expr }) => {
                 let mut declare_locals = FxHashMap::default();
-                let pattern_ty =
-                    self.infer_declare_pattern(env, pattern, &mut declare_locals, false)?;
+                let pattern_ty = self.infer_declare_pattern(
+                    env,
+                    pattern,
+                    dependents,
+                    &mut declare_locals,
+                    false,
+                )?;
 
-                let (_, expr_certainly_returns) = self.check_expr(env, expr, pattern_ty)?;
+                let (_, expr_certainly_returns) = self.check_expr(
+                    env,
+                    expr,
+                    &declare_locals.values().map(|t| t.0).collect_vec(),
+                    pattern_ty,
+                )?;
                 env.add_locals(declare_locals);
 
                 return self.assign_extra(*id, Type::Nil, expr_certainly_returns);
             }
             ast::Stmt::Assign(ast::AssignStmt { id, pattern, expr }) => {
-                let pattern_ty = self.infer_assign_pattern(env, pattern)?;
-                let (_, expr_certainly_returns) = self.check_expr(env, expr, pattern_ty)?;
+                self.dep_labels.insert(*id, format!("assign stmt"));
+
+                self.depends(dependents, *id);
+
+                // TODO make sure this logic is right. My idea: the contents of the variable
+                //  might be runtime dependent, but the declaration isn't statically dependent,
+                //  which is what we're checking here, so we don't have to check the dependency
+                //  of the assigned variables. We do, however, just check the usages in the stmt.
+                let pattern_ty = self.infer_assign_pattern(env, pattern, &vec![*id])?;
+                let (_, expr_certainly_returns) =
+                    self.check_expr(env, expr, &vec![*id], pattern_ty)?;
 
                 return self.assign_extra(*id, Type::Nil, expr_certainly_returns);
             }
             ast::Stmt::Expr(ast::ExprStmt { id, expr }) => {
-                let (expr_ty, expr_certainly_returns) = self.infer_expr(env, expr, use_result)?;
+                self.dep_labels.insert(*id, format!("expr stmt"));
+
+                self.depends(dependents, *id);
+
+                let (expr_ty, expr_certainly_returns) =
+                    self.infer_expr(env, expr, &vec![*id], use_result)?;
 
                 return self.assign_extra(*id, expr_ty, expr_certainly_returns);
             }
@@ -1533,10 +1758,11 @@ impl TypeCheckerCtx {
         &mut self,
         env: &mut Env,
         pattern: &ast::AssignPattern,
+        dependents: &Vec<usize>,
     ) -> Result<Type, TypeError> {
         match pattern {
             ast::AssignPattern::Single(ast::AssignSingle { id, loc }) => {
-                let loc_ty = self.infer_location(env, loc)?;
+                let loc_ty = self.infer_location(env, loc, dependents)?;
 
                 return self.assign(*id, loc_ty);
             }
@@ -1549,7 +1775,7 @@ impl TypeCheckerCtx {
                 let ty = Type::List(element_ty.clone().into());
 
                 for pat in elements {
-                    let pat_ty = self.infer_assign_pattern(env, pat)?;
+                    let pat_ty = self.infer_assign_pattern(env, pat, dependents)?;
                     self.add_constraint(Constraint::TypeEqual(
                         pat.id(),
                         pat_ty,
@@ -1558,7 +1784,7 @@ impl TypeCheckerCtx {
                 }
 
                 if let Some(pat) = splat {
-                    let pat_ty = self.infer_assign_pattern(env, pat)?;
+                    let pat_ty = self.infer_assign_pattern(env, pat, dependents)?;
                     self.add_constraint(Constraint::TypeEqual(pat.id(), pat_ty, ty.clone()))?;
                 }
 
@@ -1573,7 +1799,7 @@ impl TypeCheckerCtx {
                 let ty = Type::Tuple(element_types.clone());
 
                 for (i, el) in elements.into_iter().enumerate() {
-                    let decl_ty = self.infer_assign_pattern(env, el)?;
+                    let decl_ty = self.infer_assign_pattern(env, el, dependents)?;
                     self.add_constraint(Constraint::TypeEqual(
                         el.id(),
                         decl_ty,
@@ -1587,10 +1813,18 @@ impl TypeCheckerCtx {
     }
 
     // TODO: deal with certain return
-    fn infer_location(&mut self, env: &mut Env, loc: &ast::AssignLoc) -> Result<Type, TypeError> {
+    fn infer_location(
+        &mut self,
+        env: &mut Env,
+        loc: &ast::AssignLoc,
+        dependents: &Vec<usize>,
+    ) -> Result<Type, TypeError> {
         match loc {
             ast::AssignLoc::Var(ast::AssignLocVar { id, var }) => {
-                let ty = self.get_assignable_local(*id, env, var.as_str())?;
+                let (local_id, ty) = self.get_assignable_local(*id, env, var.as_str())?;
+
+                self.depends(dependents, local_id);
+
                 self.assign(*id, ty)
             }
             ast::AssignLoc::Index(ast::AssignLocIndex {
@@ -1598,8 +1832,8 @@ impl TypeCheckerCtx {
                 container,
                 index,
             }) => {
-                let container_type = self.infer_location(env, container)?;
-                let (index_type, certain_return) = self.infer_expr(env, index, true)?;
+                let container_type = self.infer_location(env, container, dependents)?;
+                let (index_type, certain_return) = self.infer_expr(env, index, dependents, true)?;
                 // TODO: deal with certain return of index expr
 
                 let element_type = Type::TypeVar(self.fresh_ty_var(false));
@@ -1629,6 +1863,7 @@ impl TypeCheckerCtx {
         &mut self,
         env: &mut Env,
         pattern: &ast::DeclarePattern,
+        dependents: &Vec<usize>,
         declare_locals: &mut FxHashMap<String, (usize, Type)>,
         if_let_guarded: bool,
     ) -> Result<Type, TypeError> {
@@ -1638,6 +1873,11 @@ impl TypeCheckerCtx {
                     // only if in declare-stmt
                     panic!("can't use declare guard in declare stmt");
                 }
+
+                self.dep_labels
+                    .insert(*id, format!("local {}", var.as_str()));
+
+                self.depends(dependents, *id);
 
                 let ty = ty
                     .clone()
@@ -1667,7 +1907,8 @@ impl TypeCheckerCtx {
                 let ty = Type::List(element_ty.clone().into());
 
                 for el in elements {
-                    let decl_ty = self.infer_declarable(env, el, declare_locals, if_let_guarded)?;
+                    let decl_ty =
+                        self.infer_declarable(env, el, dependents, declare_locals, if_let_guarded)?;
                     self.add_constraint(Constraint::TypeEqual(
                         el.id(),
                         decl_ty,
@@ -1676,6 +1917,11 @@ impl TypeCheckerCtx {
                 }
 
                 if let Some(ast::DeclareRest { id, var, ty }) = rest {
+                    self.dep_labels
+                        .insert(*id, format!("local (list splat) {}", var.as_str()));
+
+                    self.depends(dependents, *id);
+
                     let ty = ty
                         .clone()
                         .map(|ty| self.convert_hint_to_type(&*env, &ty))
@@ -1711,7 +1957,8 @@ impl TypeCheckerCtx {
                 let ty = Type::Tuple(element_types.clone());
 
                 for (i, el) in elements.iter().enumerate() {
-                    let decl_ty = self.infer_declarable(env, el, declare_locals, if_let_guarded)?;
+                    let decl_ty =
+                        self.infer_declarable(env, el, dependents, declare_locals, if_let_guarded)?;
                     self.add_constraint(Constraint::TypeEqual(
                         el.id(),
                         decl_ty,
@@ -1766,6 +2013,7 @@ impl TypeCheckerCtx {
         &mut self,
         env: &mut Env,
         declarable: &ast::Declarable,
+        dependents: &Vec<usize>,
         declare_locals: &mut FxHashMap<String, (usize, Type)>,
         if_let_guarded: bool,
     ) -> Result<Type, TypeError> {
@@ -1776,10 +2024,10 @@ impl TypeCheckerCtx {
         } = declarable;
 
         let pattern_ty =
-            self.infer_declare_pattern(env, pattern, declare_locals, if_let_guarded)?;
+            self.infer_declare_pattern(env, pattern, dependents, declare_locals, if_let_guarded)?;
 
         if let Some(expr) = fallback {
-            self.check_expr(env, expr, pattern_ty.clone())?;
+            self.check_expr(env, expr, dependents, pattern_ty.clone())?;
         }
 
         self.assign(*id, pattern_ty)
@@ -1789,6 +2037,7 @@ impl TypeCheckerCtx {
         &mut self,
         env: &mut Env,
         branch: &ast::IfBranch,
+        dependents: &Vec<usize>,
         use_result: bool,
     ) -> Result<
         (
@@ -1802,10 +2051,10 @@ impl TypeCheckerCtx {
     > {
         match branch {
             ast::IfBranch::If(ast::IfThenBranch { id, cond, body }) => {
-                let (cond_ty, cond_cr) = self.check_expr(env, cond, Type::Bool)?;
+                let (cond_ty, cond_cr) = self.check_expr(env, cond, dependents, Type::Bool)?;
 
                 let (then_ty, body_cr) =
-                    self.infer_block(&mut env.clone(), body, use_result, false)?;
+                    self.infer_block(&mut env.clone(), body, dependents, use_result, false)?;
 
                 let ty = if use_result { then_ty } else { Type::Nil };
 
@@ -1818,15 +2067,21 @@ impl TypeCheckerCtx {
                 body,
             }) => {
                 let mut declare_locals = FxHashMap::default();
-                let pattern_ty =
-                    self.infer_declare_pattern(env, pattern, &mut declare_locals, true)?;
+                let pattern_ty = self.infer_declare_pattern(
+                    env,
+                    pattern,
+                    dependents,
+                    &mut declare_locals,
+                    true,
+                )?;
 
-                let (expr_ty, expr_cr) = self.check_expr(env, expr, pattern_ty.nullable())?;
+                let (expr_ty, expr_cr) =
+                    self.check_expr(env, expr, dependents, pattern_ty.nullable())?;
 
                 let mut then_child_env = env.clone();
                 then_child_env.add_locals(declare_locals);
                 let (then_ty, body_cr) =
-                    self.infer_block(&mut then_child_env, body, use_result, false)?;
+                    self.infer_block(&mut then_child_env, body, dependents, use_result, false)?;
 
                 let ty = if use_result { then_ty } else { Type::Nil };
 
@@ -1839,6 +2094,7 @@ impl TypeCheckerCtx {
         &mut self,
         env: &mut Env,
         expr: &ast::Expr,
+        dependents: &Vec<usize>,
         use_result: bool,
     ) -> Result<(Type, bool), TypeError> {
         match expr {
@@ -1851,7 +2107,7 @@ impl TypeCheckerCtx {
                             self.assign(*id, Type::Str)?;
                         }
                         ast::StrPiece::Interpolation(ast::StrPieceInterpolation { id, expr }) => {
-                            let (ty, cr) = self.infer_expr(env, expr, true)?;
+                            let (ty, cr) = self.infer_expr(env, expr, dependents, true)?;
                             if cr {
                                 certain_return = true;
                             }
@@ -1879,21 +2135,27 @@ impl TypeCheckerCtx {
                 return self.assign_extra(*id, Type::Float, false);
             }
             ast::Expr::Var(ast::VarExpr { id, var }) => {
-                let ty = self.get_local(*id, env, var.as_str())?;
+                let (def_node_id, ty) = self.get_local(*id, env, var.as_str())?;
+
+                self.depends(dependents, def_node_id);
+
                 return self.assign_extra(*id, ty, false);
             }
             ast::Expr::Unary(ast::UnaryExpr { id, op, expr }) if op.as_str() == "some" => {
-                let (expr_ty, certainly_returns) = self.infer_expr(env, expr, true)?;
+                let (expr_ty, certainly_returns) = self.infer_expr(env, expr, dependents, true)?;
 
                 return self.assign_extra(*id, expr_ty.nullable(), certainly_returns);
             }
             ast::Expr::Unary(ast::UnaryExpr { id, op, expr }) => {
-                let (expr_ty, certainly_returns) = self.infer_expr(env, expr, true)?;
+                let (expr_ty, certainly_returns) = self.infer_expr(env, expr, dependents, true)?;
 
                 let res_ty = Type::TypeVar(self.fresh_ty_var(false));
 
                 match self.get_local(*id, env, op.as_str())? {
-                    Type::Fn(f_ty) => {
+                    (def_node_id, Type::Fn(f_ty)) => {
+                        self.depends(dependents, def_node_id);
+                        self.depends(dependents, f_ty.body_node_id);
+
                         // instantiate if generic
                         let f_ty = self.instantiate_fn_ty(f_ty, false);
 
@@ -1917,13 +2179,14 @@ impl TypeCheckerCtx {
                         );
                     }
 
-                    Type::NamedFnOverload { defs, choice_var } => {
+                    (_, Type::NamedFnOverload { defs, choice_var }) => {
                         let overloads = defs
                             .into_iter()
                             .enumerate()
-                            .filter(|(i, f_ty)| f_ty.params.len() == 1)
-                            .map(|(i, f_ty)| {
+                            .filter(|(i, (_, f_ty))| f_ty.params.len() == 1)
+                            .map(|(i, (def_node_id, f_ty))| {
                                 let FnType {
+                                    body_node_id,
                                     generics,
                                     mut params,
                                     ret,
@@ -1931,7 +2194,7 @@ impl TypeCheckerCtx {
 
                                 params.push(*ret);
 
-                                (i, params)
+                                (i, def_node_id, body_node_id, params)
                             })
                             .collect_vec();
 
@@ -1961,8 +2224,8 @@ impl TypeCheckerCtx {
                 op,
                 right,
             }) => {
-                let (left_ty, left_cr) = self.infer_expr(env, left, true)?;
-                let (right_ty, right_cr) = self.infer_expr(env, right, true)?;
+                let (left_ty, left_cr) = self.infer_expr(env, left, dependents, true)?;
+                let (right_ty, right_cr) = self.infer_expr(env, right, dependents, true)?;
 
                 // TODO, this is actually a bit trickier because of short-circuiting boolean ops...
                 let certainly_returns = left_cr || right_cr;
@@ -1970,7 +2233,10 @@ impl TypeCheckerCtx {
                 let res_ty = Type::TypeVar(self.fresh_ty_var(false));
 
                 match self.get_local(*id, env, op.as_str())? {
-                    Type::Fn(f_ty) => {
+                    (def_node_id, Type::Fn(f_ty)) => {
+                        self.depends(dependents, def_node_id);
+                        self.depends(dependents, f_ty.body_node_id);
+
                         // instantiate if generic
                         let f_ty = self.instantiate_fn_ty(f_ty, false);
 
@@ -2000,13 +2266,14 @@ impl TypeCheckerCtx {
                         );
                     }
 
-                    Type::NamedFnOverload { defs, choice_var } => {
+                    (_, Type::NamedFnOverload { defs, choice_var }) => {
                         let overloads = defs
                             .into_iter()
                             .enumerate()
-                            .filter(|(i, f_ty)| f_ty.params.len() == 2)
-                            .map(|(i, f_ty)| {
+                            .filter(|(i, (_, f_ty))| f_ty.params.len() == 2)
+                            .map(|(i, (def_node_id, f_ty))| {
                                 let FnType {
+                                    body_node_id,
                                     generics,
                                     mut params,
                                     ret,
@@ -2014,7 +2281,7 @@ impl TypeCheckerCtx {
 
                                 params.push(*ret);
 
-                                (i, params)
+                                (i, def_node_id, body_node_id, params)
                             })
                             .collect_vec();
 
@@ -2049,14 +2316,14 @@ impl TypeCheckerCtx {
                 let list_ty = Type::List(element_ty.clone().into());
 
                 for el in elements {
-                    let (_, cr) = self.check_expr(env, el, element_ty.clone())?;
+                    let (_, cr) = self.check_expr(env, el, dependents, element_ty.clone())?;
                     if cr {
                         certainly_returns = true;
                     }
                 }
 
                 if let Some(splat) = splat {
-                    let (_, cr) = self.check_expr(env, splat, list_ty.clone())?;
+                    let (_, cr) = self.check_expr(env, splat, dependents, list_ty.clone())?;
                     if cr {
                         certainly_returns = true;
                     }
@@ -2069,7 +2336,7 @@ impl TypeCheckerCtx {
                 let mut element_types = vec![];
 
                 for expr in elements {
-                    let (ty, cr) = self.infer_expr(env, expr, true)?;
+                    let (ty, cr) = self.infer_expr(env, expr, dependents, true)?;
                     element_types.push(ty);
                     if cr {
                         certainly_returns = true;
@@ -2091,13 +2358,18 @@ impl TypeCheckerCtx {
                 for ast::DictEntry { id, key, value } in entries {
                     match &key.key {
                         ast::DictKeyKind::Expr(key_expr) => {
-                            let (_, cr) = self.check_expr(env, key_expr, key_ty.clone())?;
+                            let (_, cr) =
+                                self.check_expr(env, key_expr, dependents, key_ty.clone())?;
                             if cr {
                                 certainly_returns = true;
                             }
                         }
                         ast::DictKeyKind::Identifier(key_id) => {
-                            let key_local_ty = self.get_local(key.id, env, key_id.as_str())?;
+                            let (def_node_id, key_local_ty) =
+                                self.get_local(key.id, env, key_id.as_str())?;
+
+                            self.depends(dependents, def_node_id);
+
                             self.add_constraint(Constraint::TypeEqual(
                                 key.id,
                                 key_local_ty,
@@ -2106,7 +2378,7 @@ impl TypeCheckerCtx {
                         }
                     }
 
-                    let (_, cr) = self.check_expr(env, value, val_ty.clone())?;
+                    let (_, cr) = self.check_expr(env, value, dependents, val_ty.clone())?;
                     if cr {
                         certainly_returns = true;
                     }
@@ -2124,8 +2396,8 @@ impl TypeCheckerCtx {
                     todo!()
                 }
 
-                let (container_type, c_cr) = self.infer_expr(env, expr, true)?;
-                let (index_type, i_cr) = self.infer_expr(env, index, true)?;
+                let (container_type, c_cr) = self.infer_expr(env, expr, dependents, true)?;
+                let (index_type, i_cr) = self.infer_expr(env, index, dependents, true)?;
 
                 let element_type = Type::TypeVar(self.fresh_ty_var(false));
 
@@ -2169,7 +2441,7 @@ impl TypeCheckerCtx {
                 //     arg_types.push(self.infer_expr(env, &args[0].expr, use_result));
                 // }
 
-                let (callee_ty, cr) = self.infer_expr(env, f, true)?;
+                let (callee_ty, cr) = self.infer_expr(env, f, dependents, true)?;
                 if cr {
                     certainly_returns = true;
                 }
@@ -2180,6 +2452,8 @@ impl TypeCheckerCtx {
                 match callee_ty {
                     // simplest situation: it's known to be a function with also known type
                     Type::Fn(f_ty) => {
+                        self.depends(dependents, f_ty.body_node_id);
+
                         // instantiate if generic
                         let f_ty = self.instantiate_fn_ty(f_ty, false);
 
@@ -2192,7 +2466,7 @@ impl TypeCheckerCtx {
 
                         for (i, ast::Argument { id, name, expr }) in args.into_iter().enumerate() {
                             let (expr_ty, cr) =
-                                self.check_expr(env, expr, f_ty.params[i].clone())?;
+                                self.check_expr(env, expr, dependents, f_ty.params[i].clone())?;
 
                             if cr {
                                 certainly_returns = true;
@@ -2216,7 +2490,7 @@ impl TypeCheckerCtx {
                         let mut params = vec![];
 
                         for (i, ast::Argument { id, name, expr }) in args.into_iter().enumerate() {
-                            let (expr_ty, cr) = self.infer_expr(env, expr, true)?;
+                            let (expr_ty, cr) = self.infer_expr(env, expr, dependents, true)?;
 
                             if cr {
                                 certainly_returns = true;
@@ -2230,6 +2504,7 @@ impl TypeCheckerCtx {
                             f.id(),
                             Type::TypeVar(v),
                             Type::Fn(FnType {
+                                body_node_id: 0, // TODO check that this is never used
                                 generics: vec![],
                                 params,
                                 ret: ret.clone().into(),
@@ -2243,10 +2518,13 @@ impl TypeCheckerCtx {
                     //  there's only one overload that works due to the number of arguments
                     Type::NamedFnOverload { defs, choice_var }
                         if let Some(overload_index) =
-                            find_unique_match(&defs, |f_ty| f_ty.params.len() == num_args) =>
+                            find_unique_match(&defs, |(_, f_ty)| f_ty.params.len() == num_args) =>
                     {
                         self.overload_choices[choice_var] = Some(overload_index);
-                        let f_ty = defs[overload_index].clone();
+                        let (def_node_id, f_ty) = defs[overload_index].clone();
+
+                        // self.depends(dependents, def_node_id);
+                        self.depends(dependents, f_ty.body_node_id);
 
                         // instantiate if generic
                         let f_ty = self.instantiate_fn_ty(f_ty, false);
@@ -2260,7 +2538,7 @@ impl TypeCheckerCtx {
 
                         for (i, ast::Argument { id, name, expr }) in args.into_iter().enumerate() {
                             let (expr_ty, cr) =
-                                self.check_expr(env, expr, f_ty.params[i].clone())?;
+                                self.check_expr(env, expr, dependents, f_ty.params[i].clone())?;
 
                             if cr {
                                 certainly_returns = true;
@@ -2282,7 +2560,7 @@ impl TypeCheckerCtx {
                         let mut types = vec![];
 
                         for ast::Argument { id, name, expr } in args.iter() {
-                            let (expr_ty, cr) = self.infer_expr(env, expr, true)?;
+                            let (expr_ty, cr) = self.infer_expr(env, expr, dependents, true)?;
 
                             if cr {
                                 certainly_returns = true;
@@ -2295,9 +2573,10 @@ impl TypeCheckerCtx {
                         let overloads = defs
                             .into_iter()
                             .enumerate()
-                            .filter(|(i, f_ty)| f_ty.params.len() == num_args)
-                            .map(|(i, f_ty)| {
+                            .filter(|(i, (_, f_ty))| f_ty.params.len() == num_args)
+                            .map(|(i, (def_node_id, f_ty))| {
                                 let FnType {
+                                    body_node_id,
                                     generics,
                                     mut params,
                                     ret,
@@ -2305,7 +2584,7 @@ impl TypeCheckerCtx {
 
                                 params.push(*ret);
 
-                                (i, params)
+                                (i, def_node_id, body_node_id, params)
                             })
                             .collect_vec();
 
@@ -2340,12 +2619,14 @@ impl TypeCheckerCtx {
                 let mut declare_locals = FxHashMap::default();
                 let params = params
                     .into_iter()
-                    .map(|decl| self.infer_declarable(env, decl, &mut declare_locals, false))
+                    .map(|decl| {
+                        self.infer_declarable(env, decl, dependents, &mut declare_locals, false)
+                    })
                     .collect::<Result<Vec<_>, TypeError>>()?;
 
                 let mut child_env = env.new_child_fn_scope(*id, declare_locals);
                 let (body_ty, certain_return) =
-                    self.infer_block(&mut child_env, body, true, true)?;
+                    self.infer_block(&mut child_env, body, dependents, true, true)?;
 
                 let ret_ty = Type::TypeVar(self.fresh_ty_var(false));
 
@@ -2388,6 +2669,7 @@ impl TypeCheckerCtx {
                 }
 
                 let ty = Type::Fn(FnType {
+                    body_node_id: body.id(),
                     generics: vec![],
                     params,
                     ret: ret_ty.into(),
@@ -2403,13 +2685,13 @@ impl TypeCheckerCtx {
                 let fully_branched = else_branch.is_some();
 
                 let (then_ty, (first_cond_certain_return, first_body_certain_return)) =
-                    self.infer_if_branch(env, &if_branches[0], use_result)?;
+                    self.infer_if_branch(env, &if_branches[0], dependents, use_result)?;
 
                 let mut branch_bodies_cr = vec![first_body_certain_return];
 
                 for i in 1..if_branches.len() {
                     let (next_branch_ty, (_, body_cr)) =
-                        self.infer_if_branch(env, &if_branches[i], use_result)?;
+                        self.infer_if_branch(env, &if_branches[i], dependents, use_result)?;
 
                     branch_bodies_cr.push(body_cr);
 
@@ -2424,7 +2706,7 @@ impl TypeCheckerCtx {
 
                 if let Some(block) = else_branch.as_ref() {
                     let (next_branch_ty, body_cr) =
-                        self.infer_block(env, block, use_result, false)?;
+                        self.infer_block(env, block, dependents, use_result, false)?;
 
                     branch_bodies_cr.push(body_cr);
 
@@ -2460,7 +2742,8 @@ impl TypeCheckerCtx {
                 cond,
                 body,
             }) => {
-                let (cond_ty, mut certainly_returns) = self.check_expr(env, cond, Type::Bool)?;
+                let (cond_ty, mut certainly_returns) =
+                    self.check_expr(env, cond, dependents, Type::Bool)?;
 
                 let mut child_env = env.clone();
                 child_env.curr_loop = Some(*id);
@@ -2468,7 +2751,7 @@ impl TypeCheckerCtx {
                     child_env.loops.insert(label.str.clone(), *id);
                 }
 
-                self.infer_block(&mut env.clone(), body, false, false)?;
+                self.infer_block(&mut env.clone(), body, dependents, false, false)?;
 
                 let break_expr_ty = self.types.entry(*id).or_insert(Type::Nil).clone();
                 Ok((break_expr_ty, certainly_returns))
@@ -2484,7 +2767,7 @@ impl TypeCheckerCtx {
                 }
 
                 let (body_ty, certainly_returns) =
-                    self.infer_block(&mut child_env, body, use_result, false)?;
+                    self.infer_block(&mut child_env, body, dependents, use_result, false)?;
 
                 if let Some(break_expr_ty) = self.types.get(id).cloned() {
                     if use_result {
@@ -2517,7 +2800,7 @@ impl TypeCheckerCtx {
                 }
 
                 let (_, certainly_returns) =
-                    self.infer_block(&mut child_env, body, false, false)?;
+                    self.infer_block(&mut child_env, body, dependents, false, false)?;
 
                 // let fallback = Type::Nil;
                 // let fallback = Type::TypeVar(self.fresh_ty_var(false));
@@ -2534,10 +2817,15 @@ impl TypeCheckerCtx {
                 body,
             }) => {
                 let mut declare_locals = FxHashMap::default();
-                let pattern_ty =
-                    self.infer_declare_pattern(env, pattern, &mut declare_locals, false)?;
+                let pattern_ty = self.infer_declare_pattern(
+                    env,
+                    pattern,
+                    dependents,
+                    &mut declare_locals,
+                    false,
+                )?;
 
-                self.check_expr(env, range, Type::List(pattern_ty.into()))?;
+                self.check_expr(env, range, dependents, Type::List(pattern_ty.into()))?;
 
                 let mut child_env = env.clone();
                 child_env.add_locals(declare_locals);
@@ -2546,7 +2834,8 @@ impl TypeCheckerCtx {
                     child_env.loops.insert(label.str.clone(), *id);
                 }
 
-                let (body_ty, _) = self.infer_block(&mut child_env, body, use_result, false)?;
+                let (body_ty, _) =
+                    self.infer_block(&mut child_env, body, dependents, use_result, false)?;
 
                 if let Some(break_expr_ty) = self.types.get(id).cloned() {
                     if use_result {
@@ -2611,6 +2900,7 @@ impl TypeCheckerCtx {
         &mut self,
         env: &mut Env,
         expr: &ast::Expr,
+        dependents: &Vec<usize>,
         ty: Type,
     ) -> Result<(Type, bool), TypeError> {
         match (&expr, &ty) {
@@ -2636,13 +2926,14 @@ impl TypeCheckerCtx {
 
                 for (param, sk_param) in params.iter().zip(skolemized_params) {
                     // TODO: check declarable, instead of infer + unify
-                    let param_ty = self.infer_declarable(env, param, &mut declare_locals, false)?;
+                    let param_ty =
+                        self.infer_declarable(env, param, dependents, &mut declare_locals, false)?;
                     self.add_constraint(Constraint::TypeEqual(param.id(), param_ty, sk_param))?;
                 }
 
                 let mut child_env = env.new_child_fn_scope(*id, declare_locals);
                 let (body_ty, certain_return) =
-                    self.infer_block(&mut child_env, body, true, true)?;
+                    self.infer_block(&mut child_env, body, dependents, true, true)?;
 
                 let ret_ty = skolemized_ret.as_ref().clone();
 
@@ -2694,7 +2985,10 @@ impl TypeCheckerCtx {
                 //     return_stmt_ty,
                 // ))?;
 
-                return self.assign_extra(*id, Type::Fn(fn_ty.clone()), false);
+                let mut my_fn_ty = fn_ty.clone();
+                my_fn_ty.body_node_id = body.id();
+
+                return self.assign_extra(*id, Type::Fn(my_fn_ty), false);
             }
 
             // (ast::Expr::Var(ast::VarExpr { id, var }), Type::Fn(fn_ty)) => {
@@ -2747,7 +3041,7 @@ impl TypeCheckerCtx {
                 // println!("  expr: {expr:?}");
                 // println!("  ty: {ty:?}");
 
-                let (expr_ty, certain_return) = self.infer_expr(env, expr, true)?;
+                let (expr_ty, certain_return) = self.infer_expr(env, expr, dependents, true)?;
                 self.add_constraint(Constraint::TypeEqual(expr.id(), expr_ty, ty.clone()))?;
                 Ok((ty, certain_return))
             }
@@ -2878,6 +3172,7 @@ mod test {
                 let expected_err = expectation.trim_start_matches("err:").trim();
 
                 match (expected_err, err.kind.clone()) {
+                    ("DependencyCycle", TypeErrorKind::DependencyCycle { .. }) => {}
                     ("NoOverload", TypeErrorKind::NoOverload) => {}
                     ("ArgsMismatch", TypeErrorKind::ArgsMismatch(_, _)) => {}
                     ("InfiniteType", TypeErrorKind::InfiniteType(_, _)) => {}
@@ -2892,6 +3187,12 @@ mod test {
                         let b = ctx
                             .convert_hint_to_type(&Env::new(), &parse_type(b))
                             .unwrap();
+
+                        let a = format!("{a:?}");
+                        let b = format!("{b:?}");
+                        let le = format!("{le:?}");
+                        let ri = format!("{ri:?}");
+
                         if a == le && b == ri || a == ri && b == le {
                             // all good
                         } else {

@@ -73,7 +73,6 @@ let f = add(3.1, add(4, 5))
 // =========
 // the type checker breaks off when no progress is made and no overload can be chosen
 // err: NoOverload
-// skip
 // =========
 
 fn add(a, b) {
