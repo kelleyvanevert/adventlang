@@ -250,7 +250,7 @@ impl TypeErrorKind {
 enum Constraint {
     TypeEqual(usize, Type, Type),
     ReturnTyHack(usize, Type, Type, Type),
-    CanInstantiateTo(usize, Type, Type),
+    CanInstantiateTo(usize, Type, Type, Vec<usize>),
     ChooseOverload(ChooseOverloadConstraint),
     CheckIndex(CheckIndexConstraint),
 }
@@ -271,7 +271,7 @@ impl Constraint {
                 b.substitute(bound, unification_table);
                 ret_ty.substitute(bound, unification_table);
             }
-            Constraint::CanInstantiateTo(node_id, scheme, concrete) => {
+            Constraint::CanInstantiateTo(node_id, scheme, concrete, dependents) => {
                 scheme.substitute(bound, unification_table);
                 concrete.substitute(bound, unification_table);
             }
@@ -305,7 +305,7 @@ impl Constraint {
                     index_type: check.index_type,
                 },
             },
-            Constraint::CanInstantiateTo(node_id, scheme, concrete) => TypeError {
+            Constraint::CanInstantiateTo(node_id, scheme, concrete, dependents) => TypeError {
                 node_id,
                 kind: TypeErrorKind::CannotInstantiate { scheme, concrete },
             },
@@ -348,6 +348,7 @@ struct ChooseOverloadConstraint {
         usize,     // body node id
         Vec<Type>, // param types + ret type
     )>,
+    dependents: Vec<usize>,
 }
 
 impl ChooseOverloadConstraint {
@@ -468,7 +469,9 @@ pub struct TypeCheckerCtx {
     //  which can hopefully remove the need for `const`, and allow nested `fn`
     //  items to work nicely.
     dependencies: FxHashMap<usize, FxHashSet<usize>>,
+    named_fn_bodies: FxHashSet<usize>,
     dep_labels: FxHashMap<usize, String>,
+    disallow_circularity: FxHashSet<usize>,
 }
 
 impl TypeCheckerCtx {
@@ -482,7 +485,9 @@ impl TypeCheckerCtx {
             rigid_vars: Default::default(),
             fn_return_ty: Default::default(),
             dependencies: Default::default(),
+            named_fn_bodies: Default::default(),
             dep_labels: Default::default(),
+            disallow_circularity: Default::default(),
         }
     }
 
@@ -562,15 +567,19 @@ impl TypeCheckerCtx {
             // }
             // panic!("cycle");
 
-            return Err(TypeError {
-                node_id: 0,
-                kind: TypeErrorKind::DependencyCycle {
-                    cycle: prev
-                        .into_iter()
-                        .map(|id| format!("- {}  {:?}", id, self.dep_labels.get(&id)))
-                        .collect_vec(),
-                },
-            });
+            if prev.iter().any(|id| self.disallow_circularity.contains(id)) {
+                return Err(TypeError {
+                    node_id: 0,
+                    kind: TypeErrorKind::DependencyCycle {
+                        cycle: prev
+                            .into_iter()
+                            .map(|id| format!("- {}  {:?}", id, self.dep_labels.get(&id)))
+                            .collect_vec(),
+                    },
+                });
+            } else {
+                return Ok(());
+            }
         }
 
         prev.push(id);
@@ -667,17 +676,24 @@ impl TypeCheckerCtx {
             Constraint::TypeEqual(node_id, left, right) => {
                 self.check_ty_equal(*node_id, left.clone(), right.clone())
             }
-            Constraint::CanInstantiateTo(node_id, scheme, concrete) => {
+            Constraint::CanInstantiateTo(node_id, scheme, concrete, dependents) => {
                 match self.normalize_ty(scheme.clone()) {
                     Type::TypeVar(v) => {
                         // solve later
                         Ok(ConstraintResult::NeedsMoreInformation)
                     }
                     Type::Fn(fn_type) => {
-                        let ty = Type::Fn(self.instantiate_fn_ty(fn_type, false));
+                        let fn_ty = self.instantiate_fn_ty(fn_type, false);
+
+                        self.depends(
+                            dependents,
+                            fn_ty.body_node_id,
+                            !self.named_fn_bodies.contains(&fn_ty.body_node_id),
+                        );
+
                         Ok(ConstraintResult::ResolveTo(vec![Constraint::TypeEqual(
                             *node_id,
-                            ty,
+                            Type::Fn(fn_ty),
                             concrete.clone(),
                         )]))
                     }
@@ -862,6 +878,18 @@ impl TypeCheckerCtx {
                     choose.overloads[i].3[ti].clone(),
                 )?;
             }
+
+            self.depends(
+                &choose.dependents,
+                choose.overloads[i].1, // def node id
+                false,                 // ??
+            );
+
+            self.depends(
+                &choose.dependents,
+                choose.overloads[i].2, // body node id
+                false,                 // ??
+            );
 
             return Ok(res);
         }
@@ -1274,94 +1302,11 @@ impl TypeCheckerCtx {
         self.assign_extra(id, ty, ()).map(|t| t.0)
     }
 
-    // fn dep_check_doc(&mut self, deps: &mut Deps, doc: &ast::Document) -> Result<(), TypeError> {
-    //     self.dep_check_block(deps, &doc.body)?;
+    fn depends(&mut self, dependents: &Vec<usize>, dependency: usize, disallow_circularity: bool) {
+        if disallow_circularity {
+            self.disallow_circularity.insert(dependency);
+        }
 
-    //     Ok(())
-    // }
-
-    // fn dep_check_block(&mut self, deps: &mut Deps, block: &ast::Block) -> Result<(), TypeError> {
-    //     for stmt in &block.stmts {
-    //         self.dep_check_stmt(deps, stmt)?;
-    //     }
-
-    //     Ok(())
-    // }
-
-    // fn dep_check_stmt(&mut self, deps: &mut Deps, stmt: &ast::Stmt) -> Result<(), TypeError> {
-    //     match stmt {
-    //         ast::Stmt::ConstItem(ast::ConstItem { id, name, expr }) => {
-    //             // TODO
-    //         }
-    //         ast::Stmt::NamedFn(ast::NamedFnItem {
-    //             id,
-    //             name,
-    //             generics,
-    //             params,
-    //             ret,
-    //             body,
-    //         }) => {
-    //             // TODO
-    //         }
-    //         ast::Stmt::Break(ast::BreakStmt { id, label, expr }) => {
-    //             // TODO
-    //         }
-    //         ast::Stmt::Continue(ast::ContinueStmt { id, label }) => {
-    //             // TODO
-    //         }
-    //         ast::Stmt::Return(ast::ReturnStmt { id, expr }) => {
-    //             // TODO
-    //         }
-    //         ast::Stmt::Declare(ast::DeclareStmt { id, pattern, expr }) => {
-    //             // TODO
-    //             self.dep_check_expr(deps, expr)?;
-    //         }
-    //         ast::Stmt::Assign(ast::AssignStmt { id, pattern, expr }) => {
-    //             // TODO
-    //         }
-    //         ast::Stmt::Expr(ast::ExprStmt { id, expr }) => {
-    //             // TODO
-    //             self.dep_check_expr(deps, expr)?;
-    //         }
-    //     }
-
-    //     Ok(())
-    // }
-
-    // fn dep_check_expr(&mut self, deps: &mut Deps, expr: &ast::Expr) -> Result<(), TypeError> {
-    //     match expr {
-    //         ast::Expr::Str(_)
-    //         | ast::Expr::Nil(_)
-    //         | ast::Expr::Regex(_)
-    //         | ast::Expr::Bool(_)
-    //         | ast::Expr::Int(_)
-    //         | ast::Expr::Float(_) => {}
-
-    //         ast::Expr::Var(ast::VarExpr { id, var }) => {
-    //             //
-    //         }
-    //         ast::Expr::Unary(_) => {}
-    //         ast::Expr::Binary(_) => {}
-    //         ast::Expr::List(_) => {}
-    //         ast::Expr::Tuple(_) => {}
-    //         ast::Expr::Dict(_) => {}
-    //         ast::Expr::Index(_) => {}
-    //         ast::Expr::Member(_) => {}
-    //         ast::Expr::Call(_) => {}
-    //         ast::Expr::AnonymousFn(_) => {}
-    //         ast::Expr::If(_) => {}
-    //         ast::Expr::While(_) => {}
-    //         ast::Expr::WhileLet(_) => {}
-    //         ast::Expr::Do(_) => {}
-    //         ast::Expr::DoWhile(_) => {}
-    //         ast::Expr::Loop(_) => {}
-    //         ast::Expr::For(_) => {}
-    //     }
-
-    //     Ok(())
-    // }
-
-    fn depends(&mut self, dependents: &Vec<usize>, dependency: usize) {
         for &x in dependents {
             (*self.dependencies.entry(x).or_default()).insert(dependency);
         }
@@ -1490,6 +1435,7 @@ impl TypeCheckerCtx {
                     .transpose()?
                     .unwrap_or_else(|| Type::TypeVar(self.fresh_ty_var(false)));
 
+                self.named_fn_bodies.insert(body.id());
                 let fn_ty = FnType {
                     body_node_id: body.id(),
                     generics,
@@ -1518,7 +1464,7 @@ impl TypeCheckerCtx {
                 self.dep_labels
                     .insert(*id, format!("const {}", name.as_str()));
 
-                self.depends(dependents, *id);
+                self.depends(dependents, *id, true);
 
                 let (ty, cr) = self.infer_expr(env, expr, &vec![*id], true)?;
 
@@ -1548,7 +1494,7 @@ impl TypeCheckerCtx {
                     format!("invocation of named fn {}", name.as_str()),
                 );
 
-                self.depends(dependents, *id);
+                self.depends(dependents, *id, true);
 
                 let mut typing_child_env = env.clone();
 
@@ -1589,6 +1535,7 @@ impl TypeCheckerCtx {
                 let (body_ty, certain_return) =
                     self.infer_block(&mut child_env, body, &vec![body.id()], true, true)?;
 
+                self.named_fn_bodies.insert(body.id());
                 let ty = Type::Fn(FnType {
                     body_node_id: body.id(),
                     generics: generics.clone(),
@@ -1646,7 +1593,7 @@ impl TypeCheckerCtx {
             ast::Stmt::Break(ast::BreakStmt { id, label, expr }) => {
                 self.dep_labels.insert(*id, format!("break stmt"));
 
-                self.depends(dependents, *id);
+                self.depends(dependents, *id, false);
 
                 let (expr_ty, expr_certainly_returns) = expr
                     .as_ref()
@@ -1683,7 +1630,7 @@ impl TypeCheckerCtx {
             ast::Stmt::Return(ast::ReturnStmt { id, expr }) => {
                 self.dep_labels.insert(*id, format!("return stmt"));
 
-                self.depends(dependents, *id);
+                self.depends(dependents, *id, false);
 
                 let (expr_ty, _) = expr
                     .as_ref()
@@ -1729,7 +1676,7 @@ impl TypeCheckerCtx {
             ast::Stmt::Assign(ast::AssignStmt { id, pattern, expr }) => {
                 self.dep_labels.insert(*id, format!("assign stmt"));
 
-                self.depends(dependents, *id);
+                self.depends(dependents, *id, false);
 
                 // TODO make sure this logic is right. My idea: the contents of the variable
                 //  might be runtime dependent, but the declaration isn't statically dependent,
@@ -1744,7 +1691,7 @@ impl TypeCheckerCtx {
             ast::Stmt::Expr(ast::ExprStmt { id, expr }) => {
                 self.dep_labels.insert(*id, format!("expr stmt"));
 
-                self.depends(dependents, *id);
+                self.depends(dependents, *id, false);
 
                 let (expr_ty, expr_certainly_returns) =
                     self.infer_expr(env, expr, &vec![*id], use_result)?;
@@ -1823,7 +1770,7 @@ impl TypeCheckerCtx {
             ast::AssignLoc::Var(ast::AssignLocVar { id, var }) => {
                 let (local_id, ty) = self.get_assignable_local(*id, env, var.as_str())?;
 
-                self.depends(dependents, local_id);
+                self.depends(dependents, local_id, true);
 
                 self.assign(*id, ty)
             }
@@ -1877,7 +1824,7 @@ impl TypeCheckerCtx {
                 self.dep_labels
                     .insert(*id, format!("local {}", var.as_str()));
 
-                self.depends(dependents, *id);
+                self.depends(dependents, *id, true);
 
                 let ty = ty
                     .clone()
@@ -1920,7 +1867,7 @@ impl TypeCheckerCtx {
                     self.dep_labels
                         .insert(*id, format!("local (list splat) {}", var.as_str()));
 
-                    self.depends(dependents, *id);
+                    self.depends(dependents, *id, true);
 
                     let ty = ty
                         .clone()
@@ -2137,7 +2084,7 @@ impl TypeCheckerCtx {
             ast::Expr::Var(ast::VarExpr { id, var }) => {
                 let (def_node_id, ty) = self.get_local(*id, env, var.as_str())?;
 
-                self.depends(dependents, def_node_id);
+                self.depends(dependents, def_node_id, true);
 
                 return self.assign_extra(*id, ty, false);
             }
@@ -2153,8 +2100,8 @@ impl TypeCheckerCtx {
 
                 match self.get_local(*id, env, op.as_str())? {
                     (def_node_id, Type::Fn(f_ty)) => {
-                        self.depends(dependents, def_node_id);
-                        self.depends(dependents, f_ty.body_node_id);
+                        self.depends(dependents, def_node_id, false);
+                        self.depends(dependents, f_ty.body_node_id, false);
 
                         // instantiate if generic
                         let f_ty = self.instantiate_fn_ty(f_ty, false);
@@ -2205,6 +2152,7 @@ impl TypeCheckerCtx {
                                 nodes: vec![expr.id(), *id],
                                 types: vec![expr_ty.clone(), res_ty.clone()],
                                 overloads,
+                                dependents: dependents.clone(),
                             },
                         ))?;
 
@@ -2234,8 +2182,8 @@ impl TypeCheckerCtx {
 
                 match self.get_local(*id, env, op.as_str())? {
                     (def_node_id, Type::Fn(f_ty)) => {
-                        self.depends(dependents, def_node_id);
-                        self.depends(dependents, f_ty.body_node_id);
+                        self.depends(dependents, def_node_id, false);
+                        self.depends(dependents, f_ty.body_node_id, false);
 
                         // instantiate if generic
                         let f_ty = self.instantiate_fn_ty(f_ty, false);
@@ -2292,6 +2240,7 @@ impl TypeCheckerCtx {
                                 nodes: vec![left.id(), right.id(), *id],
                                 types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
                                 overloads,
+                                dependents: dependents.clone(),
                             },
                         ))?;
 
@@ -2368,7 +2317,7 @@ impl TypeCheckerCtx {
                             let (def_node_id, key_local_ty) =
                                 self.get_local(key.id, env, key_id.as_str())?;
 
-                            self.depends(dependents, def_node_id);
+                            self.depends(dependents, def_node_id, true);
 
                             self.add_constraint(Constraint::TypeEqual(
                                 key.id,
@@ -2452,7 +2401,11 @@ impl TypeCheckerCtx {
                 match callee_ty {
                     // simplest situation: it's known to be a function with also known type
                     Type::Fn(f_ty) => {
-                        self.depends(dependents, f_ty.body_node_id);
+                        self.depends(
+                            dependents,
+                            f_ty.body_node_id,
+                            !self.named_fn_bodies.contains(&f_ty.body_node_id),
+                        );
 
                         // instantiate if generic
                         let f_ty = self.instantiate_fn_ty(f_ty, false);
@@ -2509,6 +2462,7 @@ impl TypeCheckerCtx {
                                 params,
                                 ret: ret.clone().into(),
                             }),
+                            dependents.clone(),
                         ))?;
 
                         return self.assign_extra(*id, ret, certainly_returns);
@@ -2524,7 +2478,7 @@ impl TypeCheckerCtx {
                         let (def_node_id, f_ty) = defs[overload_index].clone();
 
                         // self.depends(dependents, def_node_id);
-                        self.depends(dependents, f_ty.body_node_id);
+                        self.depends(dependents, f_ty.body_node_id, false);
 
                         // instantiate if generic
                         let f_ty = self.instantiate_fn_ty(f_ty, false);
@@ -2600,6 +2554,7 @@ impl TypeCheckerCtx {
                                 nodes: node_ids,
                                 types,
                                 overloads,
+                                dependents: dependents.clone(),
                             },
                         ))?;
 
@@ -2668,6 +2623,7 @@ impl TypeCheckerCtx {
                     }
                 }
 
+                self.named_fn_bodies.insert(body.id());
                 let ty = Type::Fn(FnType {
                     body_node_id: body.id(),
                     generics: vec![],

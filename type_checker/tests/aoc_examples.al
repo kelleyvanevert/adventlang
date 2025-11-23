@@ -6,13 +6,13 @@
 // ok
 // ======
 
-const digits = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+let digits = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
 
 fn is_digit(s) {
   s :in digits
 }
 
-const nums = [
+let nums = [
   ("0", "0"),
   ("1", "1"),
   ("2", "2"),
@@ -54,7 +54,7 @@ fn bonus(input: str) {
 // ok
 // ======
 
-const example_input = "
+let example_input = "
 Game 1: 3 blue, 4 red; 1 red, 2 green, 6 blue; 2 green
 Game 2: 1 blue, 2 green; 3 green, 4 blue, 1 red; 1 green, 1 blue
 Game 3: 8 green, 6 blue, 20 red; 5 blue, 4 red, 13 green; 5 green, 1 red
@@ -100,7 +100,7 @@ fn solve(input, red, green, blue) {
 // ok
 // ======
 
-const example_input = "
+let example_input = "
 467..114..
 ...*......
 ..35..633.
@@ -159,7 +159,7 @@ fn solve(input) {
 // ok
 // ======
 
-const example_input = "
+let example_input = "
 Card 1: 41 48 83 86 17 | 83 86  6 31 17  9 48 53
 Card 2: 13 32 20 16 61 | 61 30 68 82 17 32 24 19
 Card 3:  1 21 53 59 44 | 69 82 63 72 16 21 14  1
@@ -219,7 +219,7 @@ assert(bonus(example_input) == 30)
 // ok
 // ======
 
-const example_input = "
+let example_input = "
 seeds: 79 14 55 13
 
 seed-to-soil map:
@@ -346,7 +346,7 @@ assert(bonus(example_input) == 46)
 // ok
 // ======
 
-const example_input = "
+let example_input = "
 Time:      7  15   30
 Distance:  9  40  200
 "
@@ -403,7 +403,7 @@ assert(bonus(example_input) == 71503)
 // ok
 // ======
 
-const example_input = "
+let example_input = "
 32T3K 765
 T55J5 684
 KK677 28
@@ -411,13 +411,13 @@ KTJJT 220
 QQQJA 483
 "
 
-const five_of_a_kind = 6
-const four_of_a_kind = 5
-const full_house = 4
-const three_of_a_kind = 3
-const two_pair = 2
-const one_pair = 1
-const high_card = 0
+let five_of_a_kind = 6
+let four_of_a_kind = 5
+let full_house = 4
+let three_of_a_kind = 3
+let two_pair = 2
+let one_pair = 1
+let high_card = 0
 
 fn solve(input: str) {
   let digits = @{
@@ -436,13 +436,13 @@ fn solve(input: str) {
     "A": 14,
   }
 
-  let convert_base = |hand: str| {
+  fn convert_base(hand: str) {
     hand :chars :reverse :enumerate
       :map |(i, d)| { digits[d] << (i * 4) }
       :sum
   }
 
-  let hand_type = |hand: str| {
+  fn hand_type(hand: str) {
     let counts = range(0, 16) :map |i| { (i, 0) }
     for let k in hand :chars :map |d| { digits[d] } {
       counts[k][1] += 1
@@ -475,7 +475,7 @@ fn solve(input: str) {
     return high_card
   }
 
-  let score_hand = |hand: str| {
+  fn score_hand(hand: str) {
     convert_base(hand) + (hand_type(hand) << 20)
   }
 
@@ -606,10 +606,9 @@ assert(bonus(example_input) == 5905)
 // ======
 // 2023 day 8
 // ok
-// skip
 // ======
 
-const example_input = "
+let example_input = "
 RL
 
 AAA = (BBB, CCC)
@@ -621,7 +620,7 @@ GGG = (GGG, GGG)
 ZZZ = (ZZZ, ZZZ)
 "
 
-const example_input_2 = "
+let example_input_2 = "
 LLR
 
 AAA = (BBB, BBB)
@@ -649,7 +648,7 @@ fn solve(input: str) {
   i
 }
 
-const bonus_example_input = "
+let bonus_example_input = "
 LR
 
 11A = (11B, XXX)
@@ -724,7 +723,7 @@ assert(bonus(bonus_example_input) == 6)
 // ok
 // ======
 
-const example_input = "
+let example_input = "
 0 3 6 9 12 15
 1 3 6 10 15 21
 10 13 16 21 30 45

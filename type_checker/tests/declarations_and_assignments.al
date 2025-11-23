@@ -61,7 +61,7 @@ let a = a + 4
 // ok
 // ======
 
-const a = 4
+let a = 4
 
 fn main() {
   let b: int = a
@@ -76,7 +76,7 @@ fn main() {
 // ok
 // ======
 
-const a = 4
+let a = 4
 
 fn main() {
   let b: int = a
@@ -167,8 +167,8 @@ fn main(input: str) {
 
 
 // ======
+// this is circular/recursive, but named fns are allowed to be so
 // ok
-// skip
 // ======
 
 fn gcd(a: int, b: int) {
