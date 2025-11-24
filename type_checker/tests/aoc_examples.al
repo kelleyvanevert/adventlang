@@ -1,8 +1,5 @@
 // ======
 // 2023 day 13
-// TODO:
-// - [ ] indexing tuples (-> overloading with generic functions)
-//
 // ok
 // ======
 
@@ -33,8 +30,8 @@ fn bonus(input: str) {
     let digits = range(0, line :len)
       :filter_map |i| {
         nums :find_map |t| {
-          if line :slice i :starts_with (t :fst) { // TODO: indexing tuples
-            t :snd // TODO: indexing tuples
+          if line :slice i :starts_with t[0] {
+            t[1]
           }
         } :unwrap :unwrap
       }
@@ -48,9 +45,6 @@ fn bonus(input: str) {
 
 // ======
 // 2023 day 23
-// TODO:
-// - [ ] allowing non-bools in if conditions (-> automatic conversions)
-//
 // ok
 // ======
 
@@ -93,10 +87,6 @@ fn solve(input, red, green, blue) {
 
 // ======
 // 2023 day 3
-// TODO:
-// - [ ] typing if-let-expr (-> nullability)
-// - [ ] allowing non-bools in if conditions (-> automatic conversions)
-//
 // ok
 // ======
 
@@ -213,9 +203,6 @@ assert(bonus(example_input) == 30)
 
 // ======
 // 2023 day 5
-// TODO:
-// - [ ] tuple indexing
-//
 // ok
 // ======
 
@@ -323,10 +310,8 @@ fn bonus(input: str) {
       let skp = MAX_INT // renamed to skp so searching sk?pped tests is easier
       for let m in mappers {
         let t = m(n)
-        // n = t[0] // TODO tuple indexing
-        n = t :fst
-        // skp = t[1] :min skp // TODO tuple indexing
-        skp = t :snd :min skp
+        n = t[0]
+        skp = t[1] :min skp
       }
 
       loc = loc :min n
@@ -580,8 +565,6 @@ fn bonus(input: str) {
       return three_of_a_kind
     } else if jokers >= 1 {
       return one_pair
-    } else { /// TODO: WHY IS THIS NEEDED???? -- the type checker says `nil != ?nil` if I remove this (useless) branch
-      return high_card
     }
 
     return high_card

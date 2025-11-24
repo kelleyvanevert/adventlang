@@ -93,9 +93,6 @@ pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
         sqrt: fn(int) -> float
         sqrt: fn(float) -> float
 
-        fst: fn<A, B>((A, B)) -> A                      // TODO remove after adding tuple indexing
-        snd: fn<A, B>((A, B)) -> B                      // TODO remove after adding tuple indexing
-
         is_some: fn<A>(?A) -> bool
         unwrap: fn<A>(?A) -> A
 
@@ -162,6 +159,7 @@ pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
         %: fn(float, float) -> float
 
         <<: fn(int, int) -> int
+        >>: fn(int, int) -> int
     ";
 
     let mut parser = AdventlangParser::new();
