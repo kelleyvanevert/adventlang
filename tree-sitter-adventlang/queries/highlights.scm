@@ -74,6 +74,7 @@
 (boolean_literal) @constant.builtin
 (integer_literal) @constant.builtin
 (float_literal) @constant.builtin
+(nil_literal) @constant.builtin
 
 (escape_sequence) @escape
 

@@ -49,6 +49,10 @@ if invalid :is_some {
   // ..
 }
 
+if invalid != nil {
+  // ..
+}
+
 
 // ======
 // ok
