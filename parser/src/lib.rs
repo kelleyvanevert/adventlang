@@ -3,7 +3,5 @@
 
 pub mod ast;
 mod parser;
-mod tree_sitter_parser;
 
 pub use parser::*;
-pub use tree_sitter_parser::*;

@@ -2,10 +2,9 @@
 mod tests {
     use std::time::Instant;
 
-    use pretty_assertions::assert_eq;
     use test_case::test_case;
 
-    use parser::{AdventlangParser, ast::StripIds, parse_document, parse_type};
+    use parser::AdventlangParser;
 
     #[test_case("2023_day01")]
     #[test_case("2023_day02")]
@@ -31,27 +30,14 @@ mod tests {
     #[test_case("2024_day08")]
     fn test_parse_aoc(name: &str) {
         let content =
-            std::fs::read_to_string(format!("./aoc/{name}.al")).expect("can read aoc file");
+            std::fs::read_to_string(format!("./tests/aoc/{name}.al")).expect("can read aoc file");
 
-        let doc1 = parse_document(&content).expect("Can parse with parser combinators");
-
-        let mut doc2 = AdventlangParser::new()
+        AdventlangParser::new()
             .parse_document(&content)
-            .expect("Can parse with Tree-sitter")
-            .document;
-
-        doc2.strip_ids();
-
-        // if doc1 != doc2 {
-        //     fs::write(&format!("doc1_{name}.txt"), format!("{:#?}", doc1)).unwrap();
-        //     fs::write(&format!("doc2_{name}.txt"), format!("{:#?}", doc2)).unwrap();
-        // }
-
-        assert_eq!(doc1, doc2);
+            .expect("Can parse with Tree-sitter");
     }
 
     #[test]
-    #[ignore]
     fn bench_type_parsing() {
         let stdlib = "
             // MISC.
@@ -227,30 +213,18 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        let using_parser_combinators = {
-            let t0 = Instant::now();
-            for _ in 0..50 {
-                for t in &types {
-                    parse_type(t);
-                }
+        let n = 50;
+        let t0 = Instant::now();
+        for _ in 0..n {
+            for t in &types {
+                parser.parse_type(t).expect("can parse");
             }
-            t0.elapsed() / 50
-        };
+        }
 
-        let using_tree_sitter = {
-            let t0 = Instant::now();
-            for _ in 0..50 {
-                for t in &types {
-                    parser.parse_type(t).expect("can parse");
-                }
-            }
-            t0.elapsed() / 50
-        };
+        let _dt = t0.elapsed() / n;
 
-        panic!(
-            "Total parsing time:\n- using parser combinators: {:?}\n- using tree-sitter: {:?}",
-            using_parser_combinators, using_tree_sitter
-        );
+        // panic!("Total parsing time: {:?}", dt);
+
         // Total parsing time:
         // - using parser combinators: 31.210999ms
         // - using tree-sitter: 784.678µs
@@ -287,29 +261,21 @@ mod tests {
         let mut ts_parser = AdventlangParser::new();
 
         let contents = tests.map(|name| {
-            std::fs::read_to_string(format!("./aoc/{name}.al")).expect("can read aoc file")
+            std::fs::read_to_string(format!("./tests/aoc/{name}.al")).expect("can read aoc file")
         });
 
-        let using_parser_combinators = {
-            let t0 = Instant::now();
-            for source in &contents {
-                parse_document(source).expect("can parse");
-            }
-            t0.elapsed()
-        };
-
-        let using_tree_sitter = {
-            let t0 = Instant::now();
+        let n = 50;
+        let t0 = Instant::now();
+        for _ in 0..n {
             for source in &contents {
                 ts_parser.parse_document(source).expect("can parse");
             }
-            t0.elapsed()
-        };
+        }
 
-        panic!(
-            "Total parsing time:\n- using parser combinators: {:?}\n- using tree-sitter: {:?}",
-            using_parser_combinators, using_tree_sitter
-        );
+        let dt = t0.elapsed() / n;
+
+        panic!("Total parsing time: {:?}", dt);
+
         // Total parsing time:
         // - using parser combinators: 1.315s
         // - using tree-sitter: 8.55ms

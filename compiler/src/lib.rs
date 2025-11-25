@@ -1,5 +1,5 @@
 use inkwell::{builder::Builder, context::Context, module::Module};
-use parser::TSParseResult;
+use parser::ParseResult;
 use thiserror::Error;
 use type_checker::TypeCheckerCtx;
 
@@ -9,8 +9,9 @@ pub enum CompileError {
     Whatever,
 }
 
+#[allow(unused)]
 pub struct Compiler<'ctx, 'a> {
-    parse_result: &'a TSParseResult<'a>,
+    parse_result: &'a ParseResult<'a>,
     type_checker: &'a TypeCheckerCtx,
 
     context: &'ctx Context,
@@ -21,7 +22,7 @@ pub struct Compiler<'ctx, 'a> {
 
 impl<'ctx, 'a> Compiler<'ctx, 'a> {
     pub fn new(
-        parse_result: &'a TSParseResult,
+        parse_result: &'a ParseResult,
         type_checker: &'a TypeCheckerCtx,
         context: &'ctx Context,
     ) -> Self {
@@ -53,7 +54,7 @@ mod test {
 
     #[test]
     fn test() {
-        let source = include_str!("../../tests/aoc/2023_day09.al");
+        let source = include_str!("../../parser/tests/aoc/2023_day09.al");
         let mut parser = AdventlangParser::new();
         let parse_result = parser.parse_document(source).expect("can parse");
 
@@ -64,6 +65,6 @@ mod test {
         }
 
         let compilation_context = Context::create();
-        let compiler = Compiler::new(&parse_result, &type_checker, &compilation_context);
+        let _compiler = Compiler::new(&parse_result, &type_checker, &compilation_context);
     }
 }
