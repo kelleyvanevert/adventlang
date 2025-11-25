@@ -1207,7 +1207,7 @@ impl TypeCheckerCtx {
                     params: params
                         .into_iter()
                         .map(|hint| self.convert_hint_to_type(&mut typing_child_env, hint))
-                        .collect::<Result<Vec<_>, _>>()?,
+                        .collect::<Result<_, _>>()?,
                     ret: self
                         .convert_hint_to_type(&mut typing_child_env, &ret)?
                         .into(),
@@ -1229,7 +1229,7 @@ impl TypeCheckerCtx {
                 t.element_types
                     .iter()
                     .map(|hint| self.convert_hint_to_type(env, hint))
-                    .collect::<Result<Vec<_>, _>>()?,
+                    .collect::<Result<_, _>>()?,
             )),
             ast::TypeHint::Dict(ast::DictTypeHint {
                 id,
@@ -1425,7 +1425,7 @@ impl TypeCheckerCtx {
                     .map(|param| self.forward_declare_declarable(&mut typing_child_env, param))
                     // .map(|_| Ok(Type::TypeVar(self.fresh_ty_var(false))))
                     //
-                    .collect::<Result<Vec<_>, _>>()?;
+                    .collect::<Result<_, _>>()?;
 
                 let ret = ret
                     .as_ref()
@@ -1941,7 +1941,7 @@ impl TypeCheckerCtx {
                 //     .elements
                 //     .iter()
                 //     .map(|el| self.forward_declare_declarable(env, el))
-                //     .collect::<Result<Vec<_>, _>>()?;
+                //     .collect::<Result<_, _>>()?;
 
                 todo!()
             }
@@ -1949,7 +1949,7 @@ impl TypeCheckerCtx {
                 elements
                     .iter()
                     .map(|el| self.forward_declare_declarable(env, el))
-                    .collect::<Result<Vec<_>, _>>()?,
+                    .collect::<Result<_, _>>()?,
             )),
         }
     }

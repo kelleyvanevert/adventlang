@@ -767,10 +767,10 @@ impl TryFrom<Expr> for AssignPattern {
                 let elements = elements
                     .into_iter()
                     .map(|el| AssignPattern::try_from(el))
-                    .try_collect()?;
+                    .collect::<Result<_, _>>()?;
 
                 let splat = splat
-                    .map(|box expr| AssignPattern::try_from(expr))
+                    .map(|expr| AssignPattern::try_from(*expr))
                     .transpose()
                     .map(|a| a.map(Box::new))?;
 
@@ -784,7 +784,7 @@ impl TryFrom<Expr> for AssignPattern {
                 let elements = elements
                     .into_iter()
                     .map(|el| AssignPattern::try_from(el))
-                    .try_collect()?;
+                    .collect::<Result<_, _>>()?;
 
                 Ok(AssignPattern::Tuple(AssignTuple { id, elements }))
             }
