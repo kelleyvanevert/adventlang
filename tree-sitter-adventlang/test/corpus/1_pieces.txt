@@ -93,17 +93,3 @@ fn is_digit(s) {
               left: (identifier)
               function: (identifier)
               right: (identifier))))))
-
-===============
-Const item
-===============
-
-const name = "Kelley"
-
----
-
-(source_file
-      (const_item
-        (identifier)
-        (str_literal
-          (string_character))))

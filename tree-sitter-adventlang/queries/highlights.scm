@@ -60,7 +60,6 @@
 "for" @keyword
 "if" @keyword
 "in" @keyword
-"const" @keyword
 "let" @keyword
 "return" @keyword
 "some" @keyword
