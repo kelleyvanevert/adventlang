@@ -74,10 +74,6 @@ module.exports = grammar({
     //   like a newline or something else, and in that case it's an expression statement)
     [$._lookup, $._expr],
 
-    // I don't actually understand how these conflict could occur
-    [$.while_expr, $.parenthesized_expr],
-    [$.do_while_expr, $.parenthesized_expr],
-
     [$.assign_list, $.list_expr],
   ],
 
@@ -340,13 +336,13 @@ module.exports = grammar({
       optional(seq(field("label", $.label), ":")),
       "do",
       field("body", $.block_expr),
-      optional(seq("while", maybeParenthesized(field("cond", $._expr)))),
+      optional(seq("while", field("cond", $._expr))),
     ),
 
     while_expr: $ => seq(
       optional(seq(field("label", $.label), ":")),
       "while",
-      maybeParenthesized(seq(optional(seq("let", field("pattern", $._declare_pattern), "=")), field("cond", $._expr))),
+      seq(optional(seq("let", field("pattern", $._declare_pattern), "=")), field("cond", $._expr)),
       field("body", $.block_expr),
     ),
 
@@ -371,7 +367,7 @@ module.exports = grammar({
     for_expr: $ => seq(
       optional(seq(field("label", $.label), ":")),
       "for",
-      maybeParenthesized(seq("let", field("pattern", $._declare_pattern), "in", field("range", $._expr))),
+      seq("let", field("pattern", $._declare_pattern), "in", field("range", $._expr)),
       field("body", $.block_expr),
     ),
 
@@ -533,8 +529,4 @@ function sepBy(sep, rule) {
 
 function listElements(fieldName, rule, sep = ",") {
   return optional(seq(sepBy1(sep, field(fieldName, rule)), optional(sep)));
-}
-
-function maybeParenthesized(rule) {
-  return choice(seq("(", rule, ")"), rule);
 }
