@@ -10,8 +10,6 @@ use inkwell::{
 };
 use thiserror::Error;
 
-use crate::{hir::TypeHIR, inference_pass::InferencePass};
-
 type IRGenResult<'ir> = Result<BasicValueEnum<'ir>, BackendError>;
 
 #[derive(Error, PartialEq, Debug)]
