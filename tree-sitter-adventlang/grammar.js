@@ -203,15 +203,13 @@ module.exports = grammar({
 
     declare_stmt: $ => seq("let", field("pattern", $._declare_pattern), "=", field("expr", $._expr)),
 
-    declare_guard: $ => "some",
-
     _declare_pattern: $ => choice(
       $.declare_var,
       $.declare_list,
       $.declare_tuple,
     ),
 
-    declare_var:   $ => seq(optional(field("guard", $.declare_guard)), field("name", $.identifier), optional(seq(":", field("type", $._type)))),
+    declare_var:   $ => seq(field("name", $.identifier), optional(seq(":", field("type", $._type)))),
     declare_list:  $ => seq("[", listElements("element", $.declarable), optional(seq("..", field("splat", $.identifier), optional(seq(":", field("splat_type", $._type))))), "]"),
     declare_tuple: $ => seq("(", listElements("element", $.declarable), optional(seq("..", field("splat", $.identifier), optional(seq(":", field("splat_type", $._type))))), ")"),
 

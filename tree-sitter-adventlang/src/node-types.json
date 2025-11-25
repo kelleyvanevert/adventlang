@@ -668,11 +668,6 @@
     }
   },
   {
-    "type": "declare_guard",
-    "named": true,
-    "fields": {}
-  },
-  {
     "type": "declare_list",
     "named": true,
     "fields": {
@@ -774,16 +769,6 @@
     "type": "declare_var",
     "named": true,
     "fields": {
-      "guard": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "declare_guard",
-            "named": true
-          }
-        ]
-      },
       "name": {
         "multiple": false,
         "required": true,

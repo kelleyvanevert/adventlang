@@ -46,7 +46,7 @@ fn arrangements(pieces, ns, indent) {
   let h = (pieces, ns)
 
   if should_memoize {
-    if let some memoized = cache[h] {
+    if let memoized = cache[h] {
       return memoized + 0
     }
   }
@@ -119,7 +119,7 @@ fn split_around(arr, i) {
 let placements_cache = @{}
 
 fn placements(piece, n) {
-  if let some memoized = placements_cache[(piece, n)] {
+  if let memoized = placements_cache[(piece, n)] {
     return memoized
   }
 

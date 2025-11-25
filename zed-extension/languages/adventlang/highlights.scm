@@ -66,7 +66,6 @@
 "return" @keyword
 "while" @keyword
 "loop" @keyword
-(declare_guard) @keyword
 
 (str_literal) @string
 

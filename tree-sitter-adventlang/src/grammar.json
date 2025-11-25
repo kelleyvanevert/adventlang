@@ -1013,10 +1013,6 @@
         }
       ]
     },
-    "declare_guard": {
-      "type": "STRING",
-      "value": "some"
-    },
     "_declare_pattern": {
       "type": "CHOICE",
       "members": [
@@ -1037,22 +1033,6 @@
     "declare_var": {
       "type": "SEQ",
       "members": [
-        {
-          "type": "CHOICE",
-          "members": [
-            {
-              "type": "FIELD",
-              "name": "guard",
-              "content": {
-                "type": "SYMBOL",
-                "name": "declare_guard"
-              }
-            },
-            {
-              "type": "BLANK"
-            }
-          ]
-        },
         {
           "type": "FIELD",
           "name": "name",

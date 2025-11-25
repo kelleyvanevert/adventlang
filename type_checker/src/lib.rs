@@ -1788,12 +1788,7 @@ impl TypeCheckerCtx {
         if_let_guarded: bool,
     ) -> Result<Type, TypeError> {
         match pattern {
-            ast::DeclarePattern::Single(ast::DeclareSingle { id, guard, var, ty }) => {
-                if *guard {
-                    // only if in declare-stmt
-                    panic!("can't use declare guard in declare stmt");
-                }
-
+            ast::DeclarePattern::Single(ast::DeclareSingle { id, var, ty }) => {
                 self.dep_labels
                     .insert(*id, format!("local {}", var.as_str()));
 
