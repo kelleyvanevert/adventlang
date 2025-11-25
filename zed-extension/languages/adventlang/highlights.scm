@@ -55,15 +55,16 @@
 "break" @keyword
 "continue" @keyword
 "else" @keyword
-"fn" @keyword
 "do" @keyword
+"fn" @keyword
 "for" @keyword
 "if" @keyword
 "in" @keyword
-"let" @keyword
 "const" @keyword
-"with" @keyword
+"let" @keyword
 "return" @keyword
+"some" @keyword
+"with" @keyword
 "while" @keyword
 "loop" @keyword
 
