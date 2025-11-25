@@ -1,5 +1,5 @@
 
-const example_1 = "
+let example_1 = "
 ..F7.
 .FJ|.
 SJ.L7
@@ -7,7 +7,7 @@ SJ.L7
 LJ...
 "
 
-const example_2 = "
+let example_2 = "
 ...........
 .S-------7.
 .|F-----7|.
@@ -19,7 +19,7 @@ const example_2 = "
 ...........
 "
 
-const example_3 = "
+let example_3 = "
 .F----7F7F7F7F-7....
 .|F--7||||||||FJ....
 .||.FJ||||||||L7....
@@ -32,7 +32,7 @@ L--J.L7...LJS7F-7L7.
 ....L---J.LJ.LJLJ...
 "
 
-const example_4 = "
+let example_4 = "
 FF7FSF7F7F7F7F7F---7
 L|LJ||||||||||||F--J
 FL-7LJLJ||||||LJL-77
@@ -45,8 +45,8 @@ L.L7LFJ|||||FJL7||LJ
 L7JLJL-JLJLJL--JLJ.L
 "
 
-const Y = 0
-const X = 1
+let Y = 0
+let X = 1
 
 fn is_clockwise(polygon) {
   polygon []= polygon[0]

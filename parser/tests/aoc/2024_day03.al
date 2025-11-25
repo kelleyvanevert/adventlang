@@ -1,6 +1,6 @@
 // al run day03/al/main.al < inputs/input_03.txt
 
-const example = "
+let example = "
 xmul(2,4)%&mul[3,7]!@^do_not_mul(5,5)+mul(32,64]then(mul(11,8)mul(8,5))
 "
 
@@ -15,7 +15,7 @@ fn solve(input: str) {
     :sum
 }
 
-const bonus_example = "
+let bonus_example = "
 xmul(2,4)&mul[3,7]!^don't()_mul(5,5)+mul(32,64](mul(11,8)undo()?mul(8,5))
 "
 

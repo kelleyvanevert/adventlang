@@ -643,10 +643,6 @@
       "members": [
         {
           "type": "SYMBOL",
-          "name": "const_item"
-        },
-        {
-          "type": "SYMBOL",
           "name": "named_fn_item"
         },
         {
@@ -678,35 +674,6 @@
     "expr_stmt": {
       "type": "SYMBOL",
       "name": "_expr"
-    },
-    "const_item": {
-      "type": "SEQ",
-      "members": [
-        {
-          "type": "STRING",
-          "value": "const"
-        },
-        {
-          "type": "FIELD",
-          "name": "name",
-          "content": {
-            "type": "SYMBOL",
-            "name": "identifier"
-          }
-        },
-        {
-          "type": "STRING",
-          "value": "="
-        },
-        {
-          "type": "FIELD",
-          "name": "expr",
-          "content": {
-            "type": "SYMBOL",
-            "name": "_expr"
-          }
-        }
-      ]
     },
     "named_fn_item": {
       "type": "SEQ",

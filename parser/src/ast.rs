@@ -512,11 +512,6 @@ ast_nodes! {
         body: Block,
     }
 
-    struct ConstItem {
-        name: Identifier,
-        expr: Expr,
-    }
-
     struct BreakStmt {
         label: Option<Label>,
         expr: Option<Expr>,
@@ -546,7 +541,6 @@ ast_nodes! {
 
     enum Stmt {
         NamedFn(NamedFnItem),
-        ConstItem(ConstItem),
         Break(BreakStmt),
         Continue(ContinueStmt),
         Return(ReturnStmt),

@@ -1,5 +1,5 @@
 
-const example_input = "
+let example_input = "
 RL
 
 AAA = (BBB, CCC)
@@ -11,7 +11,7 @@ GGG = (GGG, GGG)
 ZZZ = (ZZZ, ZZZ)
 "
 
-const example_input_2 = "
+let example_input_2 = "
 LLR
 
 AAA = (BBB, BBB)
@@ -39,7 +39,7 @@ fn solve(input: str) {
   i
 }
 
-const bonus_example_input = "
+let bonus_example_input = "
 LR
 
 11A = (11B, XXX)

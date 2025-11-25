@@ -1,5 +1,5 @@
 
-const example_input = "
+let example_input = "
 ???.### 1,1,3
 .??..??...?##. 1,1,3
 ?#?#?#?#?#?#?#? 1,3,1,6
@@ -8,7 +8,7 @@ const example_input = "
 ?###???????? 3,2,1
 "
 
-const example_input_less = "
+let example_input_less = "
 ???.### 1,1,3
 .??..??...?##. 1,1,3
 ?#?#?#?#?#?#?#? 1,3,1,6
@@ -39,8 +39,8 @@ fn hash(pieces: [str], ns: [int]) {
   (pieces :join ",") + "__" + (ns :join ",")
 }
 
-const should_memoize = false
-const cache = @{} // dict[_, int]
+let should_memoize = false
+let cache = @{} // dict[_, int]
 
 fn arrangements(pieces, ns, indent) {
   let h = (pieces, ns)
@@ -116,7 +116,7 @@ fn split_around(arr, i) {
 
 // caching of placements improves the runtime by .. 2% :P
 // what the hell, why not
-const placements_cache = @{}
+let placements_cache = @{}
 
 fn placements(piece, n) {
   if let some memoized = placements_cache[(piece, n)] {

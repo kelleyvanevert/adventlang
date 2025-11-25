@@ -1,6 +1,6 @@
 // al run day06/al/main.al < inputs/input_06.txt
 
-const example = "
+let example = "
 ....#.....
 .........#
 ..........

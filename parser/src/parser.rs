@@ -734,11 +734,6 @@ impl<'a> Converter<'a> {
                 params: node.map_children("param", |node| self.as_declarable(node)),
                 body: node.map_child("body", |node| self.as_block(node, true)),
             }),
-            "const_item" => Stmt::ConstItem(ConstItem {
-                id: self.fresh_ast_node_id(node),
-                name: node.map_child("name", |node| self.as_identifier(node)),
-                expr: node.map_child("expr", |node| self.as_expr(node)),
-            }),
             "expr_stmt" => Stmt::Expr(ExprStmt {
                 id: self.fresh_ast_node_id(node),
                 expr: self.as_expr(node.child(0).unwrap()),

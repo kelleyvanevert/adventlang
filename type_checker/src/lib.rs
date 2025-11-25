@@ -1385,13 +1385,6 @@ impl TypeCheckerCtx {
         stmt: &ast::Stmt,
     ) -> Result<Option<Type>, TypeError> {
         match stmt {
-            ast::Stmt::ConstItem(ast::ConstItem { id, name, expr }) => {
-                let placeholder_ty = Type::TypeVar(self.fresh_ty_var(false));
-
-                env.add_local(name.str.clone(), (*id, placeholder_ty.clone()));
-
-                Ok(Some(placeholder_ty))
-            }
             ast::Stmt::NamedFn(ast::NamedFnItem {
                 id,
                 name,
@@ -1458,24 +1451,6 @@ impl TypeCheckerCtx {
         placeholder_ty: Option<Type>,
     ) -> Result<(Type, bool), TypeError> {
         match stmt {
-            ast::Stmt::ConstItem(ast::ConstItem { id, name, expr }) => {
-                self.dep_labels
-                    .insert(*id, format!("const {}", name.as_str()));
-
-                self.depends(dependents, *id, true);
-
-                let (ty, cr) = self.infer_expr(env, expr, &vec![*id], true)?;
-
-                // (local was already added to `env` in `forward_declare_stmt`)
-
-                self.add_constraint(Constraint::TypeEqual(
-                    *id,
-                    ty.clone(),
-                    placeholder_ty.expect("placeholder type exists for const item"),
-                ))?;
-
-                self.assign_extra(*id, Type::Nil, cr)
-            }
             ast::Stmt::NamedFn(ast::NamedFnItem {
                 id,
                 name,

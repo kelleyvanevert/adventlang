@@ -1,6 +1,6 @@
 // al run day04/al/main.al < inputs/input_04.txt
 
-const example = "
+let example = "
 MMMSXXMASM
 MSAMXMSMSA
 AMXSXMAAMM

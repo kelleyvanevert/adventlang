@@ -182,10 +182,6 @@
         "named": true
       },
       {
-        "type": "const_item",
-        "named": true
-      },
-      {
         "type": "continue_stmt",
         "named": true
       },
@@ -628,32 +624,6 @@
     "type": "comment_text",
     "named": true,
     "fields": {}
-  },
-  {
-    "type": "const_item",
-    "named": true,
-    "fields": {
-      "expr": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "_expr",
-            "named": true
-          }
-        ]
-      },
-      "name": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "identifier",
-            "named": true
-          }
-        ]
-      }
-    }
   },
   {
     "type": "continue_stmt",
@@ -1963,10 +1933,6 @@
   },
   {
     "type": "break",
-    "named": false
-  },
-  {
-    "type": "const",
     "named": false
   },
   {

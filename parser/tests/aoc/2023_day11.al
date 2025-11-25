@@ -1,5 +1,5 @@
 
-const example_input = "
+let example_input = "
 ...#......
 .......#..
 #.........

@@ -1,5 +1,5 @@
 
-const example_input = "
+let example_input = "
 Time:      7  15   30
 Distance:  9  40  200
 "

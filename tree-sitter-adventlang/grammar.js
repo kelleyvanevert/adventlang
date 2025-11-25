@@ -165,7 +165,6 @@ module.exports = grammar({
     ),
 
     _stmt: $ => choice(
-      $.const_item,
       $.named_fn_item,
       $.continue_stmt,
       $.break_stmt,
@@ -176,8 +175,6 @@ module.exports = grammar({
     ),
 
     expr_stmt: $ => $._expr,
-
-    const_item: $ => seq("const", field("name", $.identifier), "=", field("expr", $._expr)),
 
     named_fn_item: $ => seq(
       "fn",
