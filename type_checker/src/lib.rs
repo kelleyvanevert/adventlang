@@ -1,19 +1,13 @@
 #![feature(if_let_guard)]
-#![allow(unused)]
-#![allow(dead_code)]
 
-use std::{
-    collections::VecDeque,
-    fmt::Display,
-    ops::{Add, AddAssign},
-};
+use std::ops::{Add, AddAssign};
 
-use ena::unify::{InPlaceUnificationTable, UnifyKey};
+use ena::unify::InPlaceUnificationTable;
 use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
 use parser::{
     ParseResult,
-    ast::{self, AstNode, IfExpr},
+    ast::{self, AstNode},
 };
 use thiserror::Error;
 
@@ -188,6 +182,7 @@ pub enum TypeErrorKind {
 }
 
 impl TypeErrorKind {
+    #[allow(dead_code)]
     fn substitute(
         &mut self,
         bound: &mut Vec<TypeVar>,
@@ -198,7 +193,7 @@ impl TypeErrorKind {
                 a.substitute(bound, unification_table);
                 b.substitute(bound, unification_table);
             }
-            Self::InfiniteType(v, ty) => {
+            Self::InfiniteType(_, ty) => {
                 ty.substitute(bound, unification_table);
             }
             Self::NotCallable(t) => {
@@ -258,22 +253,23 @@ enum Constraint {
 }
 
 impl Constraint {
+    #[allow(dead_code)]
     fn substitute(
         &mut self,
         bound: &mut Vec<TypeVar>,
         unification_table: &mut InPlaceUnificationTable<TypeVar>,
     ) {
         match self {
-            Constraint::TypeEqual(node_id, a, b) => {
+            Constraint::TypeEqual(_node_id, a, b) => {
                 a.substitute(bound, unification_table);
                 b.substitute(bound, unification_table);
             }
-            Constraint::ReturnTyHack(node_id, a, b, ret_ty) => {
+            Constraint::ReturnTyHack(_node_id, a, b, ret_ty) => {
                 a.substitute(bound, unification_table);
                 b.substitute(bound, unification_table);
                 ret_ty.substitute(bound, unification_table);
             }
-            Constraint::CanInstantiateTo(node_id, scheme, concrete, dependents) => {
+            Constraint::CanInstantiateTo(_node_id, scheme, concrete, _dependents) => {
                 scheme.substitute(bound, unification_table);
                 concrete.substitute(bound, unification_table);
             }
@@ -307,7 +303,7 @@ impl Constraint {
                     index_type: check.index_type,
                 },
             },
-            Constraint::CanInstantiateTo(node_id, scheme, concrete, dependents) => TypeError {
+            Constraint::CanInstantiateTo(node_id, scheme, concrete, _dependents) => TypeError {
                 node_id,
                 kind: TypeErrorKind::CannotInstantiate { scheme, concrete },
             },
@@ -327,6 +323,7 @@ struct CheckIndexConstraint {
 }
 
 impl CheckIndexConstraint {
+    #[allow(dead_code)]
     fn substitute(
         &mut self,
         bound: &mut Vec<TypeVar>,
@@ -354,6 +351,7 @@ struct ChooseOverloadConstraint {
 }
 
 impl ChooseOverloadConstraint {
+    #[allow(dead_code)]
     fn substitute(
         &mut self,
         bound: &mut Vec<TypeVar>,
@@ -406,20 +404,6 @@ impl AddAssign for ConstraintResult {
                 cs1.extend_from_slice(&cs2);
             }
             _ => {}
-        }
-    }
-}
-
-#[derive(Debug)]
-struct Deps {
-    // node id `x` -> depends on node ids `ys`
-    deps: FxHashMap<usize, FxHashSet<usize>>,
-}
-
-impl Deps {
-    pub fn new() -> Self {
-        Self {
-            deps: Default::default(),
         }
     }
 }
@@ -526,9 +510,8 @@ impl TypeCheckerCtx {
         // substitute throughout the doc
         // typed_doc.substitute(&mut vec![], &mut self.unification_table);
         // println!("SUBSTITUTE THROUGHOUT THE DOCUMENT");
-        for (&node_id, ty) in &mut self.types {
+        for (_, ty) in &mut self.types {
             // *self.normalize_ty(ty.clone());
-            let orig = ty.clone();
             ty.substitute(&mut vec![], &mut self.unification_table);
 
             // if !ty.is_concrete(&mut vec![]) {
@@ -626,7 +609,7 @@ impl TypeCheckerCtx {
         }
 
         loop {
-            let mut queue = std::mem::take(&mut self.constraints);
+            let queue = std::mem::take(&mut self.constraints);
             let mut did_work = false;
 
             for constraint in queue {
@@ -680,7 +663,7 @@ impl TypeCheckerCtx {
             }
             Constraint::CanInstantiateTo(node_id, scheme, concrete, dependents) => {
                 match self.normalize_ty(scheme.clone()) {
-                    Type::TypeVar(v) => {
+                    Type::TypeVar(_) => {
                         // solve later
                         Ok(ConstraintResult::NeedsMoreInformation)
                     }
@@ -729,7 +712,7 @@ impl TypeCheckerCtx {
         ret_ty: Type,
     ) -> Result<ConstraintResult, TypeError> {
         match (a, b) {
-            (Type::TypeVar(x), other) | (other, Type::TypeVar(x)) => {
+            (Type::TypeVar(_), _) | (_, Type::TypeVar(_)) => {
                 // resolve this later
                 Ok(ConstraintResult::NeedsMoreInformation)
             }
@@ -768,7 +751,7 @@ impl TypeCheckerCtx {
                     ),
                 ]))
             }
-            (other, Type::Nullable { child }) | (Type::Nullable { child }, other) => {
+            (_, Type::Nullable { child }) | (Type::Nullable { child }, _) => {
                 // resolve this now
                 Ok(ConstraintResult::ResolveTo(vec![Constraint::TypeEqual(
                     node_id,
@@ -841,7 +824,7 @@ impl TypeCheckerCtx {
                     choose.types[ti].clone(),
                     choose.overloads[i].3[ti].clone(),
                 ) {
-                    Err(err) => {
+                    Err(_) => {
                         possible = false;
                         break 'check;
                     }
@@ -1093,7 +1076,10 @@ impl TypeCheckerCtx {
 
                 self.unification_table
                     .unify_var_value(v, Some(ty))
-                    .map_err(|(l, r)| TypeErrorKind::NotEqual(l, r));
+                    .map_err(|(l, r)| TypeError {
+                        node_id,
+                        kind: TypeErrorKind::NotEqual(l, r),
+                    })?;
 
                 Ok(ConstraintResult::Succeed)
             }
@@ -1182,7 +1168,7 @@ impl TypeCheckerCtx {
                 child: self.convert_hint_to_type(env, &t.child)?.into(),
             }),
             ast::TypeHint::Fn(ast::FnTypeHint {
-                id,
+                id: _,
                 generics,
                 params,
                 ret,
@@ -1232,7 +1218,7 @@ impl TypeCheckerCtx {
                     .collect::<Result<_, _>>()?,
             )),
             ast::TypeHint::Dict(ast::DictTypeHint {
-                id,
+                id: _,
                 key_ty,
                 value_ty,
             }) => Ok(Type::Dict {
@@ -1281,12 +1267,7 @@ impl TypeCheckerCtx {
         }
     }
 
-    fn assign_extra<E>(
-        &mut self,
-        id: usize,
-        mut ty: Type,
-        extra: E,
-    ) -> Result<(Type, E), TypeError> {
+    fn assign_extra<E>(&mut self, id: usize, ty: Type, extra: E) -> Result<(Type, E), TypeError> {
         if let Some(prev) = self.types.insert(id, ty.clone()) {
             panic!(
                 "Error: node {id} was already assigned a type: {prev:?}, while being assign a new type: {ty:?}"
@@ -1296,7 +1277,7 @@ impl TypeCheckerCtx {
         Ok((ty, extra))
     }
 
-    fn assign(&mut self, id: usize, mut ty: Type) -> Result<Type, TypeError> {
+    fn assign(&mut self, id: usize, ty: Type) -> Result<Type, TypeError> {
         self.assign_extra(id, ty, ()).map(|t| t.0)
     }
 
@@ -1597,7 +1578,7 @@ impl TypeCheckerCtx {
 
                 return self.assign_extra(*id, Type::Nil, expr_certainly_returns);
             }
-            ast::Stmt::Continue(ast::ContinueStmt { id, label }) => {
+            ast::Stmt::Continue(ast::ContinueStmt { id, label: _ }) => {
                 return self.assign_extra(*id, Type::Nil, false);
             }
             ast::Stmt::Return(ast::ReturnStmt { id, expr }) => {
@@ -1753,13 +1734,13 @@ impl TypeCheckerCtx {
                 index,
             }) => {
                 let container_type = self.infer_location(env, container, dependents)?;
-                let (index_type, certain_return) = self.infer_expr(env, index, dependents, true)?;
+                let (index_type, _cr) = self.infer_expr(env, index, dependents, true)?;
                 // TODO: deal with certain return of index expr
 
                 let element_type = Type::TypeVar(self.fresh_ty_var(false));
 
                 let literal_index_int_value = match index {
-                    ast::Expr::Int(ast::IntExpr { id, value }) => Some(*value),
+                    ast::Expr::Int(ast::IntExpr { id: _, value }) => Some(*value),
                     _ => None,
                 };
 
@@ -1906,7 +1887,7 @@ impl TypeCheckerCtx {
                 .map(|ty| self.convert_hint_to_type(env, &ty))
                 .transpose()?
                 .unwrap_or_else(|| Type::TypeVar(self.fresh_ty_var(false)))),
-            ast::DeclarePattern::List(list) => {
+            ast::DeclarePattern::List(_list) => {
                 // let elements = list
                 //     .elements
                 //     .iter()
@@ -1915,7 +1896,7 @@ impl TypeCheckerCtx {
 
                 todo!()
             }
-            ast::DeclarePattern::Tuple(ast::DeclareTuple { id, elements }) => Ok(Type::Tuple(
+            ast::DeclarePattern::Tuple(ast::DeclareTuple { id: _, elements }) => Ok(Type::Tuple(
                 elements
                     .iter()
                     .map(|el| self.forward_declare_declarable(env, el))
@@ -1966,7 +1947,7 @@ impl TypeCheckerCtx {
     > {
         match branch {
             ast::IfBranch::If(ast::IfThenBranch { id, cond, body }) => {
-                let (cond_ty, cond_cr) = self.check_expr(env, cond, dependents, Type::Bool)?;
+                let (_, cond_cr) = self.check_expr(env, cond, dependents, Type::Bool)?;
 
                 let (then_ty, body_cr) =
                     self.infer_block(&mut env.clone(), body, dependents, use_result, false)?;
@@ -1990,8 +1971,7 @@ impl TypeCheckerCtx {
                     true,
                 )?;
 
-                let (expr_ty, expr_cr) =
-                    self.check_expr(env, expr, dependents, pattern_ty.nullable())?;
+                let (_, expr_cr) = self.check_expr(env, expr, dependents, pattern_ty.nullable())?;
 
                 let mut then_child_env = env.clone();
                 then_child_env.add_locals(declare_locals);
@@ -2018,7 +1998,7 @@ impl TypeCheckerCtx {
 
                 for piece in pieces {
                     match piece {
-                        ast::StrPiece::Fragment(ast::StrPieceFragment { id, str }) => {
+                        ast::StrPiece::Fragment(ast::StrPieceFragment { id, str: _ }) => {
                             self.assign(*id, Type::Str)?;
                         }
                         ast::StrPiece::Interpolation(ast::StrPieceInterpolation { id, expr }) => {
@@ -2037,16 +2017,16 @@ impl TypeCheckerCtx {
                 let v = Type::TypeVar(self.fresh_ty_var(false));
                 return self.assign_extra(*id, Type::Nullable { child: v.into() }, false);
             }
-            ast::Expr::Regex(ast::RegexExpr { id, str }) => {
+            ast::Expr::Regex(ast::RegexExpr { id, str: _ }) => {
                 return self.assign_extra(*id, Type::Regex, false);
             }
-            ast::Expr::Bool(ast::BoolExpr { id, value }) => {
+            ast::Expr::Bool(ast::BoolExpr { id, value: _ }) => {
                 return self.assign_extra(*id, Type::Bool, false);
             }
-            ast::Expr::Int(ast::IntExpr { id, value }) => {
+            ast::Expr::Int(ast::IntExpr { id, value: _ }) => {
                 return self.assign_extra(*id, Type::Int, false);
             }
-            ast::Expr::Float(ast::FloatExpr { id, str }) => {
+            ast::Expr::Float(ast::FloatExpr { id, str: _ }) => {
                 return self.assign_extra(*id, Type::Float, false);
             }
             ast::Expr::Var(ast::VarExpr { id, var }) => {
@@ -2085,7 +2065,7 @@ impl TypeCheckerCtx {
                             expr.id(),
                             expr_ty,
                             f_ty.params[0].clone(),
-                        ));
+                        ))?;
 
                         return self.assign_extra(
                             *id,
@@ -2098,11 +2078,11 @@ impl TypeCheckerCtx {
                         let overloads = defs
                             .into_iter()
                             .enumerate()
-                            .filter(|(i, (_, f_ty))| f_ty.params.len() == 1)
+                            .filter(|(_, (_, f_ty))| f_ty.params.len() == 1)
                             .map(|(i, (def_node_id, f_ty))| {
                                 let FnType {
                                     body_node_id,
-                                    generics,
+                                    generics: _,
                                     mut params,
                                     ret,
                                 } = self.instantiate_fn_ty(f_ty, false);
@@ -2186,11 +2166,11 @@ impl TypeCheckerCtx {
                         let overloads = defs
                             .into_iter()
                             .enumerate()
-                            .filter(|(i, (_, f_ty))| f_ty.params.len() == 2)
+                            .filter(|(_, (_, f_ty))| f_ty.params.len() == 2)
                             .map(|(i, (def_node_id, f_ty))| {
                                 let FnType {
                                     body_node_id,
-                                    generics,
+                                    generics: _,
                                     mut params,
                                     ret,
                                 } = self.instantiate_fn_ty(f_ty, false);
@@ -2272,7 +2252,7 @@ impl TypeCheckerCtx {
                     val: val_ty.clone().into(),
                 };
 
-                for ast::DictEntry { id, key, value } in entries {
+                for ast::DictEntry { id: _, key, value } in entries {
                     match &key.key {
                         ast::DictKeyKind::Expr(key_expr) => {
                             let (_, cr) =
@@ -2291,7 +2271,7 @@ impl TypeCheckerCtx {
                                 key.id,
                                 key_local_ty,
                                 key_ty.clone(),
-                            ));
+                            ))?;
                         }
                     }
 
@@ -2319,7 +2299,7 @@ impl TypeCheckerCtx {
                 let element_type = Type::TypeVar(self.fresh_ty_var(false));
 
                 let literal_index_int_value = match index.as_ref() {
-                    ast::Expr::Int(ast::IntExpr { id, value }) => Some(*value),
+                    ast::Expr::Int(ast::IntExpr { id: _, value }) => Some(*value),
                     _ => None,
                 };
 
@@ -2342,7 +2322,7 @@ impl TypeCheckerCtx {
                 id,
                 f,
                 coalesce,
-                postfix,
+                postfix: _,
                 args,
             }) => {
                 if *coalesce {
@@ -2385,7 +2365,8 @@ impl TypeCheckerCtx {
                             });
                         }
 
-                        for (i, ast::Argument { id, name, expr }) in args.into_iter().enumerate() {
+                        for (i, ast::Argument { id, name: _, expr }) in args.into_iter().enumerate()
+                        {
                             let (expr_ty, cr) =
                                 self.check_expr(env, expr, dependents, f_ty.params[i].clone())?;
 
@@ -2410,7 +2391,7 @@ impl TypeCheckerCtx {
                         let ret = Type::TypeVar(self.fresh_ty_var(false));
                         let mut params = vec![];
 
-                        for (i, ast::Argument { id, name, expr }) in args.into_iter().enumerate() {
+                        for ast::Argument { id, name: _, expr } in args.into_iter() {
                             let (expr_ty, cr) = self.infer_expr(env, expr, dependents, true)?;
 
                             if cr {
@@ -2443,9 +2424,9 @@ impl TypeCheckerCtx {
                             find_unique_match(&defs, |(_, f_ty)| f_ty.params.len() == num_args) =>
                     {
                         self.overload_choices[choice_var] = Some(overload_index);
-                        let (def_node_id, f_ty) = defs[overload_index].clone();
+                        let (_def_node_id, f_ty) = defs[overload_index].clone();
 
-                        // self.depends(dependents, def_node_id);
+                        // self.depends(dependents, def_node_id, false);
                         self.depends(dependents, f_ty.body_node_id, false);
 
                         // instantiate if generic
@@ -2458,7 +2439,8 @@ impl TypeCheckerCtx {
                             });
                         }
 
-                        for (i, ast::Argument { id, name, expr }) in args.into_iter().enumerate() {
+                        for (i, ast::Argument { id, name: _, expr }) in args.into_iter().enumerate()
+                        {
                             let (expr_ty, cr) =
                                 self.check_expr(env, expr, dependents, f_ty.params[i].clone())?;
 
@@ -2481,7 +2463,7 @@ impl TypeCheckerCtx {
                         let ret = Type::TypeVar(self.fresh_ty_var(false));
                         let mut types = vec![];
 
-                        for ast::Argument { id, name, expr } in args.iter() {
+                        for ast::Argument { id, name: _, expr } in args.iter() {
                             let (expr_ty, cr) = self.infer_expr(env, expr, dependents, true)?;
 
                             if cr {
@@ -2495,11 +2477,11 @@ impl TypeCheckerCtx {
                         let overloads = defs
                             .into_iter()
                             .enumerate()
-                            .filter(|(i, (_, f_ty))| f_ty.params.len() == num_args)
+                            .filter(|(_, (_, f_ty))| f_ty.params.len() == num_args)
                             .map(|(i, (def_node_id, f_ty))| {
                                 let FnType {
                                     body_node_id,
-                                    generics,
+                                    generics: _,
                                     mut params,
                                     ret,
                                 } = self.instantiate_fn_ty(f_ty, false);
@@ -2643,7 +2625,7 @@ impl TypeCheckerCtx {
                     }
                 }
 
-                let mut ty = if use_result {
+                let ty = if use_result {
                     if else_branch.is_some() {
                         then_ty
                     } else {
@@ -2666,8 +2648,7 @@ impl TypeCheckerCtx {
                 cond,
                 body,
             }) => {
-                let (cond_ty, mut certainly_returns) =
-                    self.check_expr(env, cond, dependents, Type::Bool)?;
+                let (_, certainly_returns) = self.check_expr(env, cond, dependents, Type::Bool)?;
 
                 let mut child_env = env.clone();
                 child_env.curr_loop = Some(*id);
@@ -2784,6 +2765,7 @@ impl TypeCheckerCtx {
         }
     }
 
+    #[allow(dead_code)]
     fn debug_disjoint_sets(&mut self) {
         let mut sets: FxHashMap<Type, FxHashSet<Type>> = FxHashMap::default();
         for v in self.all_vars.clone() {
@@ -2990,8 +2972,8 @@ pub fn print_type_error(parse_result: &ParseResult, err: TypeError) {
 
     let error_node = parse_result.find_cst_node(err.node_id);
 
-    let start_byte = error_node.start_byte();
-    let end_byte = error_node.end_byte();
+    let _start_byte = error_node.start_byte();
+    let _end_byte = error_node.end_byte();
     let start_pos = error_node.start_position();
     let end_pos = error_node.end_position();
 

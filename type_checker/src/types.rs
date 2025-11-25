@@ -1,15 +1,14 @@
 use std::fmt::Debug;
 
-use ena::unify::{EqUnifyValue, InPlaceUnificationTable, UnifyKey, UnifyValue};
+use ena::unify::{EqUnifyValue, InPlaceUnificationTable, UnifyKey};
 use fxhash::FxHashMap;
-use parser::ast;
 
 #[derive(Clone, PartialEq, Eq, Hash, Copy)]
 pub struct TypeVar(pub u32);
 
 impl Debug for TypeVar {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "t{}", self.0);
+        write!(f, "t{}", self.0)?;
         Ok(())
     }
 }
@@ -185,7 +184,7 @@ impl Type {
                 Type::Nil | Type::Bool | Type::Str | Type::Int | Type::Float | Type::Regex,
                 Type::Nil | Type::Bool | Type::Str | Type::Int | Type::Float | Type::Regex,
             ) => self != other,
-            (Type::TypeVar(x), Type::TypeVar(y)) => false,
+            (Type::TypeVar(_), Type::TypeVar(_)) => false,
             (Type::Fn(a), Type::Fn(b)) => a.irreconcilable(b),
             (Type::NamedFnOverload { .. }, Type::NamedFnOverload { .. }) => {
                 todo!()
@@ -203,7 +202,7 @@ impl Type {
                     key: b_key,
                     val: b_val,
                 },
-            ) => a_key.irreconcilable(b_key) || b_val.irreconcilable(b_val),
+            ) => a_key.irreconcilable(b_key) || a_val.irreconcilable(b_val),
             (Type::Nullable { child: a_child }, Type::Nullable { child: b_child }) => {
                 a_child.irreconcilable(b_child)
             }
@@ -236,7 +235,7 @@ impl Type {
                     key: b_key,
                     val: b_val,
                 },
-            ) => a_key.alpha_eq(b_key, bound) && b_val.alpha_eq(b_val, bound),
+            ) => a_key.alpha_eq(b_key, bound) && a_val.alpha_eq(b_val, bound),
             (Type::Nullable { child: a_child }, Type::Nullable { child: b_child }) => {
                 a_child.alpha_eq(b_child, bound)
             }
@@ -426,7 +425,7 @@ impl Debug for Type {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "{el:?}");
+                    write!(f, "{el:?}")?;
                 }
                 if elements.len() == 1 {
                     write!(f, ",")?;

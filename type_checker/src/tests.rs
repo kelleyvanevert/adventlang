@@ -6,7 +6,7 @@ fn run_test_case(
     lineno: usize,
     description: &str,
     expectation: &str,
-    error_location: Option<(usize, usize)>,
+    _error_location: Option<(usize, usize)>,
     source: &str,
 ) {
     let Some(parse_result) = AdventlangParser::new().parse_document(&source) else {
@@ -15,7 +15,7 @@ fn run_test_case(
 
     let mut ctx = TypeCheckerCtx::new();
     match ctx.typecheck(&parse_result.document) {
-        Ok(typed_doc) => {
+        Ok(_typed_doc) => {
             if expectation != "ok" {
                 println!("");
                 println!("====================");
@@ -183,7 +183,7 @@ macro_rules! run_test_cases_in_file {
                 } else if status == "meta" {
                     panic!("Can't parse line in meta block, file `{filename}`, line {i}");
                 } else if status == "test"
-                    && let Some((before, after)) = line.split_once("^here")
+                    && let Some((before, _after)) = line.split_once("^here")
                 {
                     error_location = Some((test_lines.len(), before.len()));
                 } else if status == "test" {
