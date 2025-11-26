@@ -9,6 +9,10 @@ pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
 
         print: fn(str) -> nil
         assert: fn(bool) -> nil
+        panic: fn<T>() -> T
+        panic: fn<T>(str) -> T
+        unreachable: fn<T>() -> T
+        unreachable: fn<T>(str) -> T
 
 
         // STRINGS
