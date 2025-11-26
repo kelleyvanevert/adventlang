@@ -1068,8 +1068,30 @@ impl TypeCheckerCtx {
 
                 Ok(r)
             }
-            (Type::Struct { fields: _ }, Type::Struct { fields: _ }) => {
-                todo!()
+            (Type::Struct { fields: a_fields }, Type::Struct { fields: b_fields }) => {
+                let a = a_fields.iter().map(|f| &f.0).collect::<FxHashSet<_>>();
+                let b = b_fields.iter().map(|f| &f.0).collect::<FxHashSet<_>>();
+
+                if a != b {
+                    return Err(TypeError {
+                        node_id,
+                        kind: TypeErrorKind::NotEqual(
+                            Type::Struct { fields: a_fields },
+                            Type::Struct { fields: b_fields },
+                        ),
+                    });
+                }
+
+                let mut r = ConstraintResult::Succeed;
+
+                for key in a {
+                    let a_val = a_fields.iter().find(|f| &f.0 == key).unwrap();
+                    let b_val = b_fields.iter().find(|f| &f.0 == key).unwrap();
+
+                    r += self.check_ty_equal(node_id, a_val.1.clone(), b_val.1.clone())?;
+                }
+
+                Ok(r)
             }
             (Type::Set { key: a_key }, Type::Set { key: b_key }) => {
                 let r_key = self.check_ty_equal(node_id, *a_key, *b_key)?;

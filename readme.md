@@ -63,6 +63,8 @@ Status:
   - [x] nullability
   - [ ] coalescing
   - [ ] while-let, do-while
+  - [x] maps, sets, structs (syntax and member usage typing)
+  - [ ] structural subtyping
   - postponed nice-to-haves:
     - named and optional arguments for functions
     - automatic conversions (?) / allowing non-bools in conditions

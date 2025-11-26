@@ -471,14 +471,14 @@ impl Debug for Type {
                 write!(f, ")")
             }
             Type::Struct { fields } => {
-                write!(f, "{{")?;
+                write!(f, "{{ ")?;
                 for (i, (name, t)) in fields.into_iter().enumerate() {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
                     write!(f, "{name}: {t:?}")?;
                 }
-                write!(f, "}}")
+                write!(f, " }}")
             }
             Type::Set { key } => write!(f, "set[{key:?}]"),
             Type::Map { key, val } => write!(f, "map[{key:?}, {val:?}]"),
