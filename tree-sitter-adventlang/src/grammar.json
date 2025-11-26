@@ -2303,7 +2303,14 @@
       "members": [
         {
           "type": "STRING",
-          "value": "@{"
+          "value": "@"
+        },
+        {
+          "type": "IMMEDIATE_TOKEN",
+          "content": {
+            "type": "STRING",
+            "value": "{"
+          }
         },
         {
           "type": "CHOICE",
@@ -2412,7 +2419,14 @@
       "members": [
         {
           "type": "STRING",
-          "value": "#{"
+          "value": "#"
+        },
+        {
+          "type": "IMMEDIATE_TOKEN",
+          "content": {
+            "type": "STRING",
+            "value": "{"
+          }
         },
         {
           "type": "CHOICE",

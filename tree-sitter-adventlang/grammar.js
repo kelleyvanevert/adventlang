@@ -319,7 +319,7 @@ module.exports = grammar({
     ),
 
     struct_expr: $ => seq(
-      "@{",
+      "@", token.immediate("{"),
       listElements(
         "pair",
         $.struct_entry,
@@ -330,7 +330,7 @@ module.exports = grammar({
     struct_entry: $ => seq(field("key", $.identifier), optional(seq(":", field("val", $._expr)))),
 
     hash_container_expr: $ => seq(
-      "#{",
+      "#", token.immediate("{"),
       listElements(
         "entry",
         $.hash_container_entry,
