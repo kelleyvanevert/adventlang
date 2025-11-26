@@ -9,7 +9,7 @@ fn run_test_case(
     _error_location: Option<(usize, usize)>,
     source: &str,
 ) {
-    let Some(parse_result) = AdventlangParser::new().parse_document(&source) else {
+    let Ok(parse_result) = AdventlangParser::new().parse_document(&source) else {
         panic!("Can't parse test case source, file: `{test_file_name}`, line {lineno}");
     };
 

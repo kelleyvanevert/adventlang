@@ -394,6 +394,7 @@ dependencies = [
  "fxhash",
  "regex",
  "test-case",
+ "thiserror 2.0.17",
  "tree-sitter",
  "tree-sitter-adventlang",
 ]
