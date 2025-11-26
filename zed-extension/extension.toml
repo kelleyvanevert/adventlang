@@ -8,5 +8,5 @@ repository = "https://github.com/kelleyvanevert/adventlang"
 
 [grammars.adventlang]
 repository = "https://github.com/kelleyvanevert/adventlang"
-rev = "197b24984021d425d0dca3c5efaf46535d6b459f"
+rev = "bb8f041b661aecf13e4451dd3b3243ac72290105"
 path = "tree-sitter-adventlang"

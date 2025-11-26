@@ -20,7 +20,7 @@ fn solve(input: str) {
   let h = grid:len
   let w = grid[0]:len
 
-  let antennas = @{}
+  let antennas = #{}
 
   for let y in range(0, h) {
     for let x in range(0, w) {
@@ -30,7 +30,7 @@ fn solve(input: str) {
         if !antennas[a] {
           antennas[a] = []
         }
-        antennas[a] []= (x,y) // !!! doesn't work
+        antennas[a] :push (x,y) // !!! doesn't work
       }
     }
   }

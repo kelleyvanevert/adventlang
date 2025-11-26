@@ -55,7 +55,7 @@ fn solve(input) {
 fn bonus(input) {
   let schematic = input :trim :lines
   let total = 0
-  let possible_gears = @{}
+  let possible_gears = #{}
 
   fn found_adj(pos, s) {
     if let other = possible_gears[pos] {

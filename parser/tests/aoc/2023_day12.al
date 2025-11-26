@@ -116,7 +116,7 @@ fn split_around(arr, i) {
 
 // caching of placements improves the runtime by .. 2% :P
 // what the hell, why not
-let placements_cache = @{}
+let placements_cache = #{}
 
 fn placements(piece, n) {
   if let memoized = placements_cache[(piece, n)] {
