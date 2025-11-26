@@ -348,7 +348,15 @@ impl<'a> Converter<'a> {
                 entries: node.map_children("pair", |node| StructEntry {
                     id: self.fresh_ast_node_id(node),
                     key: node.map_child("key", |node| self.as_identifier(node)),
-                    value: node.map_child("val", |node| self.as_expr(node)),
+                    value: node
+                        .map_opt_child("val", |node| self.as_expr(node))
+                        // a little bit of de-sugaring
+                        .unwrap_or_else(|| {
+                            Expr::Var(VarExpr {
+                                id: node.map_child("key", |node| self.fresh_ast_node_id(node)),
+                                var: node.map_child("key", |node| self.as_var(node)),
+                            })
+                        }),
                 }),
             }),
             "str_literal" => Expr::Str(StrExpr {

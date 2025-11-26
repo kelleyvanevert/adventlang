@@ -53,7 +53,8 @@ d[2] = true
 // ok
 // ======
 
-let kelley = @{ name: "Kelley", age: 33 }
+let age = 33
+let kelley = @{ name: "Kelley", age }
 
 let n: str = kelley.name
 kelley.name = "New name"

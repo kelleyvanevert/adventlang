@@ -476,7 +476,7 @@ impl Debug for Type {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "{t:?}")?;
+                    write!(f, "{name}: {t:?}")?;
                 }
                 write!(f, "}}")
             }
