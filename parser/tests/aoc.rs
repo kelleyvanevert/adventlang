@@ -76,7 +76,8 @@ mod tests {
             float: fn<A>(A) -> float
             clone: fn<A>(A) -> A
 
-            dict: fn<K, V>([(K, V)]) -> dict[K, V]
+            map: fn<K, V>([(K, V)]) -> map[K, V]
+            set: fn<K>([K]) -> set[K]
 
 
             // LISTS

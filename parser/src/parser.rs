@@ -204,45 +204,31 @@ impl<'a> Converter<'a> {
             "regex_type" => TypeHint::Regex(RegexTypeHint {
                 id: self.fresh_ast_node_id(node),
             }),
-            "tuple_type" => {
-                let element_types = node.map_children("element", |node| self.as_type(node));
-                if element_types.len() == 0 {
-                    TypeHint::SomeTuple(SomeTupleTypeHint {
-                        id: self.fresh_ast_node_id(node),
-                    })
-                } else {
-                    TypeHint::Tuple(TupleTypeHint {
-                        id: self.fresh_ast_node_id(node),
-                        element_types,
-                    })
-                }
-            }
-            "list_type" => {
-                let ty = node.map_opt_child("elements", |node| self.as_type(node));
-                match ty {
-                    None => TypeHint::SomeList(SomeListTypeHint {
-                        id: self.fresh_ast_node_id(node),
-                    }),
-                    Some(ty) => TypeHint::List(ListTypeHint {
-                        id: self.fresh_ast_node_id(node),
-                        elements_ty: ty.into(),
-                    }),
-                }
-            }
-            "dict_type" => {
-                let key = node.map_opt_child("key", |node| self.as_type(node));
-                let val = node.map_opt_child("val", |node| self.as_type(node));
-                match (key, val) {
-                    (Some(key), Some(val)) => TypeHint::Dict(DictTypeHint {
-                        id: self.fresh_ast_node_id(node),
-                        key_ty: key.into(),
-                        value_ty: val.into(),
-                    }),
-                    _ => TypeHint::SomeDict(SomeDictTypeHint {
-                        id: self.fresh_ast_node_id(node),
-                    }),
-                }
-            }
+            "tuple_type" => TypeHint::Tuple(TupleTypeHint {
+                id: self.fresh_ast_node_id(node),
+                element_types: node.map_children("element", |node| self.as_type(node)),
+            }),
+            "list_type" => TypeHint::List(ListTypeHint {
+                id: self.fresh_ast_node_id(node),
+                elements_ty: node.map_child("elements", |node| self.as_type(node).into()),
+            }),
+            "map_type" => TypeHint::Map(MapTypeHint {
+                id: self.fresh_ast_node_id(node),
+                key_ty: node.map_child("key", |node| self.as_type(node).into()),
+                value_ty: node.map_child("val", |node| self.as_type(node).into()),
+            }),
+            "set_type" => TypeHint::Set(SetTypeHint {
+                id: self.fresh_ast_node_id(node),
+                key_ty: node.map_child("key", |node| self.as_type(node).into()),
+            }),
+            "struct_type" => TypeHint::Struct(StructTypeHint {
+                id: self.fresh_ast_node_id(node),
+                fields: node.map_children("fields", |node| StructFieldTypeHint {
+                    id: self.fresh_ast_node_id(node),
+                    key: node.map_child("key", |node| self.as_identifier(node)),
+                    value_ty: node.map_child("val", |node| self.as_type(node).into()),
+                }),
+            }),
             "nullable_type" => TypeHint::Nullable(NullableTypeHint {
                 id: self.fresh_ast_node_id(node),
                 child: node.map_child("child", |node| self.as_type(node)).into(),
@@ -323,41 +309,46 @@ impl<'a> Converter<'a> {
                 id: self.fresh_ast_node_id(node),
                 elements: node.map_children("element", |child| self.as_expr(child)),
             }),
-            "dict_expr" => Expr::Dict(DictExpr {
-                id: self.fresh_ast_node_id(node),
-                entries: node.map_children("pair", |node| {
-                    if let Some(var) = node.map_opt_child("id_key", |node| self.as_var(node)) {
-                        DictEntry {
-                            id: self.fresh_ast_node_id(node),
-                            key: DictKey {
-                                id: self.fresh_ast_node_id(node),
-                                key: DictKeyKind::Identifier(var.clone().into()),
-                            },
-                            value: node
-                                .map_opt_child("val", |node| self.as_expr(node))
-                                .unwrap_or(Expr::Var(VarExpr {
-                                    id: self.fresh_ast_node_id(node),
-                                    var,
-                                })),
-                        }
-                    } else {
-                        let key_node_id = node.map_child("expr_key", |node| node.id());
+            "hash_container_expr" => {
+                let entries = node.map_children("entry", |node| {
+                    let id = self.fresh_ast_node_id(node);
+                    let key = node.map_child("key", |node| self.as_expr(node));
+                    let val = node.map_opt_child("val", |node| self.as_expr(node));
+                    (id, key, val)
+                });
 
-                        DictEntry {
-                            id: self.fresh_ast_node_id(node),
-                            key: DictKey {
-                                id: key_node_id,
-                                key: DictKeyKind::Expr(
-                                    node.map_child("expr_key", |node| self.as_expr(node)),
-                                ),
-                            },
-                            value: node
-                                .map_opt_child("val", |node| self.as_expr(node))
-                                .unwrap_or_else(|| {
-                                    node.map_child("expr_key", |node| self.as_expr(node))
-                                }),
-                        }
-                    }
+                if entries.iter().all(|e| e.2.is_some()) {
+                    Expr::Map(MapExpr {
+                        id: self.fresh_ast_node_id(node),
+                        entries: entries
+                            .into_iter()
+                            .map(|(id, key, value)| MapEntry {
+                                id,
+                                key,
+                                value: value.unwrap(),
+                            })
+                            .collect(),
+                    })
+                } else if entries.iter().all(|e| e.2.is_none()) {
+                    Expr::Set(SetExpr {
+                        id: self.fresh_ast_node_id(node),
+                        entries: entries
+                            .into_iter()
+                            .map(|(id, key, _)| SetEntry { id, key })
+                            .collect(),
+                    })
+                } else {
+                    panic!(
+                        "hash container can't be set nor map because it contains both pairs as well as single values"
+                    )
+                }
+            }
+            "struct_expr" => Expr::Struct(StructExpr {
+                id: self.fresh_ast_node_id(node),
+                entries: node.map_children("pair", |node| StructEntry {
+                    id: self.fresh_ast_node_id(node),
+                    key: node.map_child("key", |node| self.as_identifier(node)),
+                    value: node.map_child("val", |node| self.as_expr(node)),
                 }),
             }),
             "str_literal" => Expr::Str(StrExpr {

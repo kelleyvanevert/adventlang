@@ -16,7 +16,7 @@ let one_pair = 1
 let high_card = 0
 
 fn solve(input: str) {
-  let digits = @{
+  let digits = #{
     "2": 2,
     "3": 3,
     "4": 4,
@@ -86,7 +86,7 @@ fn solve(input: str) {
 fn bonus(input: str) {
   let J = 0
 
-  let digits = @{
+  let digits = #{
     "J": 0, // moved (!)
 
     "2": 2,

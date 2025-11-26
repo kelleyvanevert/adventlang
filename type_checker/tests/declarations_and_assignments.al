@@ -160,7 +160,7 @@ fn first() {
 fn main(input: str) {
   let a = 5
 
-  fn bla(list) {
+  fn bla(list: [int]) {
     a :in list
   }
 }

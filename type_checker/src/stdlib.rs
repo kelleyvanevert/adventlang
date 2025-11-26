@@ -44,13 +44,15 @@ pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
         float: fn<A>(A) -> float
         clone: fn<A>(A) -> A
 
-        dict: fn<K, V>([(K, V)]) -> dict[K, V]
+        as_map: fn<K, V>([(K, V)]) -> map[K, V]
+        as_set: fn<K>([K]) -> set[K]
 
 
         // LISTS
         // ======
 
         in: fn<A>(A, [A]) -> bool
+        in: fn<A>(A, set[A]) -> bool
         filter: fn<A, B>([A], fn(A) -> bool) -> [A]
         map: fn<A, B>([A], fn(A) -> B) -> [B]
         flat_map: fn<A, B>([A], fn(A) -> [B]) -> [B]

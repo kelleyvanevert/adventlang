@@ -105,26 +105,23 @@ module.exports = grammar({
 
     label: $ => seq("'", $.identifier),
 
-    tuple_type: $ => choice(
-      seq(
-        "(",
-        seq(field("element", $._type), ","),
-        repeat(seq(field("element", $._type), ",")),
-        optional(field("element", $._type)),
-        ")",
-      ),
-      "tuple",
+    tuple_type: $ => seq(
+      "(",
+      seq(field("element", $._type), ","),
+      repeat(seq(field("element", $._type), ",")),
+      optional(field("element", $._type)),
+      ")",
     ),
 
-    list_type: $ => choice(
-      seq("[", field("elements", $._type), "]"),
-      "list",
-    ),
+    list_type: $ => seq("[", field("elements", $._type), "]"),
 
-    dict_type: $ => choice(
-      seq("dict", "[", field("key", $._type), ",", field("val", $._type), "]"),
-      "dict",
-    ),
+    map_type: $ => seq("map", "[", field("key", $._type), ",", field("val", $._type), "]"),
+
+    set_type: $ => seq("set", "[", field("key", $._type), "]"),
+
+    struct_type: $ => seq("{", listElements("fields", $.struct_type_field), "}"),
+
+    struct_type_field: $ => seq(field("key", $.identifier), ":", field("val", $._type)),
 
     nullable_type: $ => seq("?", field("child", $._type)),
 
@@ -146,7 +143,9 @@ module.exports = grammar({
     _type: $ => choice(
       $.tuple_type,
       $.list_type,
-      $.dict_type,
+      $.map_type,
+      $.set_type,
+      $.struct_type,
       alias("nil", $.nil_type),
       alias("bool", $.bool_type),
       alias("str", $.str_type),
@@ -250,7 +249,8 @@ module.exports = grammar({
       $._literal,
       $.list_expr,
       $.tuple_expr,
-      $.dict_expr,
+      $.hash_container_expr,
+      $.struct_expr,
       $.anonymous_fn,
       $.unary_expression,
       $.binary_expr,
@@ -273,7 +273,7 @@ module.exports = grammar({
     //   $._literal,
     //   $.list_expr,
     //   $.tuple_expr,
-    //   $.dict_expr,
+    //   $.hash_container_expr,
     //   $.anonymous_fn,
     //   $.parenthesized_expr,
 
@@ -318,18 +318,28 @@ module.exports = grammar({
       ")",
     ),
 
-    dict_expr: $ => seq(
+    struct_expr: $ => seq(
       "@{",
       listElements(
         "pair",
-        $.dict_pair,
+        $.struct_entry,
       ),
       "}",
     ),
 
-    dict_pair: $ => choice(
-      seq(".", field("id_key", $.identifier), optional(seq(":", field("val", $._expr)))),
-      seq(field("expr_key", $._expr), optional(seq(":", field("val", $._expr)))),
+    struct_entry: $ => seq(field("key", $.identifier), optional(seq(":", field("val", $._expr)))),
+
+    hash_container_expr: $ => seq(
+      "#{",
+      listElements(
+        "entry",
+        $.hash_container_entry,
+      ),
+      "}",
+    ),
+
+    hash_container_entry: $ => choice(
+      seq(field("key", $._expr), optional(seq(":", field("val", $._expr)))),
     ),
 
     do_while_expr: $ => seq(

@@ -28,9 +28,15 @@ pub enum Type {
     },
     List(Box<Type>),
     Tuple(Vec<Type>),
-    Dict {
+    Struct {
+        fields: Vec<(String, Type)>,
+    },
+    Map {
         key: Box<Type>,
         val: Box<Type>,
+    },
+    Set {
+        key: Box<Type>,
     },
     Nullable {
         child: Box<Type>,
@@ -193,12 +199,14 @@ impl Type {
             (Type::Tuple(a), Type::Tuple(b)) => {
                 a.len() != b.len() || (0..a.len()).any(|i| a[i].irreconcilable(&b[i]))
             }
+            (Type::Struct { .. }, Type::Struct { .. }) => todo!(),
+            (Type::Set { key: a_key }, Type::Set { key: b_key }) => a_key.irreconcilable(b_key),
             (
-                Type::Dict {
+                Type::Map {
                     key: a_key,
                     val: a_val,
                 },
-                Type::Dict {
+                Type::Map {
                     key: b_key,
                     val: b_val,
                 },
@@ -226,12 +234,14 @@ impl Type {
             (Type::Tuple(a), Type::Tuple(b)) => {
                 a.len() == b.len() && (0..a.len()).all(|i| a[i].alpha_eq(&b[i], bound))
             }
+            (Type::Struct { .. }, Type::Struct { .. }) => todo!(),
+            (Type::Set { key: a_key }, Type::Set { key: b_key }) => a_key.alpha_eq(b_key, bound),
             (
-                Type::Dict {
+                Type::Map {
                     key: a_key,
                     val: a_val,
                 },
-                Type::Dict {
+                Type::Map {
                     key: b_key,
                     val: b_val,
                 },
@@ -252,7 +262,9 @@ impl Type {
             Type::NamedFnOverload { defs, .. } => defs.iter().all(|(_, el)| el.is_concrete(bound)),
             Type::List(element_ty) => element_ty.is_concrete(bound),
             Type::Tuple(elements) => elements.iter().all(|el| el.is_concrete(bound)),
-            Type::Dict { key, val } => key.is_concrete(bound) && val.is_concrete(bound),
+            Type::Struct { fields } => fields.iter().all(|(_, t)| t.is_concrete(bound)),
+            Type::Set { key } => key.is_concrete(bound),
+            Type::Map { key, val } => key.is_concrete(bound) && val.is_concrete(bound),
             Type::Nullable { child } => child.is_concrete(bound),
         }
     }
@@ -288,7 +300,17 @@ impl Type {
                 }
                 Ok(())
             }
-            Type::Dict { key, val } => {
+            Type::Struct { fields } => {
+                for (_, t) in fields {
+                    t.occurs_check(var).map_err(|_| self.clone())?;
+                }
+                Ok(())
+            }
+            Type::Set { key } => {
+                (*key).occurs_check(var).map_err(|_| self.clone())?;
+                Ok(())
+            }
+            Type::Map { key, val } => {
                 (*key).occurs_check(var).map_err(|_| self.clone())?;
                 (*val).occurs_check(var).map_err(|_| self.clone())?;
                 Ok(())
@@ -325,7 +347,15 @@ impl Type {
                     el.substitute_vars(sub);
                 }
             }
-            Type::Dict { key, val } => {
+            Type::Struct { fields } => {
+                for (_, t) in fields {
+                    t.substitute_vars(sub);
+                }
+            }
+            Type::Set { key } => {
+                key.substitute_vars(sub);
+            }
+            Type::Map { key, val } => {
                 key.substitute_vars(sub);
                 val.substitute_vars(sub);
             }
@@ -379,7 +409,15 @@ impl Type {
                     el.substitute(bound, unification_table);
                 }
             }
-            Type::Dict { key, val } => {
+            Type::Struct { fields } => {
+                for (_, t) in fields {
+                    t.substitute(bound, unification_table);
+                }
+            }
+            Type::Set { key } => {
+                key.substitute(bound, unification_table);
+            }
+            Type::Map { key, val } => {
                 key.substitute(bound, unification_table);
                 val.substitute(bound, unification_table);
             }
@@ -432,7 +470,18 @@ impl Debug for Type {
                 }
                 write!(f, ")")
             }
-            Type::Dict { key, val } => write!(f, "dict[{key:?}, {val:?}]"),
+            Type::Struct { fields } => {
+                write!(f, "{{")?;
+                for (i, (name, t)) in fields.into_iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{t:?}")?;
+                }
+                write!(f, "}}")
+            }
+            Type::Set { key } => write!(f, "set[{key:?}]"),
+            Type::Map { key, val } => write!(f, "map[{key:?}, {val:?}]"),
             Type::Nullable { child } => write!(f, "?{child:?}"),
         }
     }

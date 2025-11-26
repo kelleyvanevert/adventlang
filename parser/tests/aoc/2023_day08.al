@@ -20,7 +20,7 @@ ZZZ = (ZZZ, ZZZ)
 "
 
 fn solve(input: str) {
-  let dirs = @{ .L: 0, .R: 1}
+  let dirs = #{ "L": 0, "R": 1}
   let [path, rules] = input :trim :split "\n\n"
   let path = path :chars :map |c| { dirs[c] }
 
@@ -65,7 +65,7 @@ fn lcm(a, b) {
 }
 
 fn bonus(input: str) {
-  let dirs = @{ .L: 0, .R: 1 }
+  let dirs = #{ "L": 0, "R": 1 }
   let [path, rules] = input :trim :split "\n\n"
   let path = path :chars :map |c| { dirs[c] }
 

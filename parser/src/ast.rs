@@ -332,15 +332,6 @@ ast_nodes! {
         expr: Expr,
     }
 
-    struct DictKey {
-        key: DictKeyKind,
-    }
-
-    enum DictKeyKind {
-        Identifier(Identifier),
-        Expr(Expr),
-    }
-
     struct StrExpr {
         pieces: Vec<StrPiece>,
     }
@@ -387,13 +378,30 @@ ast_nodes! {
         elements: Vec<Expr>,
     }
 
-    struct DictExpr {
-        entries: Vec<DictEntry>,
+    struct StructExpr {
+        entries: Vec<StructEntry>,
     }
 
-    struct DictEntry {
-        key: DictKey,
+    struct StructEntry {
+        key: Identifier,
         value: Expr,
+    }
+
+    struct MapExpr {
+        entries: Vec<MapEntry>,
+    }
+
+    struct MapEntry {
+        key: Expr,
+        value: Expr,
+    }
+
+    struct SetExpr {
+        entries: Vec<SetEntry>,
+    }
+
+    struct SetEntry {
+        key: Expr,
     }
 
     struct IndexExpr {
@@ -489,7 +497,9 @@ ast_nodes! {
         Binary(BinaryExpr),
         List(ListExpr),
         Tuple(TupleExpr),
-        Dict(DictExpr),
+        Struct(StructExpr),
+        Map(MapExpr),
+        Set(SetExpr),
         Index(IndexExpr),
         Member(MemberExpr),
         Call(CallExpr),
@@ -587,17 +597,26 @@ ast_nodes! {
         elements_ty: Box<TypeHint>,
     }
 
-    struct SomeTupleTypeHint {}
-
     struct TupleTypeHint {
         element_types: Vec<TypeHint>,
     }
 
-    struct SomeDictTypeHint {}
+    struct StructTypeHint {
+        fields: Vec<StructFieldTypeHint>,
+    }
 
-    struct DictTypeHint {
+    struct StructFieldTypeHint {
+        key: Identifier,
+        value_ty: TypeHint,
+    }
+
+    struct MapTypeHint {
         key_ty: Box<TypeHint>,
         value_ty: Box<TypeHint>,
+    }
+
+    struct SetTypeHint {
+        key_ty: Box<TypeHint>,
     }
 
     struct NullableTypeHint {
@@ -614,12 +633,11 @@ ast_nodes! {
         Float(FloatTypeHint),
         SomeFn(SomeFnTypeHint),
         Fn(FnTypeHint),
-        SomeList(SomeListTypeHint),
         List(ListTypeHint),
-        SomeTuple(SomeTupleTypeHint),
         Tuple(TupleTypeHint),
-        SomeDict(SomeDictTypeHint),
-        Dict(DictTypeHint),
+        Struct(StructTypeHint),
+        Map(MapTypeHint),
+        Set(SetTypeHint),
         Nullable(NullableTypeHint),
     }
 }

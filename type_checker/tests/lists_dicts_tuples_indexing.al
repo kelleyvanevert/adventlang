@@ -10,14 +10,25 @@ d[2] = "d"
 
 
 // ======
-// indexing and assigning into dicts
+// indexing and assigning into maps
 // ok
 // ======
 
-let d = @{ "a": 12 }
+let d = #{ "a": 12 }
 
 let v: int = d["a"]
 d["a"] = 13
+
+
+// ======
+// indexing and assigning into sets
+// ok
+// ======
+
+let d = #{ "a", "b" }
+
+let v: bool = d["a"]
+// d["a"] = 13
 
 
 // ======
@@ -35,6 +46,20 @@ d[1] = "three"
 
 let v: bool = d[2]
 d[2] = true
+
+
+// ======
+// indexing and assigning into structs
+// ok
+// ======
+
+let kelley = @{ name: "Kelley", age: 33 }
+
+let n: str = kelley.name
+kelley.name = "New name"
+
+let a: int = kelley.age
+kelley.age = 34
 
 
 // ======

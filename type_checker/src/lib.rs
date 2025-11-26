@@ -159,6 +159,11 @@ pub enum TypeErrorKind {
         container_type: Type,
         index_type: Type,
     },
+    #[error("cannot get member `{member}` of struct type {container_type:?}")]
+    CannotMember {
+        container_type: Type,
+        member: String,
+    },
     #[error("cannot instantiate function {scheme:?} to {concrete:?}")]
     CannotInstantiate { scheme: Type, concrete: Type },
     #[error("invalid tuple index")]
@@ -217,6 +222,12 @@ impl TypeErrorKind {
                 container_type.substitute(bound, unification_table);
                 index_type.substitute(bound, unification_table);
             }
+            Self::CannotMember {
+                container_type,
+                member: _,
+            } => {
+                container_type.substitute(bound, unification_table);
+            }
             Self::CannotInstantiate { scheme, concrete } => {
                 scheme.substitute(bound, unification_table);
                 concrete.substitute(bound, unification_table);
@@ -250,6 +261,7 @@ enum Constraint {
     CanInstantiateTo(usize, Type, Type, Vec<usize>),
     ChooseOverload(ChooseOverloadConstraint),
     CheckIndex(CheckIndexConstraint),
+    CheckMember(CheckMemberConstraint),
 }
 
 impl Constraint {
@@ -279,6 +291,9 @@ impl Constraint {
             Constraint::CheckIndex(check) => {
                 check.substitute(bound, unification_table);
             }
+            Constraint::CheckMember(check) => {
+                check.substitute(bound, unification_table);
+            }
         }
     }
 
@@ -301,6 +316,13 @@ impl Constraint {
                 kind: TypeErrorKind::CannotIndex {
                     container_type: check.container_type,
                     index_type: check.index_type,
+                },
+            },
+            Constraint::CheckMember(check) => TypeError {
+                node_id: check.node_id,
+                kind: TypeErrorKind::CannotMember {
+                    container_type: check.container_type,
+                    member: check.member,
                 },
             },
             Constraint::CanInstantiateTo(node_id, scheme, concrete, _dependents) => TypeError {
@@ -331,6 +353,28 @@ impl CheckIndexConstraint {
     ) {
         self.container_type.substitute(bound, unification_table);
         self.index_type.substitute(bound, unification_table);
+        self.element_type.substitute(bound, unification_table);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CheckMemberConstraint {
+    node_id: usize,
+    container_node_id: usize,
+    container_type: Type,
+    member_node_id: usize,
+    member: String,
+    element_type: Type,
+}
+
+impl CheckMemberConstraint {
+    #[allow(dead_code)]
+    fn substitute(
+        &mut self,
+        bound: &mut Vec<TypeVar>,
+        unification_table: &mut InPlaceUnificationTable<TypeVar>,
+    ) {
+        self.container_type.substitute(bound, unification_table);
         self.element_type.substitute(bound, unification_table);
     }
 }
@@ -692,6 +736,7 @@ impl TypeCheckerCtx {
             }
             Constraint::ChooseOverload(choose) => self.choose_named_fn_overload(choose),
             Constraint::CheckIndex(check) => self.check_index(check),
+            Constraint::CheckMember(check) => self.check_member(check),
 
             // this is, well, a hack
             Constraint::ReturnTyHack(node_id, a, b, ret_ty) => {
@@ -910,7 +955,18 @@ impl TypeCheckerCtx {
                 ),
             ])),
 
-            Type::Dict { key, val } => Ok(ConstraintResult::ResolveTo(vec![
+            Type::Set { key } => Ok(ConstraintResult::ResolveTo(vec![
+                // the index is a key
+                Constraint::TypeEqual(
+                    check.index_node_id,
+                    check.index_type.clone(),
+                    key.as_ref().clone(),
+                ),
+                // and the result is a value
+                Constraint::TypeEqual(check.node_id, check.element_type.clone(), Type::Bool),
+            ])),
+
+            Type::Map { key, val } => Ok(ConstraintResult::ResolveTo(vec![
                 // the index is a key
                 Constraint::TypeEqual(
                     check.index_node_id,
@@ -951,6 +1007,38 @@ impl TypeCheckerCtx {
         }
     }
 
+    fn check_member(
+        &mut self,
+        check: &CheckMemberConstraint,
+    ) -> Result<ConstraintResult, TypeError> {
+        match self.normalize_ty(check.container_type.clone()) {
+            Type::TypeVar(_) => Ok(ConstraintResult::NeedsMoreInformation),
+
+            Type::Struct { fields } => {
+                match fields.into_iter().find(|(n, _)| n == &check.member) {
+                    None => Err(TypeError {
+                        node_id: check.node_id,
+                        kind: TypeErrorKind::CannotMember {
+                            container_type: check.container_type.clone(),
+                            member: check.member.clone(),
+                        },
+                    }),
+                    Some((_, ty)) => {
+                        Ok(ConstraintResult::ResolveTo(vec![
+                            // the field type
+                            Constraint::TypeEqual(check.node_id, check.element_type.clone(), ty),
+                        ]))
+                    }
+                }
+            }
+
+            _ => Err(TypeError {
+                node_id: check.node_id,
+                kind: TypeErrorKind::CannotIndexContainer(check.container_type.clone()),
+            }),
+        }
+    }
+
     fn check_ty_equal(
         &mut self,
         node_id: usize,
@@ -980,12 +1068,20 @@ impl TypeCheckerCtx {
 
                 Ok(r)
             }
+            (Type::Struct { fields: _ }, Type::Struct { fields: _ }) => {
+                todo!()
+            }
+            (Type::Set { key: a_key }, Type::Set { key: b_key }) => {
+                let r_key = self.check_ty_equal(node_id, *a_key, *b_key)?;
+
+                Ok(r_key)
+            }
             (
-                Type::Dict {
+                Type::Map {
                     key: a_key,
                     val: a_val,
                 },
-                Type::Dict {
+                Type::Map {
                     key: b_key,
                     val: b_val,
                 },
@@ -1134,7 +1230,16 @@ impl TypeCheckerCtx {
                     .map(|ty| self.normalize_ty(ty))
                     .collect(),
             ),
-            Type::Dict { key, val } => Type::Dict {
+            Type::Struct { fields } => Type::Struct {
+                fields: fields
+                    .into_iter()
+                    .map(|(name, ty)| (name, self.normalize_ty(ty)))
+                    .collect(),
+            },
+            Type::Set { key } => Type::Set {
+                key: self.normalize_ty(*key).into(),
+            },
+            Type::Map { key, val } => Type::Map {
                 key: self.normalize_ty(*key).into(),
                 val: self.normalize_ty(*val).into(),
             },
@@ -1217,11 +1322,31 @@ impl TypeCheckerCtx {
                     .map(|hint| self.convert_hint_to_type(env, hint))
                     .collect::<Result<_, _>>()?,
             )),
-            ast::TypeHint::Dict(ast::DictTypeHint {
+            ast::TypeHint::Struct(ast::StructTypeHint { id: _, fields }) => Ok(Type::Struct {
+                fields: fields
+                    .iter()
+                    .map(
+                        |ast::StructFieldTypeHint {
+                             id: _,
+                             key,
+                             value_ty,
+                         }| {
+                            Ok((
+                                key.as_str().to_string(),
+                                self.convert_hint_to_type(env, value_ty)?,
+                            ))
+                        },
+                    )
+                    .collect::<Result<_, _>>()?,
+            }),
+            ast::TypeHint::Set(ast::SetTypeHint { id: _, key_ty }) => Ok(Type::Set {
+                key: self.convert_hint_to_type(env, key_ty)?.into(),
+            }),
+            ast::TypeHint::Map(ast::MapTypeHint {
                 id: _,
                 key_ty,
                 value_ty,
-            }) => Ok(Type::Dict {
+            }) => Ok(Type::Map {
                 key: self.convert_hint_to_type(env, key_ty)?.into(),
                 val: self.convert_hint_to_type(env, value_ty)?.into(),
             }),
@@ -1756,7 +1881,26 @@ impl TypeCheckerCtx {
 
                 self.assign(*id, element_type)
             }
-            ast::AssignLoc::Member(_) => todo!(),
+            ast::AssignLoc::Member(ast::AssignLocMember {
+                id,
+                container,
+                member,
+            }) => {
+                let container_type = self.infer_location(env, container, dependents)?;
+
+                let element_type = Type::TypeVar(self.fresh_ty_var(false));
+
+                self.add_constraint(Constraint::CheckMember(CheckMemberConstraint {
+                    node_id: *id,
+                    container_node_id: container.id(),
+                    container_type,
+                    member_node_id: member.id(),
+                    member: member.as_str().to_string(),
+                    element_type: element_type.clone(),
+                }))?;
+
+                self.assign(*id, element_type)
+            }
         }
     }
 
@@ -2242,37 +2386,53 @@ impl TypeCheckerCtx {
 
                 return self.assign_extra(*id, Type::Tuple(element_types), certainly_returns);
             }
-            ast::Expr::Dict(ast::DictExpr { id, entries }) => {
+            ast::Expr::Struct(ast::StructExpr { id, entries }) => {
+                let mut certainly_returns = false;
+
+                let mut fields = vec![];
+
+                for ast::StructEntry { id: _, key, value } in entries {
+                    let (value_ty, cr) = self.infer_expr(env, value, dependents, true)?;
+                    if cr {
+                        certainly_returns = true;
+                    }
+
+                    fields.push((key.as_str().to_string(), value_ty));
+                }
+
+                return self.assign_extra(*id, Type::Struct { fields }, certainly_returns);
+            }
+            ast::Expr::Set(ast::SetExpr { id, entries }) => {
+                let mut certainly_returns = false;
+
+                let key_ty = Type::TypeVar(self.fresh_ty_var(false));
+                let set_ty = Type::Set {
+                    key: key_ty.clone().into(),
+                };
+
+                for ast::SetEntry { id: _, key } in entries {
+                    let (_, cr) = self.check_expr(env, key, dependents, key_ty.clone())?;
+                    if cr {
+                        certainly_returns = true;
+                    }
+                }
+
+                return self.assign_extra(*id, set_ty, certainly_returns);
+            }
+            ast::Expr::Map(ast::MapExpr { id, entries }) => {
                 let mut certainly_returns = false;
 
                 let key_ty = Type::TypeVar(self.fresh_ty_var(false));
                 let val_ty = Type::TypeVar(self.fresh_ty_var(false));
-                let list_ty = Type::Dict {
+                let map_ty = Type::Map {
                     key: key_ty.clone().into(),
                     val: val_ty.clone().into(),
                 };
 
-                for ast::DictEntry { id: _, key, value } in entries {
-                    match &key.key {
-                        ast::DictKeyKind::Expr(key_expr) => {
-                            let (_, cr) =
-                                self.check_expr(env, key_expr, dependents, key_ty.clone())?;
-                            if cr {
-                                certainly_returns = true;
-                            }
-                        }
-                        ast::DictKeyKind::Identifier(key_id) => {
-                            let (def_node_id, key_local_ty) =
-                                self.get_local(key.id, env, key_id.as_str())?;
-
-                            self.depends(dependents, def_node_id, true);
-
-                            self.add_constraint(Constraint::TypeEqual(
-                                key.id,
-                                key_local_ty,
-                                key_ty.clone(),
-                            ))?;
-                        }
+                for ast::MapEntry { id: _, key, value } in entries {
+                    let (_, cr) = self.check_expr(env, key, dependents, key_ty.clone())?;
+                    if cr {
+                        certainly_returns = true;
                     }
 
                     let (_, cr) = self.check_expr(env, value, dependents, val_ty.clone())?;
@@ -2281,7 +2441,7 @@ impl TypeCheckerCtx {
                     }
                 }
 
-                return self.assign_extra(*id, list_ty, certainly_returns);
+                return self.assign_extra(*id, map_ty, certainly_returns);
             }
             ast::Expr::Index(ast::IndexExpr {
                 id,
@@ -2315,8 +2475,30 @@ impl TypeCheckerCtx {
 
                 return self.assign_extra(*id, element_type, c_cr || i_cr);
             }
-            ast::Expr::Member(_) => {
-                todo!()
+            ast::Expr::Member(ast::MemberExpr {
+                id,
+                expr,
+                coalesce,
+                member,
+            }) => {
+                if *coalesce {
+                    todo!()
+                }
+
+                let (container_type, c_cr) = self.infer_expr(env, expr, dependents, true)?;
+
+                let element_type = Type::TypeVar(self.fresh_ty_var(false));
+
+                self.add_constraint(Constraint::CheckMember(CheckMemberConstraint {
+                    node_id: *id,
+                    container_node_id: expr.id(),
+                    container_type,
+                    member_node_id: member.id(),
+                    member: member.as_str().to_string(),
+                    element_type: element_type.clone(),
+                }))?;
+
+                return self.assign_extra(*id, element_type, c_cr);
             }
             ast::Expr::Call(ast::CallExpr {
                 id,

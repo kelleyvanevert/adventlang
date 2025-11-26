@@ -64,7 +64,7 @@ fn solve(input, red, green, blue) {
       let [id, sets] = game :split ": "
       let id = id :replace ("Game ", "") :int
       let invalid = sets :split "; "
-        :flat_map |set| { set :split ", " }
+        :flat_map |s| { s :split ", " }
         :map |draw| {
           let [num, color] = draw :split " "
           (num:int, color)
@@ -405,7 +405,7 @@ let one_pair = 1
 let high_card = 0
 
 fn solve(input: str) {
-  let digits = @{
+  let digits = #{
     "2": 2,
     "3": 3,
     "4": 4,
@@ -475,7 +475,7 @@ fn solve(input: str) {
 fn bonus(input: str) {
   let J = 0
 
-  let digits = @{
+  let digits = #{
     "J": 0, // moved (!)
 
     "2": 2,
@@ -612,14 +612,14 @@ ZZZ = (ZZZ, ZZZ)
 "
 
 fn solve(input: str) {
-  let dirs = @{ "L": 0, "R": 1}
+  let dirs = #{ "L": 0, "R": 1}
   let [path, rules] = input :trim :split "\n\n"
   let path = path :chars :map |c| { dirs[c] }
 
   let rules = rules :lines :map |line| {
     let [source, dests] = line :split " = "
     (source, dests :replace (/[)(]/, "") :split ", ")
-  } :dict
+  } :as_map
 
   let i = 0
   let at = "AAA"
@@ -657,7 +657,7 @@ fn lcm(a: int, b: int) {
 }
 
 fn bonus(input: str) {
-  let dirs = @{ "L": 0, "R": 1 }
+  let dirs = #{ "L": 0, "R": 1 }
   let [path, rules] = input :trim :split "\n\n"
   let path = path :chars :map |c| { dirs[c] }
 
@@ -667,7 +667,7 @@ fn bonus(input: str) {
   let rules = rules :lines :map |line| {
     let [source, dests] = line :split " = "
     (source, dests :replace (/[)(]/, "") :split ", ")
-  } :dict
+  } :as_map
 
   let i = 0
   let at = clone(as)
