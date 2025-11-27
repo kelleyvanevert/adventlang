@@ -13,6 +13,6 @@ fn main() {
     // // run vector-passing proof-of-concept #2
     // crate::poc::vec_cc::main();
 
-    // // run vector-passing proof-of-concept #3
-    // crate::poc::vec_ptr_gc::main();
+    // run vector-passing proof-of-concept #3
+    crate::poc::vec_ptr_gc::main();
 }
