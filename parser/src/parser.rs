@@ -109,12 +109,13 @@ impl AdventlangParser {
 
         let root_node = tree.root_node();
 
-        if root_node.has_error() {
-            return Err(ParseError {
-                span: root_node.byte_range(),
-                kind: ParseErrorKind::CouldNotParse,
-            });
-        }
+        root_node.report_any_error()?;
+        // if root_node.has_error() {
+        //     return Err(ParseError {
+        //         span: root_node.byte_range(),
+        //         kind: ParseErrorKind::CouldNotParse,
+        //     });
+        // }
 
         let mut converter = Converter::new(source);
         let document = converter.as_doc(root_node)?;
@@ -988,6 +989,8 @@ trait NodeExt {
     fn has_child(&self, name: &str) -> bool {
         self.map_opt_child(name, |_| true).is_some()
     }
+
+    fn report_any_error(&self) -> Result<(), ParseError>;
 }
 
 impl NodeExt for Node<'_> {
@@ -1016,6 +1019,26 @@ impl NodeExt for Node<'_> {
                 kind: ParseErrorKind::Missing(name.to_string()),
             })
             .flatten()
+    }
+
+    fn report_any_error(&self) -> Result<(), ParseError> {
+        if self.is_error() {
+            return Err(ParseError {
+                span: self.byte_range(),
+                kind: ParseErrorKind::CouldNotParse,
+            });
+        } else if self.is_missing() {
+            return Err(ParseError {
+                span: self.byte_range(),
+                kind: ParseErrorKind::Missing(self.kind().to_string()),
+            });
+        }
+
+        for child in self.children(&mut self.walk()) {
+            child.report_any_error()?
+        }
+
+        Ok(())
     }
 }
 
