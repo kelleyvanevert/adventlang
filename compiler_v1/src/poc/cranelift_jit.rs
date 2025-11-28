@@ -72,7 +72,9 @@ pub fn main() -> Result<(), String> {
         let val = builder.block_params(entry_block)[0];
         let var = builder.declare_var(I64);
         builder.def_var(var, val);
-        {
+
+        // using variables multiple times
+        for i in 0..5 {
             let rhs = builder.use_var(var);
             let lhs = builder.ins().iconst(I64, i64::from(2));
             let res = builder.ins().iadd(lhs, rhs);
