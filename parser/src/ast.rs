@@ -358,14 +358,18 @@ ast_nodes! {
         var: Var,
     }
 
+    struct Op {
+        '_ str: String,
+    }
+
     struct UnaryExpr {
         expr: Box<Expr>,
-        '_ op: String,
+        op: Op,
     }
 
     struct BinaryExpr {
         left: Box<Expr>,
-        '_ op: String,
+        op: Op,
         right: Box<Expr>,
     }
 

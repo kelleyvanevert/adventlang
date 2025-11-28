@@ -7,6 +7,7 @@ pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
         // MISC.
         // ======
 
+        print: fn(int) -> nil
         print: fn(str) -> nil
         assert: fn(bool) -> nil
         panic: fn<T>() -> T

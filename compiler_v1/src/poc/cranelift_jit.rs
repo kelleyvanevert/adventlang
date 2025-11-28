@@ -268,6 +268,14 @@ pub fn main() -> Result<(), String> {
             builder.def_var(var, res);
         }
 
+        // declaring a variable later on is allowed
+        // (because these are not real 'variables', but just builder-helpers around the SSA-form)
+        {
+            let var = builder.declare_var(I64);
+            let val = builder.ins().iconst(I64, 123);
+            builder.def_var(var, val);
+        }
+
         let ret_val = builder.use_var(var);
         builder.ins().return_(&[ret_val]);
 

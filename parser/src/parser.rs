@@ -1,10 +1,10 @@
-use std::ops::Range;
-
 use fxhash::FxHashMap;
 use thiserror::Error;
 use tree_sitter::{Node, Tree};
 
 use crate::ast::*;
+
+pub use tree_sitter::Range;
 
 #[derive(Debug, Clone)]
 pub struct ParseResult<'a> {
@@ -17,14 +17,14 @@ pub struct ParseResult<'a> {
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
 #[error("{kind}")]
 pub struct ParseError {
-    pub span: Range<usize>,
+    pub span: Range,
     pub kind: ParseErrorKind,
 }
 
 impl ParseError {
     fn expected(expected: &str, node: Node) -> Self {
         Self {
-            span: node.byte_range(),
+            span: node.range(),
             kind: ParseErrorKind::Unexpected(expected.to_string(), node.kind().to_string()),
         }
     }
@@ -112,7 +112,7 @@ impl AdventlangParser {
         root_node.report_any_error()?;
         // if root_node.has_error() {
         //     return Err(ParseError {
-        //         span: root_node.byte_range(),
+        //         span: root_node.range(),
         //         kind: ParseErrorKind::CouldNotParse,
         //     });
         // }
@@ -311,6 +311,13 @@ impl<'a> Converter<'a> {
         }
     }
 
+    fn as_op(&mut self, node: Node) -> Result<Op, ParseError> {
+        Ok(Op {
+            id: self.fresh_ast_node_id(node),
+            str: self.as_str(node)?.trim().to_string(),
+        })
+    }
+
     fn as_expr(&mut self, node: Node) -> Result<Expr, ParseError> {
         match node.kind() {
             "parenthesized_expr" => node.map_child("child", |node| self.as_expr(node)),
@@ -346,15 +353,13 @@ impl<'a> Converter<'a> {
             })),
             "unary_expression" => Ok(Expr::Unary(UnaryExpr {
                 id: self.fresh_ast_node_id(node),
-                op: node.map_child("op", |node| self.as_string(node))?.into(),
+                op: node.map_child("op", |node| self.as_op(node))?.into(),
                 expr: node.map_child("expr", |node| self.as_expr(node))?.into(),
             })),
             "binary_expr" => Ok(Expr::Binary(BinaryExpr {
                 id: self.fresh_ast_node_id(node),
                 left: node.map_child("left", |node| self.as_expr(node))?.into(),
-                op: node
-                    .map_child("operator", |node| self.as_string(node))?
-                    .into(),
+                op: node.map_child("operator", |node| self.as_op(node))?.into(),
                 right: node.map_child("right", |node| self.as_expr(node))?.into(),
             })),
             "list_expr" => Ok(Expr::List(ListExpr {
@@ -401,7 +406,7 @@ impl<'a> Converter<'a> {
                     }))
                 } else {
                     Err(ParseError {
-                        span: node.byte_range(),
+                        span: node.range(),
                         kind: ParseErrorKind::InvalidHashContainer,
                     })
                 }
@@ -473,7 +478,7 @@ impl<'a> Converter<'a> {
                             "escape_sequence" => {
                                 str.push(parse_escape_sequence(self.as_str(child)?).map_err(
                                     |kind| ParseError {
-                                        span: child.byte_range(),
+                                        span: child.range(),
                                         kind,
                                     },
                                 )?);
@@ -879,9 +884,9 @@ impl<'a> Converter<'a> {
             "assign_stmt" => {
                 let pattern = node.map_child("pattern", |node| self.as_assign_pattern(node))?;
                 let expr = node.map_child("expr", |node| self.as_expr(node))?;
-                let op = node.map_child("op", |node| Ok(self.as_str(node)?.trim().to_string()))?;
+                let op = node.map_child("op", |node| self.as_op(node))?;
 
-                if op == "=" {
+                if &op.str == "=" {
                     return Ok(Stmt::Assign(AssignStmt {
                         id: self.fresh_ast_node_id(node),
                         pattern,
@@ -915,7 +920,10 @@ impl<'a> Converter<'a> {
                     expr: Expr::Binary(BinaryExpr {
                         id: self.fresh_ast_node_id(node),
                         left: lefthand_expr.into(),
-                        op: op.strip_suffix('=').unwrap().into(),
+                        op: Op {
+                            id: op.id,
+                            str: op.str.strip_suffix('=').unwrap().to_string(),
+                        },
                         right: expr.into(),
                     }),
                 }))
@@ -928,7 +936,7 @@ impl<'a> Converter<'a> {
         Ok(node
             .utf8_text(self.source.as_bytes())
             .map_err(|_| ParseError {
-                span: node.byte_range(),
+                span: node.range(),
                 kind: ParseErrorKind::InvalidUtf8,
             })?)
     }
@@ -965,7 +973,7 @@ impl<'a> Converter<'a> {
     fn as_int(&mut self, node: Node) -> Result<i64, ParseError> {
         let str = self.as_str(node)?.trim();
         Ok(str.parse().map_err(|_| ParseError {
-            span: node.byte_range(),
+            span: node.range(),
             kind: ParseErrorKind::CannotParseAsInt,
         })?)
     }
@@ -1015,7 +1023,7 @@ impl NodeExt for Node<'_> {
     ) -> Result<T, ParseError> {
         self.map_opt_child(name, f)
             .ok_or_else(|| ParseError {
-                span: self.byte_range(),
+                span: self.range(),
                 kind: ParseErrorKind::Missing(name.to_string()),
             })
             .flatten()
@@ -1024,12 +1032,12 @@ impl NodeExt for Node<'_> {
     fn report_any_error(&self) -> Result<(), ParseError> {
         if self.is_error() {
             return Err(ParseError {
-                span: self.byte_range(),
+                span: self.range(),
                 kind: ParseErrorKind::CouldNotParse,
             });
         } else if self.is_missing() {
             return Err(ParseError {
-                span: self.byte_range(),
+                span: self.range(),
                 kind: ParseErrorKind::Missing(self.kind().to_string()),
             });
         }
@@ -1084,5 +1092,40 @@ fn parse_escape_sequence(escape_str: &str) -> Result<char, ParseErrorKind> {
         }
 
         _ => Err(ParseErrorKind::UnknownEscapeSequence),
+    }
+}
+
+pub fn print_parse_error(source: &str, err: ParseError) {
+    let start_pos = err.span.start_point;
+    let end_pos = err.span.end_point;
+
+    // Split source into lines
+    let lines: Vec<&str> = source.lines().collect();
+
+    // Calculate which lines to show
+    let context_lines = 3;
+    let error_line = start_pos.row;
+    let first_line = error_line.saturating_sub(context_lines);
+    let last_line = (error_line + context_lines).min(lines.len() - 1);
+
+    // Add line numbers and source lines
+    for line_no in first_line..=last_line {
+        if line_no < lines.len() {
+            println!("{:4} | {}", line_no + 1, lines[line_no]);
+
+            // Add error annotation on the line after the error
+            if line_no == error_line {
+                // Calculate the column position for the caret
+                let column = start_pos.column;
+                let spaces = " ".repeat(4 + 3 + column); // 4 for line no, 3 for " | "
+                let carets = "^".repeat(if start_pos.row == end_pos.row {
+                    end_pos.column - start_pos.column
+                } else {
+                    1
+                });
+
+                println!("{}{} {}", spaces, carets, err);
+            }
+        }
     }
 }

@@ -113,6 +113,10 @@ dependencies = [
 name = "compiler"
 version = "0.1.0"
 dependencies = [
+ "cranelift",
+ "cranelift-jit",
+ "cranelift-module",
+ "cranelift-native",
  "fxhash",
  "hexdump",
  "indenter",

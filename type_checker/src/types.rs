@@ -184,6 +184,13 @@ impl Type {
         }
     }
 
+    pub fn as_fn_ty(self) -> FnType {
+        match self {
+            Type::Fn(fn_ty) => fn_ty,
+            ty => panic!("not a fn ty: {:?}", ty),
+        }
+    }
+
     pub fn irreconcilable(&self, other: &Type) -> bool {
         match (self, other) {
             (
