@@ -15,4 +15,8 @@ indenter = "0.3.3"
 safer-ffi = "0.1.13"
 hexdump = "0.1.2"
 parser = { path = "../parser" }
+cranelift = "0.126.1"
+cranelift-native = "0.126.1"
+cranelift-module = "0.126.1"
+cranelift-jit = "0.126.1"
 # ast = { path = "../ast" }

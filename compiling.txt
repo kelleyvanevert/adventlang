@@ -1,0 +1,40 @@
+
+fn bla() {
+    let a = [1, 2, 3]
+    let b = a
+    b
+}
+
+===
+
+let a_ptr = malloc(vec header + 3 * 8 bytes)
+push(a_ptr, 1)
+push(a_ptr, 2)
+push(a_ptr, 3)
+
+let b_str = a_ptr
+
+
+
+
+=== VECTORS
+
+mutable data type, so we don't need a COW, and we don't need an extra indirection to prevent copies
+    value: ptr (=i64)
+    value -> (bufptr, cap, len, ...buf)
+
+
+=== STRINGS
+
+immutable data type, so we need a COW, and an extra indirection to prevent unnecessary copies
+    value: ptr (=i64)
+    value -> (bufptr -> buf, len, nrefs)
+
+example:
+
+    let input = "abc" -- has 1 ref
+    let first_line = input
+        :lines -- underlying data is not copied, but, every line has 2 refs now
+        [0]
+
+    first_line[0] = "k" -- copied

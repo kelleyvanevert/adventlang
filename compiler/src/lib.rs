@@ -3,6 +3,8 @@ use parser::ParseResult;
 use thiserror::Error;
 use type_checker::TypeCheckerCtx;
 
+mod lower;
+
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub enum CompileError {
     #[error("whatever")]
