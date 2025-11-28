@@ -1,3 +1,4 @@
+use cranelift::codegen::write_function;
 use cranelift::prelude::*;
 use cranelift::{codegen::ir::BlockArg, prelude::types::I64};
 use cranelift_jit::{JITBuilder, JITModule};
@@ -83,6 +84,9 @@ pub fn main() -> Result<(), String> {
 
         let ret_val = builder.use_var(var);
         builder.ins().return_(&[ret_val]);
+
+        println!("{}", builder.func.to_string());
+
         builder.finalize();
     }
 
