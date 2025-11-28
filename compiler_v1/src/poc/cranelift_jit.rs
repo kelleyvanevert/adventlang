@@ -1,6 +1,5 @@
-use cranelift::codegen::write_function;
+use cranelift::prelude::types::I64;
 use cranelift::prelude::*;
-use cranelift::{codegen::ir::BlockArg, prelude::types::I64};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{DataDescription, Linkage, Module};
 
@@ -34,7 +33,9 @@ impl JIT {
         let isa = isa_builder
             .finish(settings::Flags::new(flag_builder))
             .unwrap();
-        let builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
+        let mut builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
+
+        builder.symbol("my_add_10", my_add_10 as *const u8);
 
         let module = JITModule::new(builder);
         Self {
@@ -46,8 +47,22 @@ impl JIT {
     }
 }
 
+extern "C" fn my_add_10(x: i64) -> i64 {
+    x + 10
+}
+
 pub fn main() -> Result<(), String> {
     let mut jit = JIT::new();
+
+    let my_add_10_id = {
+        let mut sig = jit.module.make_signature();
+        sig.params.push(AbiParam::new(I64));
+        sig.returns.push(AbiParam::new(I64));
+
+        jit.module
+            .declare_function("my_add_10", Linkage::Import, &sig)
+            .map_err(|e| e.to_string())?
+    };
 
     // translate code
     {
@@ -75,10 +90,22 @@ pub fn main() -> Result<(), String> {
         builder.def_var(var, val);
 
         // using variables multiple times
-        for i in 0..5 {
-            let rhs = builder.use_var(var);
-            let lhs = builder.ins().iconst(I64, i64::from(2));
+        for _ in 0..5 {
+            let lhs = builder.use_var(var);
+            let rhs = builder.ins().iconst(I64, i64::from(2));
             let res = builder.ins().iadd(lhs, rhs);
+            builder.def_var(var, res);
+        }
+
+        // calling external fn (also multiple times)
+        for _ in 0..5 {
+            let f_my_add_10 = jit
+                .module
+                .declare_func_in_func(my_add_10_id, &mut builder.func);
+
+            let arg = builder.use_var(var);
+            let call = builder.ins().call(f_my_add_10, &[arg]);
+            let res = builder.inst_results(call)[0];
             builder.def_var(var, res);
         }
 
