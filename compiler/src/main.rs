@@ -43,7 +43,7 @@ pub fn main() {
 
     let lowered_doc = lowering_pass.lower_doc(&parse_result.document);
 
-    println!("lowered:\n\n{}\n", lowered_doc);
+    println!("\nLOWERED:\n\n{}\n", lowered_doc);
 
     // let mut jit_compiler = JIT::new(&parse_result, &type_checker);
 

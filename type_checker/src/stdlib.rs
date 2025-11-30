@@ -183,7 +183,9 @@ pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
             .convert_hint_to_type(env, &parser.parse_type(hint).unwrap())
             .unwrap()
         {
-            Type::Fn(def) => {
+            Type::Fn(mut def) => {
+                def.meta.builtin = true;
+                def.meta.name = Some(name.to_string());
                 env.add_named_fn_local(0, name.to_string(), def);
             }
             ty => {

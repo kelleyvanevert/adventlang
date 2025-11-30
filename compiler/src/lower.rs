@@ -1,5 +1,6 @@
+use fxhash::FxHashMap;
 use parser::ast::{self, AstNode};
-use type_checker::types::Type as Ty;
+use type_checker::types::{FnType, Type as Ty};
 
 #[derive(Debug, Clone)]
 pub struct Document {
@@ -22,7 +23,7 @@ impl std::fmt::Display for Document {
 
 #[derive(Debug, Clone)]
 pub struct Function {
-    pub name: String,
+    pub id: String,
     pub params: Vec<Ty>,
     pub ret: Ty,
     pub body: Vec<Stmt>,
@@ -30,7 +31,7 @@ pub struct Function {
 
 impl std::fmt::Display for Function {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "fn `{}`(", self.name)?;
+        write!(f, "fn {}(", self.id)?;
         for ty in &self.params {
             write!(f, "{:?}", ty)?;
         }
@@ -54,10 +55,10 @@ pub enum Stmt {
 impl std::fmt::Display for Stmt {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Stmt::Declare(name, expr) => write!(f, "let {name} = {expr};"),
-            Stmt::Assign(name, expr) => write!(f, "{name} = {expr};"),
-            Stmt::Return(expr) => write!(f, "return {expr};"),
-            Stmt::Expr(expr) => write!(f, "{expr};"),
+            Stmt::Declare(name, expr) => write!(f, "let {name} = {expr}"),
+            Stmt::Assign(name, expr) => write!(f, "{name} = {expr}"),
+            Stmt::Return(expr) => write!(f, "return {expr}"),
+            Stmt::Expr(expr) => write!(f, "{expr}"),
         }
     }
 }
@@ -68,8 +69,15 @@ pub enum Expr {
     Param(usize),
     Int(i64),
     Bool(bool),
-    Call(String, Vec<Expr>),
-    Block(Option<String>, Vec<Stmt>),
+    Call {
+        fn_id: String,
+        fn_val: Box<Expr>,
+        args: Vec<Expr>,
+    },
+    Block {
+        label: Option<String>,
+        stmts: Vec<Stmt>,
+    },
     Var(String),
     Coalesce(Box<Expr>, Box<Expr>),
     ListRest(Box<Expr>, usize),
@@ -83,11 +91,15 @@ impl std::fmt::Display for Expr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Expr::Nil => write!(f, "nil"),
-            Expr::Param(index) => write!(f, "param#{index}"),
+            Expr::Param(index) => write!(f, "param-#{index}"),
             Expr::Int(value) => write!(f, "{value}"),
             Expr::Bool(value) => write!(f, "{value}"),
-            Expr::Call(fn_name, args) => {
-                write!(f, "call {fn_name}(")?;
+            Expr::Call {
+                fn_id,
+                fn_val,
+                args,
+            } => {
+                write!(f, "call {fn_id} [{fn_val}] (")?;
                 let mut first = true;
                 for arg in args {
                     if !first {
@@ -98,7 +110,7 @@ impl std::fmt::Display for Expr {
                 }
                 write!(f, ")")
             }
-            Expr::Block(label, body) => write!(f, "<block>"),
+            Expr::Block { label, stmts } => write!(f, "<block>"),
             Expr::Var(name) => write!(f, "{name}"),
             Expr::Coalesce(expr, fallback) => write!(f, "{expr} ?? {fallback}"),
             Expr::ListRest(expr, index) => write!(f, "{expr}[{index}..]"),
@@ -130,6 +142,7 @@ impl std::fmt::Display for Expr {
 pub struct LoweringPass<'a> {
     type_checker: &'a type_checker::TypeCheckerCtx,
     next_tmp_id: usize,
+    concrete_fn_id: FxHashMap<FnType, String>,
 }
 
 impl<'a> LoweringPass<'a> {
@@ -137,7 +150,27 @@ impl<'a> LoweringPass<'a> {
         Self {
             type_checker,
             next_tmp_id: 0,
+            concrete_fn_id: Default::default(),
         }
+    }
+
+    fn get_concrete_fn_id(&mut self, def: FnType) -> String {
+        assert!(def.is_concrete(&vec![]), "lowered fn type must be concrete");
+
+        if let Some(name) = self.concrete_fn_id.get(&def).cloned() {
+            return name;
+        }
+
+        let name = format!(
+            "{}{}-{}",
+            if def.meta.builtin { "@builtin-" } else { "" },
+            def.meta.name.clone().unwrap_or("anonymous".to_string()),
+            self.concrete_fn_id.len()
+        );
+
+        self.concrete_fn_id.insert(def, name.clone());
+
+        name
     }
 
     fn fresh_tmp_var_name(&mut self) -> String {
@@ -155,7 +188,7 @@ impl<'a> LoweringPass<'a> {
         }
 
         fns.push(Function {
-            name: "@document".to_string(),
+            id: "@doc".to_string(),
             params: vec![],
             ret: Ty::Nil,
             body: stmts,
@@ -208,12 +241,15 @@ impl<'a> LoweringPass<'a> {
                         self.lower_unpack_declarable(fns, &mut fn_body_stmts, decl, Expr::Param(i));
                     }
 
-                    for stmt in &body.stmts {
-                        self.lower_stmt(fns, &mut fn_body_stmts, stmt, false);
+                    for (i, stmt) in body.stmts.iter().enumerate() {
+                        let is_last = i == body.stmts.len() - 1;
+                        self.lower_stmt(fns, &mut fn_body_stmts, stmt, is_last);
                     }
 
+                    let id = self.get_concrete_fn_id(usage.clone());
+
                     fns.push(Function {
-                        name: format!("#{}: {:?}", id, usage),
+                        id,
                         params: usage.params.clone(),
                         ret: usage.ret.as_ref().clone(),
                         body: fn_body_stmts,
@@ -303,10 +339,10 @@ impl<'a> LoweringPass<'a> {
                     stmts.push(Stmt::Expr(Expr::Nil));
                 }
 
-                Expr::Block(
-                    label.as_ref().map(|label| label.as_str().to_string()),
+                Expr::Block {
+                    label: label.as_ref().map(|label| label.as_str().to_string()),
                     stmts,
-                )
+                }
             }
             ast::Expr::Binary(ast::BinaryExpr {
                 id,
@@ -314,16 +350,19 @@ impl<'a> LoweringPass<'a> {
                 op,
                 right,
             }) => {
-                let ty = self.type_checker.get_type(op.id()).as_fn_ty();
+                let def = self.type_checker.get_type(op.id()).as_fn_ty();
                 // println!("function: `{}: {:?}`", op.str, ty);
 
-                Expr::Call(
-                    format!("`{}: {:?}`", ty.body_node_id, ty),
-                    vec![
+                let fn_id = self.get_concrete_fn_id(def);
+
+                Expr::Call {
+                    fn_id,
+                    fn_val: Expr::Nil.into(), // irrelevant, in this case
+                    args: vec![
                         self.lower_expr(fns, left, true),
                         self.lower_expr(fns, right, true),
                     ],
-                )
+                }
             }
             ast::Expr::Call(ast::CallExpr {
                 id,
@@ -340,15 +379,19 @@ impl<'a> LoweringPass<'a> {
                 let callee = self.lower_expr(fns, f, true);
 
                 let usage = self.type_checker.get_fn_usage(*id);
-                println!("function: `#{}: {:?}`", usage.body_node_id, usage);
+                // println!("function: `#{}: {:?}`", usage.body_node_id, usage);
 
-                Expr::Call(
-                    format!("`#{}: {:?}`", usage.body_node_id, usage),
+                let fn_id = self.get_concrete_fn_id(usage);
+
+                Expr::Call {
+                    fn_id,
+                    fn_val: callee.into(),
                     // TODO: postfix should first calculate
-                    args.iter()
+                    args: args
+                        .iter()
                         .map(|arg| self.lower_expr(fns, &arg.expr, true))
                         .collect(),
-                )
+                }
             }
             ast::Expr::List(ast::ListExpr {
                 id,

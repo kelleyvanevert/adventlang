@@ -63,9 +63,26 @@ impl UnifyKey for TypeVar {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FnMeta {
+    pub body_node_id: usize,
+    pub name: Option<String>,
+    pub builtin: bool,
+}
+
+impl FnMeta {
+    pub fn none() -> Self {
+        Self {
+            body_node_id: 0,
+            name: None,
+            builtin: false,
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct FnType {
-    pub body_node_id: usize,
+    pub meta: FnMeta,
     pub generics: Vec<TypeVar>,
     pub params: Vec<Type>,
     pub ret: Box<Type>,

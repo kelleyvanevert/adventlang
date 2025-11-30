@@ -13,7 +13,7 @@ use thiserror::Error;
 
 use crate::{
     stdlib::add_stdlib_types,
-    types::{FnType, Type, TypeVar},
+    types::{FnMeta, FnType, Type, TypeVar},
     util::find_unique_match,
 };
 
@@ -396,7 +396,7 @@ struct ChooseOverloadConstraint {
     overloads: Vec<(
         usize,     // overload index
         usize,     // defining node id
-        usize,     // body node id
+        FnMeta,    // fn metadata
         Vec<Type>, // param types + ret type
         FnType,    // just the whole fn ty, in order to record usages
                    //  (yes, there's a bit too much duplication of types by now, haha..)
@@ -545,7 +545,7 @@ impl TypeCheckerCtx {
     pub fn get_fn_usages(&self, body_node_id: usize) -> Vec<FnType> {
         self.fn_usages
             .values()
-            .filter(|f| f.body_node_id == body_node_id)
+            .filter(|f| f.meta.body_node_id == body_node_id)
             .cloned()
             .collect()
     }
@@ -740,8 +740,8 @@ impl TypeCheckerCtx {
 
                         self.depends(
                             dependents,
-                            fn_ty.body_node_id,
-                            !self.named_fn_bodies.contains(&fn_ty.body_node_id),
+                            fn_ty.meta.body_node_id,
+                            !self.named_fn_bodies.contains(&fn_ty.meta.body_node_id),
                         );
 
                         Ok(ConstraintResult::ResolveTo(vec![Constraint::TypeEqual(
@@ -944,8 +944,8 @@ impl TypeCheckerCtx {
 
             self.depends(
                 &choose.dependents,
-                choose.overloads[i].2, // body node id
-                false,                 // ??
+                choose.overloads[i].2.body_node_id, // body node id
+                false,                              // ??
             );
 
             return Ok(res);
@@ -1239,14 +1239,14 @@ impl TypeCheckerCtx {
     fn normalize_fn_ty(
         &mut self,
         FnType {
-            body_node_id,
+            meta,
             generics,
             params,
             ret,
         }: FnType,
     ) -> FnType {
         FnType {
-            body_node_id,
+            meta,
             generics,
             params: params.into_iter().map(|ty| self.normalize_ty(ty)).collect(),
             ret: self.normalize_ty(*ret).into(),
@@ -1342,7 +1342,7 @@ impl TypeCheckerCtx {
                     .collect_vec();
 
                 Ok(Type::Fn(FnType {
-                    body_node_id: 0, // TODO: check: should never be used
+                    meta: FnMeta::none(), // TODO: check: should never be used
                     generics,
                     params: params
                         .into_iter()
@@ -1583,7 +1583,11 @@ impl TypeCheckerCtx {
 
                 self.named_fn_bodies.insert(body.id());
                 let fn_ty = FnType {
-                    body_node_id: body.id(),
+                    meta: FnMeta {
+                        body_node_id: body.id(),
+                        name: Some(name.str.clone()),
+                        builtin: false,
+                    },
                     generics,
                     params,
                     ret: ret.into(),
@@ -1663,9 +1667,8 @@ impl TypeCheckerCtx {
                 let (body_ty, certain_return) =
                     self.infer_block(&mut child_env, body, &vec![body.id()], true, true)?;
 
-                self.named_fn_bodies.insert(body.id());
                 let ty = Type::Fn(FnType {
-                    body_node_id: body.id(),
+                    meta: FnMeta::none(), // TODO: verify that it's never used
                     generics: generics.clone(),
                     params: params.clone(),
                     ret: ret_ty.clone().into(),
@@ -2242,7 +2245,7 @@ impl TypeCheckerCtx {
                 match self.get_local(*id, env, &op.str)? {
                     (def_node_id, Type::Fn(f_ty)) => {
                         self.depends(dependents, def_node_id, false);
-                        self.depends(dependents, f_ty.body_node_id, false);
+                        self.depends(dependents, f_ty.meta.body_node_id, false);
 
                         // instantiate if generic
                         let f_ty = self.instantiate_fn_ty(f_ty, false);
@@ -2288,7 +2291,7 @@ impl TypeCheckerCtx {
                                 let fn_ty = self.instantiate_fn_ty(f_ty, false);
 
                                 let FnType {
-                                    body_node_id,
+                                    meta,
                                     generics: _,
                                     mut params,
                                     ret,
@@ -2296,7 +2299,7 @@ impl TypeCheckerCtx {
 
                                 params.push(*ret);
 
-                                (i, def_node_id, body_node_id, params, fn_ty)
+                                (i, def_node_id, meta, params, fn_ty)
                             })
                             .collect_vec();
 
@@ -2334,7 +2337,7 @@ impl TypeCheckerCtx {
                 match self.get_local(*id, env, &op.str)? {
                     (def_node_id, Type::Fn(f_ty)) => {
                         self.depends(dependents, def_node_id, false);
-                        self.depends(dependents, f_ty.body_node_id, false);
+                        self.depends(dependents, f_ty.meta.body_node_id, false);
 
                         // instantiate if generic
                         let f_ty = self.instantiate_fn_ty(f_ty, false);
@@ -2386,7 +2389,7 @@ impl TypeCheckerCtx {
                                 let fn_ty = self.instantiate_fn_ty(f_ty, false);
 
                                 let FnType {
-                                    body_node_id,
+                                    meta,
                                     generics: _,
                                     mut params,
                                     ret,
@@ -2394,7 +2397,7 @@ impl TypeCheckerCtx {
 
                                 params.push(*ret);
 
-                                (i, def_node_id, body_node_id, params, fn_ty)
+                                (i, def_node_id, meta, params, fn_ty)
                             })
                             .collect_vec();
 
@@ -2602,8 +2605,8 @@ impl TypeCheckerCtx {
                     Type::Fn(f_ty) => {
                         self.depends(
                             dependents,
-                            f_ty.body_node_id,
-                            !self.named_fn_bodies.contains(&f_ty.body_node_id),
+                            f_ty.meta.body_node_id,
+                            !self.named_fn_bodies.contains(&f_ty.meta.body_node_id),
                         );
 
                         // instantiate if generic
@@ -2660,7 +2663,7 @@ impl TypeCheckerCtx {
                             f.id(),
                             Type::TypeVar(v),
                             Type::Fn(FnType {
-                                body_node_id: 0, // TODO check that this is never used
+                                meta: FnMeta::none(), // TODO check that this is never used
                                 generics: vec![],
                                 params,
                                 ret: ret.clone().into(),
@@ -2681,7 +2684,7 @@ impl TypeCheckerCtx {
                         let (_def_node_id, f_ty) = defs[overload_index].clone();
 
                         // self.depends(dependents, def_node_id, false);
-                        self.depends(dependents, f_ty.body_node_id, false);
+                        self.depends(dependents, f_ty.meta.body_node_id, false);
 
                         // instantiate if generic
                         let f_ty = self.instantiate_fn_ty(f_ty, false);
@@ -2738,7 +2741,7 @@ impl TypeCheckerCtx {
                                 let fn_ty = self.instantiate_fn_ty(f_ty, false);
 
                                 let FnType {
-                                    body_node_id,
+                                    meta,
                                     generics: _,
                                     mut params,
                                     ret,
@@ -2746,7 +2749,7 @@ impl TypeCheckerCtx {
 
                                 params.push(*ret);
 
-                                (i, def_node_id, body_node_id, params, fn_ty)
+                                (i, def_node_id, meta, params, fn_ty)
                             })
                             .collect_vec();
 
@@ -2833,7 +2836,11 @@ impl TypeCheckerCtx {
 
                 self.named_fn_bodies.insert(body.id());
                 let ty = Type::Fn(FnType {
-                    body_node_id: body.id(),
+                    meta: FnMeta {
+                        body_node_id: body.id(),
+                        name: None,
+                        builtin: false,
+                    },
                     generics: vec![],
                     params,
                     ret: ret_ty.into(),
@@ -3150,7 +3157,7 @@ impl TypeCheckerCtx {
                 // ))?;
 
                 let mut my_fn_ty = fn_ty.clone();
-                my_fn_ty.body_node_id = body.id();
+                my_fn_ty.meta.body_node_id = body.id();
 
                 return self.assign_extra(*id, Type::Fn(my_fn_ty), false);
             }
