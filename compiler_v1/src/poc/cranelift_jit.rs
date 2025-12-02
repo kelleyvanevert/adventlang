@@ -276,6 +276,38 @@ pub fn main() -> Result<(), String> {
             builder.def_var(var, val);
         }
 
+        // jump to another block and continue computing with variables from an earlier block -> allowed
+        {
+            let second_block = builder.create_block();
+
+            builder.ins().jump(second_block, &[]);
+
+            // create a second block, to see whether variables
+            builder.seal_block(second_block);
+            builder.switch_to_block(second_block);
+
+            let lhs = builder.use_var(var);
+            let rhs = builder.ins().iconst(I64, 1);
+            let res = builder.ins().iadd(lhs, rhs);
+            builder.def_var(var, res);
+        }
+
+        // jump to another block and refer back to a param of an earlier block -> also allowed
+        {
+            let third_block = builder.create_block();
+
+            builder.ins().jump(third_block, &[]);
+
+            // create a second block, to see whether variables
+            builder.seal_block(third_block);
+            builder.switch_to_block(third_block);
+
+            let lhs = builder.use_var(var);
+            let rhs = builder.block_params(entry_block)[0];
+            let res = builder.ins().iadd(lhs, rhs);
+            builder.def_var(var, res);
+        }
+
         let ret_val = builder.use_var(var);
         builder.ins().return_(&[ret_val]);
 
