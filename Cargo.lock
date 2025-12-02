@@ -117,6 +117,7 @@ dependencies = [
  "cranelift-jit",
  "cranelift-module",
  "cranelift-native",
+ "cranelift-reader",
  "fxhash",
  "hexdump",
  "indenter",
@@ -314,6 +315,18 @@ checksum = "2417046989d8d6367a55bbab2e406a9195d176f4779be4aa484d645887217d37"
 dependencies = [
  "cranelift-codegen",
  "libc",
+ "target-lexicon",
+]
+
+[[package]]
+name = "cranelift-reader"
+version = "0.126.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1a6bf19352f8a2cce29ab9b1cd871d4a9829b74e847fdb42a69b3b908a41bb8"
+dependencies = [
+ "anyhow",
+ "cranelift-codegen",
+ "smallvec",
  "target-lexicon",
 ]
 

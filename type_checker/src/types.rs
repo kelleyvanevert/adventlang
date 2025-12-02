@@ -67,7 +67,7 @@ impl UnifyKey for TypeVar {
 pub struct FnMeta {
     pub body_node_id: usize,
     pub name: Option<String>,
-    pub builtin: bool,
+    pub stdlib: bool,
 }
 
 impl FnMeta {
@@ -75,7 +75,7 @@ impl FnMeta {
         Self {
             body_node_id: 0,
             name: None,
-            builtin: false,
+            stdlib: false,
         }
     }
 }

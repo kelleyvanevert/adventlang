@@ -550,6 +550,14 @@ impl TypeCheckerCtx {
             .collect()
     }
 
+    pub fn get_stdlib_fn_usages(&self) -> Vec<FnType> {
+        self.fn_usages
+            .values()
+            .filter(|f| f.meta.stdlib)
+            .cloned()
+            .collect()
+    }
+
     fn fresh_overload_choice_var(&mut self) -> usize {
         let v = self.overload_choices.len();
         self.overload_choices.push(None);
@@ -1586,7 +1594,7 @@ impl TypeCheckerCtx {
                     meta: FnMeta {
                         body_node_id: body.id(),
                         name: Some(name.str.clone()),
-                        builtin: false,
+                        stdlib: false,
                     },
                     generics,
                     params,
@@ -2839,7 +2847,7 @@ impl TypeCheckerCtx {
                     meta: FnMeta {
                         body_node_id: body.id(),
                         name: None,
-                        builtin: false,
+                        stdlib: false,
                     },
                     generics: vec![],
                     params,

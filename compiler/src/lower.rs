@@ -4,7 +4,8 @@ use type_checker::types::{FnType, Type as Ty};
 
 #[derive(Debug, Clone)]
 pub struct Document {
-    fns: Vec<Function>,
+    pub fns: Vec<Function>,
+    pub stdlib_usages: Vec<(String, FnType)>,
 }
 
 impl std::fmt::Display for Document {
@@ -23,7 +24,7 @@ impl std::fmt::Display for Document {
 
 #[derive(Debug, Clone)]
 pub struct Function {
-    pub id: String,
+    pub fn_id: String,
     pub params: Vec<Ty>,
     pub ret: Ty,
     pub body: Vec<Stmt>,
@@ -31,7 +32,7 @@ pub struct Function {
 
 impl std::fmt::Display for Function {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "fn {}(", self.id)?;
+        write!(f, "fn {}(", self.fn_id)?;
         for ty in &self.params {
             write!(f, "{:?}", ty)?;
         }
@@ -163,7 +164,7 @@ impl<'a> LoweringPass<'a> {
 
         let name = format!(
             "{}{}-{}",
-            if def.meta.builtin { "@builtin-" } else { "" },
+            if def.meta.stdlib { "@stdlib-" } else { "" },
             def.meta.name.clone().unwrap_or("anonymous".to_string()),
             self.concrete_fn_id.len()
         );
@@ -188,13 +189,21 @@ impl<'a> LoweringPass<'a> {
         }
 
         fns.push(Function {
-            id: "@doc".to_string(),
+            fn_id: "@doc".to_string(),
             params: vec![],
             ret: Ty::Nil,
             body: stmts,
         });
 
-        Document { fns }
+        Document {
+            fns,
+            stdlib_usages: self
+                .type_checker
+                .get_stdlib_fn_usages()
+                .into_iter()
+                .map(|def| (self.get_concrete_fn_id(def.clone()), def))
+                .collect(),
+        }
     }
 
     fn lower_stmt(
@@ -249,7 +258,7 @@ impl<'a> LoweringPass<'a> {
                     let id = self.get_concrete_fn_id(usage.clone());
 
                     fns.push(Function {
-                        id,
+                        fn_id: id,
                         params: usage.params.clone(),
                         ret: usage.ret.as_ref().clone(),
                         body: fn_body_stmts,

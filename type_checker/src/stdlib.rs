@@ -52,6 +52,8 @@ pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
         // LISTS
         // ======
 
+        new_list: fn<A>() -> [A]
+        push: fn<A>([A], A) -> [A]
         in: fn<A>(A, [A]) -> bool
         in: fn<A>(A, set[A]) -> bool
         filter: fn<A, B>([A], fn(A) -> bool) -> [A]
@@ -184,7 +186,7 @@ pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
             .unwrap()
         {
             Type::Fn(mut def) => {
-                def.meta.builtin = true;
+                def.meta.stdlib = true;
                 def.meta.name = Some(name.to_string());
                 env.add_named_fn_local(0, name.to_string(), def);
             }
