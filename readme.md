@@ -68,11 +68,34 @@ Status:
   - postponed nice-to-haves:
     - named and optional arguments for functions
     - automatic conversions (?) / allowing non-bools in conditions
-- [ ] 0% create a compiler using LLVM
+- [ ] 10% create a compiler
+  - [ ] 10% lowering
+    - [ ] monomorphized implementations of generic functions, etc.
+    - [ ] handling closures correctly: escape analysis, closure structs, etc.
+  - [ ] 10% compiling
+    - [ ] ..
+  - [ ] 10% runtime
+    - [ ] vectors
+    - [ ] garbage collection
 
 Compromises:
 
 - In order to get nullability to work, which was quite a hassle, I decided to lose a bit of the "automagic" behavior I previously had in the interpreted version, where numeric operators and operations like `+` and `:min` would automatically coalesce, etc. So for example, instead of say tricking around with `:min` and starting with `nil`, just start with `MAX_INT`. To get the type system to work without too much extra hassle, I also just re-purposed the `some` keyword as a constructor for creating inhabitants of nullable types. For example: `let x = some 5`. (I removed it from the `if let` construction because it doesn't seem to make any sense there any more.) And finally you just have to use `:is_some` and `:unwrap` here and there. So, essentially, I just made nullable types more like your regular `Option<T>`.
+
+## Pipeline
+
+```
+source code
+  -> parse with Tree-sitter parser     500 lines of code in grammar.js)
+  -> convert to AST                   1100 lines of stupid conversion code in parser.rs)
+  -> type-check                      ±4000 lines of code with quite a bit of logic & trickery
+                                            handling generics, overloads, loops, branches and returns, etc.
+  -> lowering                           ?? lines of code, not super complicated but interesting
+                                            monomorphizing generic functions, converting closures, etc.
+  -> compile using Cranelift            ?? lines of code
+                                            mostly tying things together with the runtime
+  -> execute
+```
 
 ## Example (Advent of Code 2023, day 4)
 
