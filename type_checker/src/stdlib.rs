@@ -1,6 +1,9 @@
 use parser::AdventlangParser;
 
-use crate::{Env, TypeCheckerCtx, types::Type};
+use crate::{
+    Env, TypeCheckerCtx,
+    types::{FnMeta, Type},
+};
 
 pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
     let stdlib = "
@@ -186,8 +189,7 @@ pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
             .unwrap()
         {
             Type::Fn(mut def) => {
-                def.meta.stdlib = true;
-                def.meta.name = Some(name.to_string());
+                def.meta = FnMeta::stdlib(name.to_string());
                 env.add_named_fn_local(0, name.to_string(), def);
             }
             ty => {

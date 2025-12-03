@@ -1,18 +1,21 @@
 use std::error::Error;
 
 use cranelift::codegen::verifier::{VerifierError, VerifierErrors};
+use cranelift::prelude::isa::CallConv;
 use cranelift::prelude::*;
 use cranelift::{codegen::CodegenError, prelude::types::I64};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{DataDescription, FuncId, Linkage, Module, ModuleError};
 use fxhash::FxHashMap;
 use thiserror::Error;
-use type_checker::types::FnType;
+use type_checker::types::{FnMeta, FnType};
 use type_checker::{TypeCheckerCtx, types::Type as Ty};
 
-use crate::stdlib_impl::{implement_stdlib_plus, implement_stdlib_print};
+use crate::runtime::Runtime;
+use crate::stdlib_impl::{implement_stdlib_len, implement_stdlib_plus, implement_stdlib_print};
 
 pub mod lower;
+mod runtime;
 mod stdlib_impl;
 
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
@@ -66,8 +69,11 @@ pub struct JIT<'a> {
     /// functions.
     module: JITModule,
 
+    /// Runtime Fn ID map
+    runtime_fns: Runtime,
+
     /// Fn ID map
-    fn_ids: FxHashMap<String, FuncId>,
+    fn_ids: FxHashMap<String, (FuncId, Signature, FnType, bool)>,
 }
 
 impl<'a> JIT<'a> {
@@ -83,15 +89,7 @@ impl<'a> JIT<'a> {
             .unwrap();
         let builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
 
-        // builder.symbol("my_add_10", my_add_10 as *const u8);
-        // builder.symbol("al_create_vec", al_create_vec as *const u8);
-        // builder.symbol("al_index_vec_32", al_index_vec::<u32> as *const u8);
-        // builder.symbol("al_index_vec_64", al_index_vec::<u64> as *const u8);
-        // builder.symbol("al_push_vec_32", al_push_vec::<u32> as *const u8);
-        // builder.symbol("al_push_vec_64", al_push_vec::<u64> as *const u8);
-        // builder.symbol("al_vec_len", al_vec_len as *const u8);
-
-        let module = JITModule::new(builder);
+        let (module, runtime_fns) = Runtime::new(builder);
 
         Self {
             type_checker,
@@ -100,40 +98,14 @@ impl<'a> JIT<'a> {
             ctx: module.make_context(),
             data_description: DataDescription::new(),
             module,
+            runtime_fns,
 
             fn_ids: Default::default(),
         }
     }
 
     pub fn compile_doc(&mut self, doc: &lower::Document) -> Result<(), CompileError> {
-        // Stdlib
-        {
-            // Declarations
-            for (fn_name, f) in &doc.stdlib_usages {
-                // declare signature
-                let mut sig = Signature::new(self.ctx.func.signature.call_conv);
-                for _ in &f.params {
-                    sig.params.push(AbiParam::new(I64));
-                }
-                sig.returns.push(AbiParam::new(I64));
-
-                let id = self
-                    .module
-                    .declare_function(&fn_name, Linkage::Export, &sig)
-                    .map_err(|e| CompileError::ModuleError(e.to_string()))?;
-
-                self.fn_ids.insert(fn_name.clone(), id);
-            }
-
-            // Implementations
-            for (fn_name, f) in &doc.stdlib_usages {
-                self.compile_stdlib_fn(
-                    self.fn_ids[fn_name],
-                    f.meta.name.as_ref().unwrap(),
-                    f.params.clone(),
-                )?;
-            }
-        }
+        // println!("Compiling user defined code...");
 
         // User defined code
         {
@@ -143,7 +115,7 @@ impl<'a> JIT<'a> {
             for f in &doc.fns {
                 // declare signature
                 let mut sig = Signature::new(self.ctx.func.signature.call_conv);
-                for _ in &f.params {
+                for _ in &f.def.params {
                     sig.params.push(AbiParam::new(I64));
                 }
                 sig.returns.push(AbiParam::new(I64));
@@ -153,31 +125,58 @@ impl<'a> JIT<'a> {
                     .declare_function(&f.fn_id, Linkage::Export, &sig)
                     .map_err(|e| CompileError::ModuleError(e.to_string()))?;
 
-                self.fn_ids.insert(f.fn_id.clone(), id);
+                self.fn_ids
+                    .insert(f.fn_id.clone(), (id, sig, f.def.clone(), true));
 
                 compiled_fn_ids.push(id);
             }
 
             // Implementations
             for (i, f) in doc.fns.iter().enumerate() {
+                // println!("  Implementing {}: {:?}", f.fn_id, f.def);
                 self.compile_fn(compiled_fn_ids[i], f)?;
             }
         }
 
+        // println!("Now, declaring used stdlib fns...");
+        while let Some((name, id, sig, def)) = self.find_uncompiled() {
+            // println!("  Declaring {name}: {def:?}");
+            if def.meta.stdlib {
+                self.compile_stdlib_fn(id, sig.clone(), def.clone())?;
+            } else {
+                todo!()
+            }
+
+            // println!(" -> DONE");
+            self.fn_ids.get_mut(&name).unwrap().3 = true;
+        }
+
+        self.module
+            .finalize_definitions()
+            .expect("can finalize definitions");
+
         Ok(())
+    }
+
+    fn find_uncompiled(&self) -> Option<(String, FuncId, Signature, FnType)> {
+        self.fn_ids
+            .iter()
+            .find_map(|(name, (id, sig, ty, compiled))| {
+                if !*compiled {
+                    Some((name.clone(), *id, sig.clone(), ty.clone()))
+                } else {
+                    None
+                }
+            })
     }
 
     pub fn compile_stdlib_fn(
         &mut self,
         fn_id: FuncId,
-        name: &str,
-        params: Vec<Ty>,
+        sig: Signature,
+        def: FnType,
     ) -> Result<(), CompileError> {
-        // declare signature
-        for _ in &params {
-            self.ctx.func.signature.params.push(AbiParam::new(I64));
-        }
-        self.ctx.func.signature.returns.push(AbiParam::new(I64));
+        self.ctx.func.signature = sig;
 
         // start building
         let mut builder = FunctionBuilder::new(&mut self.ctx.func, &mut self.builder_context);
@@ -186,10 +185,11 @@ impl<'a> JIT<'a> {
         builder.switch_to_block(entry_block);
         builder.seal_block(entry_block);
 
-        match name {
-            "print" => implement_stdlib_print(&mut builder),
-            "+" => implement_stdlib_plus(&mut builder),
-            _ => todo!("implement stdlib fn {name}"),
+        match def.meta.name.unwrap().as_str() {
+            "print" => implement_stdlib_print(&mut self.module, &mut builder, &self.runtime_fns),
+            "+" => implement_stdlib_plus(&mut self.module, &mut builder, &self.runtime_fns),
+            "len" => implement_stdlib_len(&mut self.module, &mut builder, &self.runtime_fns),
+            name => todo!("implement stdlib fn {name}"),
         }
 
         builder.finalize();
@@ -211,26 +211,19 @@ impl<'a> JIT<'a> {
 
         self.module.clear_context(&mut self.ctx);
 
-        self.module
-            .finalize_definitions()
-            .expect("can finalize definitions");
-
         Ok(())
     }
 
-    pub fn compile_fn(
-        &mut self,
-        fn_id: FuncId,
-        f: &lower::Function,
-    ) -> Result<*const u8, CompileError> {
+    pub fn compile_fn(&mut self, fn_id: FuncId, f: &lower::Function) -> Result<(), CompileError> {
         {
             // declare signature
-            for _ in &f.params {
+            for _ in &f.def.params {
                 self.ctx.func.signature.params.push(AbiParam::new(I64));
             }
             self.ctx.func.signature.returns.push(AbiParam::new(I64));
 
             // start building
+            let call_conv = self.ctx.func.signature.call_conv;
             let mut builder = FunctionBuilder::new(&mut self.ctx.func, &mut self.builder_context);
             let entry_block = builder.create_block();
             builder.append_block_params_for_function_params(entry_block);
@@ -243,7 +236,9 @@ impl<'a> JIT<'a> {
                 module: &mut self.module,
                 type_checker: &self.type_checker,
                 entry_block,
-                fn_ids: &self.fn_ids,
+                call_conv,
+                runtime_fns: &self.runtime_fns,
+                fn_ids: &mut self.fn_ids,
             };
 
             for (i, stmt) in f.body.iter().enumerate() {
@@ -251,7 +246,7 @@ impl<'a> JIT<'a> {
                 translator.translate_stmt(stmt, is_last);
             }
 
-            println!("// {}: {:?} -> {:?}", f.fn_id, f.params, f.ret);
+            println!("// {}: {:?}", f.fn_id, f.def);
             println!("{}", translator.builder.func.to_string());
 
             translator.builder.finalize();
@@ -274,13 +269,7 @@ impl<'a> JIT<'a> {
 
         self.module.clear_context(&mut self.ctx);
 
-        self.module
-            .finalize_definitions()
-            .expect("can finalize definitions");
-
-        let code_ptr = self.module.get_finalized_function(fn_id);
-
-        Ok(code_ptr)
+        Ok(())
     }
 }
 
@@ -290,10 +279,38 @@ struct FnTranslator<'a> {
     module: &'a mut JITModule,
     type_checker: &'a TypeCheckerCtx,
     entry_block: Block,
-    fn_ids: &'a FxHashMap<String, FuncId>,
+    call_conv: CallConv,
+    runtime_fns: &'a Runtime,
+    fn_ids: &'a mut FxHashMap<String, (FuncId, Signature, FnType, bool)>,
 }
 
 impl<'a> FnTranslator<'a> {
+    fn ensure_gets_compiled(&mut self, name: &str, def: FnType) -> Result<FuncId, CompileError> {
+        // println!("    Ensuring gets compiled: {}: {:?}", name, def);
+
+        if let Some((id, _, _, _)) = self.fn_ids.get(name).cloned() {
+            return Ok(id);
+        }
+
+        // declare signature
+        let mut sig = Signature::new(self.call_conv);
+        for _ in &def.params {
+            sig.params.push(AbiParam::new(I64));
+        }
+        sig.returns.push(AbiParam::new(I64));
+
+        let id = self
+            .module
+            .declare_function(name, Linkage::Export, &sig)
+            .map_err(|e| CompileError::ModuleError(e.to_string()))?;
+
+        // println!("    Ensuring declaration of: {}: {:?}", name, def);
+
+        self.fn_ids.insert(name.to_string(), (id, sig, def, false));
+
+        Ok(id)
+    }
+
     fn get_nil_val(&mut self) -> Value {
         self.builder.ins().iconst(I64, 0)
     }
@@ -344,18 +361,24 @@ impl<'a> FnTranslator<'a> {
             lower::Expr::Int(value) => self.builder.ins().iconst(I64, *value),
             lower::Expr::Bool(value) => self.builder.ins().iconst(I64, *value as i64),
             lower::Expr::Call {
+                def,
                 fn_id,
                 fn_val,
                 args,
             } => {
-                let compiled_fn_id = *self
-                    .fn_ids
-                    .get(fn_id)
-                    .expect(&format!("have fn_id {:?}", fn_id));
+                // println!("    Needs {}", fn_id);
+                let compiled_fn_id = self.ensure_gets_compiled(fn_id, def.clone()).expect("msg");
+                // println!("      -> {}", compiled_fn_id);
+
+                // let (compiled_fn_id, _, _) = *self
+                //     .fn_ids
+                //     .get(fn_id)
+                //     .expect(&format!("have fn_id {:?}", fn_id));
 
                 let compiled_fn_ref = self
                     .module
                     .declare_func_in_func(compiled_fn_id, &mut self.builder.func);
+                // println!("      ->> {}", compiled_fn_ref);
 
                 let args = args
                     .into_iter()
@@ -377,38 +400,56 @@ impl<'a> FnTranslator<'a> {
             }
             // lower::Expr::Coalesce(Box<Expr>, Box<Expr>),
             // lower::Expr::ListRest(Box<Expr>, usize),
-            // lower::Expr::ListIndex(Box<Expr>, usize),
+            lower::Expr::ListIndex(list, index) => {
+                let list_ptr = self.translate_expr(list);
+                let index = self.translate_expr(index);
+
+                // Access
+                {
+                    let fn_ref = self.module.declare_func_in_func(
+                        self.runtime_fns.al_index_vec_64,
+                        &mut self.builder.func,
+                    );
+
+                    let call = self.builder.ins().call(fn_ref, &[list_ptr, index]);
+                    self.builder.inst_results(call)[0]
+                }
+            }
             lower::Expr::List(elements, rest) => {
-                // let h = self.fn_ids["@builtin-create-list"];
-                todo!()
+                // Create list
+                let list_ptr = {
+                    let fn_ref = self.module.declare_func_in_func(
+                        self.runtime_fns.al_create_vec,
+                        &mut self.builder.func,
+                    );
+
+                    let el_size_bits = self.builder.ins().iconst(I64, 64);
+                    let is_ptrs = self.builder.ins().iconst(I64, 0);
+
+                    let call = self.builder.ins().call(fn_ref, &[el_size_bits, is_ptrs]);
+                    self.builder.inst_results(call)[0]
+                };
+
+                // Push elements
+                for el in elements {
+                    let fn_ref = self.module.declare_func_in_func(
+                        self.runtime_fns.al_push_vec_64,
+                        &mut self.builder.func,
+                    );
+
+                    let val = self.translate_expr(el);
+                    let call = self.builder.ins().call(fn_ref, &[list_ptr, val]);
+                }
+
+                // TODO: maybe push rest
+                {
+                    // ...
+                }
+
+                list_ptr
             }
             // lower::Expr::TupleIndex(Box<Expr>, usize),
             // lower::Expr::If(Box<Expr>, Box<Expr>, Box<Expr>),
-            //
-            // ast::Expr::Int(ast::IntExpr { id, value }) => self.builder.ins().iconst(I64, *value),
-            // ast::Expr::Binary(ast::BinaryExpr {
-            //     id,
-            //     left,
-            //     op,
-            //     right,
-            // }) if &op.str == "+" => {
-            //     let lhs = self.translate_expr(left, true);
-            //     let rhs = self.translate_expr(right, true);
-            //     self.builder.ins().iadd(lhs, rhs)
-            // }
-            // ast::Expr::Var(ast::VarExpr { id, var }) => {
-            //     let (v, ty) = self.env.locals.get(var.as_str()).unwrap().clone();
-            //     self.builder.use_var(v)
-            // }
-            // ast::Expr::Call(ast::CallExpr {
-            //     id,
-            //     f,
-            //     postfix,
-            //     coalesce,
-            //     args,
-            // }) => {
-            //     todo!()
-            // }
             _ => todo!("translate expr: {:?}", expr),
         }
     }

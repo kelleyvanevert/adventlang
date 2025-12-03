@@ -7,10 +7,18 @@ pub fn main() {
         let a = 4
         let b = a + 2
         print(a)
-        bla([4])
         bla([true])
+        bla([4], a)
 
-        fn bla<T>(a: [T]) { 42 }
+        let bla = [1, 2, 3]:len
+
+        fn bla<T>(arr: [T], index: int) -> T {
+            arr[index]
+        }
+
+        fn bla<T>(arr: [T]) -> T {
+            arr[0]
+        }
     ";
 
     // let source = "

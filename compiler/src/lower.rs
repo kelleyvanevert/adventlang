@@ -1,6 +1,6 @@
 use fxhash::FxHashMap;
 use parser::ast::{self, AstNode};
-use type_checker::types::{FnType, Type as Ty};
+use type_checker::types::{FnMeta, FnType, Type as Ty};
 
 #[derive(Debug, Clone)]
 pub struct Document {
@@ -25,18 +25,17 @@ impl std::fmt::Display for Document {
 #[derive(Debug, Clone)]
 pub struct Function {
     pub fn_id: String,
-    pub params: Vec<Ty>,
-    pub ret: Ty,
+    pub def: FnType,
     pub body: Vec<Stmt>,
 }
 
 impl std::fmt::Display for Function {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "fn {}(", self.fn_id)?;
-        for ty in &self.params {
+        for ty in &self.def.params {
             write!(f, "{:?}", ty)?;
         }
-        write!(f, ") -> {:?} {{\n", self.ret)?;
+        write!(f, ") -> {:?} {{\n", self.def.ret)?;
         for stmt in &self.body {
             write!(f, "  {}\n", stmt)?;
         }
@@ -71,6 +70,7 @@ pub enum Expr {
     Int(i64),
     Bool(bool),
     Call {
+        def: FnType,
         fn_id: String,
         fn_val: Box<Expr>,
         args: Vec<Expr>,
@@ -82,7 +82,7 @@ pub enum Expr {
     Var(String),
     Coalesce(Box<Expr>, Box<Expr>),
     ListRest(Box<Expr>, usize),
-    ListIndex(Box<Expr>, usize),
+    ListIndex(Box<Expr>, Box<Expr>),
     List(Vec<Expr>, Option<Box<Expr>>),
     TupleIndex(Box<Expr>, usize),
     If(Box<Expr>, Box<Expr>, Box<Expr>),
@@ -96,6 +96,7 @@ impl std::fmt::Display for Expr {
             Expr::Int(value) => write!(f, "{value}"),
             Expr::Bool(value) => write!(f, "{value}"),
             Expr::Call {
+                def: _,
                 fn_id,
                 fn_val,
                 args,
@@ -190,8 +191,12 @@ impl<'a> LoweringPass<'a> {
 
         fns.push(Function {
             fn_id: "@doc".to_string(),
-            params: vec![],
-            ret: Ty::Nil,
+            def: FnType {
+                meta: FnMeta::none(),
+                generics: vec![],
+                params: vec![],
+                ret: Ty::Nil.into(),
+            },
             body: stmts,
         });
 
@@ -241,7 +246,7 @@ impl<'a> LoweringPass<'a> {
                 // (TODO: closure stuff)
                 // println!("Usages of named fn:");
 
-                for usage in self.type_checker.get_fn_usages(body.id()) {
+                for def in self.type_checker.get_fn_usages(body.id()) {
                     // println!("- {usage:?}");
 
                     let mut fn_body_stmts = vec![];
@@ -255,12 +260,11 @@ impl<'a> LoweringPass<'a> {
                         self.lower_stmt(fns, &mut fn_body_stmts, stmt, is_last);
                     }
 
-                    let id = self.get_concrete_fn_id(usage.clone());
+                    let id = self.get_concrete_fn_id(def.clone());
 
                     fns.push(Function {
                         fn_id: id,
-                        params: usage.params.clone(),
-                        ret: usage.ret.as_ref().clone(),
+                        def,
                         body: fn_body_stmts,
                     });
                 }
@@ -288,7 +292,7 @@ impl<'a> LoweringPass<'a> {
                         fns,
                         stmts,
                         el,
-                        Expr::ListIndex(Expr::Var(tmp.clone()).into(), i),
+                        Expr::ListIndex(Expr::Var(tmp.clone()).into(), Expr::Int(i as i64).into()),
                     );
                 }
                 if let Some(ast::DeclareRest { var, .. }) = rest {
@@ -362,9 +366,10 @@ impl<'a> LoweringPass<'a> {
                 let def = self.type_checker.get_type(op.id()).as_fn_ty();
                 // println!("function: `{}: {:?}`", op.str, ty);
 
-                let fn_id = self.get_concrete_fn_id(def);
+                let fn_id = self.get_concrete_fn_id(def.clone());
 
                 Expr::Call {
+                    def,
                     fn_id,
                     fn_val: Expr::Nil.into(), // irrelevant, in this case
                     args: vec![
@@ -387,12 +392,13 @@ impl<'a> LoweringPass<'a> {
                 // what to do?
                 let callee = self.lower_expr(fns, f, true);
 
-                let usage = self.type_checker.get_fn_usage(*id);
+                let def = self.type_checker.get_fn_usage(*id);
                 // println!("function: `#{}: {:?}`", usage.body_node_id, usage);
 
-                let fn_id = self.get_concrete_fn_id(usage);
+                let fn_id = self.get_concrete_fn_id(def.clone());
 
                 Expr::Call {
+                    def,
                     fn_id,
                     fn_val: callee.into(),
                     // TODO: postfix should first calculate
@@ -414,6 +420,15 @@ impl<'a> LoweringPass<'a> {
                 splat
                     .as_ref()
                     .map(|expr| self.lower_expr(fns, expr.as_ref(), true).into()),
+            ),
+            ast::Expr::Index(ast::IndexExpr {
+                id,
+                expr,
+                coalesce,
+                index,
+            }) => Expr::ListIndex(
+                self.lower_expr(fns, expr, true).into(),
+                self.lower_expr(fns, index, true).into(),
             ),
             _ => todo!("lower expr {:?}", expr),
         }

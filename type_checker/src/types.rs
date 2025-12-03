@@ -78,6 +78,14 @@ impl FnMeta {
             stdlib: false,
         }
     }
+
+    pub fn stdlib(name: String) -> Self {
+        Self {
+            body_node_id: 0,
+            name: Some(name),
+            stdlib: true,
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Hash)]
