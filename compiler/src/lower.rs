@@ -79,7 +79,11 @@ pub enum Expr {
         label: Option<String>,
         stmts: Vec<Stmt>,
     },
-    Var(String),
+    Local(String),
+    FnRef {
+        def: FnType,
+        fn_id: String,
+    },
     Coalesce(Box<Expr>, Box<Expr>),
     ListRest(Box<Expr>, usize),
     ListIndex(Box<Expr>, Box<Expr>),
@@ -113,7 +117,8 @@ impl std::fmt::Display for Expr {
                 write!(f, ")")
             }
             Expr::Block { label: _, stmts: _ } => write!(f, "<block>"),
-            Expr::Var(name) => write!(f, "{name}"),
+            Expr::Local(name) => write!(f, "{name}"),
+            Expr::FnRef { def, fn_id } => write!(f, "<fn-ref>"),
             Expr::Coalesce(expr, fallback) => write!(f, "{expr} ?? {fallback}"),
             Expr::ListRest(expr, index) => write!(f, "{expr}[{index}..]"),
             Expr::ListIndex(expr, index) => write!(f, "{expr}[{index}"),
@@ -292,13 +297,16 @@ impl<'a> LoweringPass<'a> {
                         fns,
                         stmts,
                         el,
-                        Expr::ListIndex(Expr::Var(tmp.clone()).into(), Expr::Int(i as i64).into()),
+                        Expr::ListIndex(
+                            Expr::Local(tmp.clone()).into(),
+                            Expr::Int(i as i64).into(),
+                        ),
                     );
                 }
                 if let Some(ast::DeclareRest { var, .. }) = rest {
                     stmts.push(Stmt::Declare(
                         var.as_str().to_string(),
-                        Expr::ListRest(Expr::Var(tmp.clone()).into(), elements.len()),
+                        Expr::ListRest(Expr::Local(tmp.clone()).into(), elements.len()),
                     ));
                 }
             }
@@ -310,7 +318,7 @@ impl<'a> LoweringPass<'a> {
                         fns,
                         stmts,
                         el,
-                        Expr::TupleIndex(Expr::Var(tmp.clone()).into(), i),
+                        Expr::TupleIndex(Expr::Local(tmp.clone()).into(), i),
                     );
                 }
             }
@@ -337,7 +345,18 @@ impl<'a> LoweringPass<'a> {
 
     fn lower_expr(&mut self, fns: &mut Vec<Function>, expr: &ast::Expr, use_result: bool) -> Expr {
         match expr {
-            ast::Expr::Var(ast::VarExpr { var, .. }) => Expr::Var(var.name.to_string()),
+            ast::Expr::Var(ast::VarExpr { id, var }) => {
+                let ty = self.type_checker.get_type(*id);
+                println!("lowering var {}", var.name.to_string());
+                println!("  of type: {:?}", ty);
+                match ty {
+                    Ty::Fn(def) => Expr::FnRef {
+                        fn_id: self.get_concrete_fn_id(def.clone()),
+                        def,
+                    },
+                    _ => Expr::Local(var.name.to_string()),
+                }
+            }
             ast::Expr::Int(ast::IntExpr { value, .. }) => Expr::Int(*value),
             ast::Expr::Bool(ast::BoolExpr { value, .. }) => Expr::Bool(*value),
             ast::Expr::Do(ast::DoExpr { label, body, .. }) => {

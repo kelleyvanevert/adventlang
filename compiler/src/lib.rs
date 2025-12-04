@@ -109,13 +109,12 @@ impl<'a> JIT<'a> {
     }
 
     pub fn compile_doc(&mut self, doc: &lower::Document) -> Result<*const u8, CompileError> {
-        // println!("Compiling user defined code...");
-
         // User defined code
         {
             let mut compiled_fn_ids = vec![];
 
             // Declarations
+            println!("Declaring user defined fns...");
             for f in &doc.fns {
                 // declare signature
                 let mut sig = Signature::new(self.ctx.func.signature.call_conv);
@@ -128,6 +127,8 @@ impl<'a> JIT<'a> {
                     .module
                     .declare_function(&f.fn_id, Linkage::Export, &sig)
                     .map_err(|e| CompileError::ModuleError(e.to_string()))?;
+
+                println!("  - {}: {:?}", f.fn_id, f.def);
 
                 self.fn_ids
                     .insert(f.fn_id.clone(), (id, sig, f.def.clone(), true));
@@ -144,10 +145,11 @@ impl<'a> JIT<'a> {
 
         // println!("Now, declaring used stdlib fns...");
         while let Some((name, id, sig, def)) = self.find_uncompiled() {
-            // println!("  Declaring {name}: {def:?}");
             if def.meta.stdlib {
                 self.compile_stdlib_fn(id, sig.clone(), def.clone())?;
             } else {
+                println!("  Hmm, declaring user-defined fn {name}: {def:?}");
+                println!("   meta: {:?}", def.meta);
                 todo!()
             }
 
@@ -300,11 +302,12 @@ struct FnTranslator<'a> {
 
 impl<'a> FnTranslator<'a> {
     fn ensure_gets_compiled(&mut self, name: &str, def: FnType) -> Result<FuncId, CompileError> {
-        // println!("    Ensuring gets compiled: {}: {:?}", name, def);
-
+        println!("    Ensuring gets compiled: {}: {:?}", name, def);
         if let Some((id, _, _, _)) = self.fn_ids.get(name).cloned() {
             return Ok(id);
         }
+
+        println!("      new: {}: {:?}", name, def);
 
         // declare signature
         let mut sig = Signature::new(self.call_conv);
@@ -408,9 +411,20 @@ impl<'a> FnTranslator<'a> {
             //     label: Option<String>,
             //     stmts: Vec<Stmt>,
             // },
-            lower::Expr::Var(name) => {
+            lower::Expr::Local(name) => {
                 let var = self.env.get_local(name);
                 self.builder.use_var(var)
+            }
+            lower::Expr::FnRef { def, fn_id } => {
+                let compiled_fn_id = self.ensure_gets_compiled(fn_id, def.clone()).expect("msg");
+
+                let compiled_fn_ref = self
+                    .module
+                    .declare_func_in_func(compiled_fn_id, &mut self.builder.func);
+
+                let fn_ptr = self.builder.ins().func_addr(I64, compiled_fn_ref);
+
+                fn_ptr
             }
             // lower::Expr::Coalesce(Box<Expr>, Box<Expr>),
             // lower::Expr::ListRest(Box<Expr>, usize),

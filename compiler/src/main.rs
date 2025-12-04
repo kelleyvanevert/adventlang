@@ -3,33 +3,44 @@ use parser::{AdventlangParser, print_parse_error};
 use type_checker::{TypeCheckerCtx, print_type_error};
 
 pub fn main() {
+    //     let source = "
+    //         let a = 4
+    //         let b = a + 2
+    //         print(b)
+    //         print(stdin() :trim)
+    //         print(b)
+    //         print([1, 2, 3, 4] :len)
+
+    // //        bla([true])
+    // //        bla([4], a)
+    // //
+    // //        let bla = [1, 2, 3]:len
+    // //
+    // //        fn bla<T>(arr: [T], index: int) -> T {
+    // //            arr[index]
+    // //        }
+    // //
+    // //        fn bla<T>(arr: [T]) -> T {
+    // //            arr[0]
+    // //        }
+    //     ";
+
     let source = "
-        let a = 4
-        let b = a + 2
-        print(b)
-        print(stdin() :trim)
-        print(b)
-        print([1, 2, 3, 4] :len)
+        fn add_one(n: int) {
+          n + 1
+        }
 
-//        bla([true])
-//        bla([4], a)
-//
-//        let bla = [1, 2, 3]:len
-//
-//        fn bla<T>(arr: [T], index: int) -> T {
-//            arr[index]
-//        }
-//
-//        fn bla<T>(arr: [T]) -> T {
-//            arr[0]
-//        }
+        fn add_two(n: int) {
+          n + 2
+        }
+
+        fn some_fn(f: fn(int) -> int) -> int {
+          f(10)
+        }
+
+        print(some_fn(add_one)) // 11
+        print(some_fn(add_two)) // 12
     ";
-
-    // let source = "
-    //     let a = 4
-    //     let b = a + 6
-    //     print(b)
-    // ";
 
     let mut parser = AdventlangParser::new();
     let parse_result = match parser.parse_document(source) {

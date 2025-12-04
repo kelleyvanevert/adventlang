@@ -547,6 +547,7 @@ impl TypeCheckerCtx {
             .values()
             .filter(|f| f.meta.body_node_id == body_node_id)
             .cloned()
+            .unique()
             .collect()
     }
 
@@ -555,6 +556,7 @@ impl TypeCheckerCtx {
             .values()
             .filter(|f| f.meta.stdlib)
             .cloned()
+            .unique()
             .collect()
     }
 
