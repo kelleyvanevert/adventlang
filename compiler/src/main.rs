@@ -9,6 +9,7 @@ pub fn main() {
         print(b)
         print(stdin() :trim)
         print(b)
+        print([1, 2, 3, 4] :len)
 
 //        bla([true])
 //        bla([4], a)

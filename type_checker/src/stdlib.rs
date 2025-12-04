@@ -23,6 +23,7 @@ pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
         // ======
 
         stdin: fn() -> str
+        read_file: fn(str) -> str
         trim: fn(str) -> str
         split: fn(str, str) -> [str]
         split: fn(str, regex) -> [str]

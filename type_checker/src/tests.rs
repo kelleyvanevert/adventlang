@@ -236,4 +236,5 @@ run_test_cases_in_file!(nullability);
 run_test_cases_in_file!(named_fn_overloading);
 run_test_cases_in_file!(lists_dicts_tuples_indexing);
 run_test_cases_in_file!(structs);
+run_test_cases_in_file!(fn_types);
 run_test_cases_in_file!(aoc_examples);

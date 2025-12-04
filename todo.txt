@@ -890,6 +890,28 @@ also: https://cheats.rs/
 
 ===
 
-struct TyCtx {
-    vars: HashMap<Var, Ty>,
-}
+
+TYPE                            REPRESENTATION
+---                             ---
+Nil                             I64
+Bool                            I64 (could also be anything else)
+Str                             I64 (ptr to AlStr)
+Int                             I64
+Float                           F64
+Regex                           I64 (ptr to AlRegex)
+Fn(FnType)                 ?? .... closure stuff
+List(el)                        I64 (ptr to AlVec)
+Tuple(els)                 ??   I64 (ptr to tuple struct)   --- or ---   (...types of els...)
+Struct { fields }               I64 (ptr to struct)
+Map { key, val }                I64 (ptr to FxHashMap)
+Set { key }                     I64 (ptr to FxHashSet)
+Nullable { child }         ??   I64 (NULL or ptr to el)   --- or ---   I128 (null flag + child)
+Never                           INVALID
+
+heap allocated:
+    regex
+    list
+    str
+    tuples
+    map
+    set
