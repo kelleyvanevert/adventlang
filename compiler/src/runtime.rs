@@ -12,6 +12,7 @@ thread_local! {
 
 #[derive(Debug)]
 pub struct Runtime {
+    pub al_print: FuncId,
     pub al_create_vec: FuncId,
     pub al_push_vec_64: FuncId,
     pub al_index_vec_64: FuncId,
@@ -20,12 +21,23 @@ pub struct Runtime {
 
 impl Runtime {
     pub fn new(mut builder: JITBuilder) -> (JITModule, Self) {
+        builder.symbol("al_print", al_print as *const u8);
         builder.symbol("al_create_vec", al_create_vec as *const u8);
         builder.symbol("al_push_vec_64", al_push_vec::<u64> as *const u8);
         builder.symbol("al_index_vec_64", al_index_vec::<u64> as *const u8);
         builder.symbol("al_vec_len", al_vec_len as *const u8);
 
         let mut module = JITModule::new(builder);
+
+        let al_print = {
+            let mut sig = module.make_signature();
+            sig.params.push(AbiParam::new(I64));
+
+            module
+                .declare_function("al_print", Linkage::Import, &sig)
+                .map_err(|e| e.to_string())
+                .unwrap()
+        };
 
         let al_create_vec = {
             let mut sig = module.make_signature();
@@ -76,6 +88,7 @@ impl Runtime {
         (
             module,
             Self {
+                al_print,
                 al_create_vec,
                 al_push_vec_64,
                 al_index_vec_64,
@@ -94,6 +107,10 @@ const AL_STR: u8 = 0x27;
 pub struct AlVec<T> {
     info: u64,   // 8 bytes
     vec: Vec<T>, // not really 100% ffi safe .. but, it's 24 bytes and works fine for now
+}
+
+pub extern "C" fn al_print(whatever: u64) {
+    println!("AL PRINT: {}", whatever);
 }
 
 pub extern "C" fn al_create_vec(

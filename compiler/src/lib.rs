@@ -104,7 +104,7 @@ impl<'a> JIT<'a> {
         }
     }
 
-    pub fn compile_doc(&mut self, doc: &lower::Document) -> Result<(), CompileError> {
+    pub fn compile_doc(&mut self, doc: &lower::Document) -> Result<*const u8, CompileError> {
         // println!("Compiling user defined code...");
 
         // User defined code
@@ -155,7 +155,9 @@ impl<'a> JIT<'a> {
             .finalize_definitions()
             .expect("can finalize definitions");
 
-        Ok(())
+        let code_ptr = self.module.get_finalized_function(self.fn_ids["@doc"].0);
+
+        Ok(code_ptr)
     }
 
     fn find_uncompiled(&self) -> Option<(String, FuncId, Signature, FnType)> {

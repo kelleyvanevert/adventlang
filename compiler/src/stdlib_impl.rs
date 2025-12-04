@@ -9,6 +9,16 @@ pub fn implement_stdlib_print(
     builder: &mut FunctionBuilder,
     runtime_fns: &Runtime,
 ) {
+    let curr_block = builder.current_block().unwrap();
+    let val = builder.block_params(curr_block)[0];
+
+    // Call runtime fn
+    {
+        let fn_ref = module.declare_func_in_func(runtime_fns.al_print, &mut builder.func);
+
+        builder.ins().call(fn_ref, &[val]);
+    }
+
     let nil = builder.ins().iconst(I64, 0);
     builder.ins().return_(&[nil]);
 }

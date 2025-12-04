@@ -6,19 +6,19 @@ pub fn main() {
     let source = "
         let a = 4
         let b = a + 2
-        print(a)
-        bla([true])
-        bla([4], a)
-
-        let bla = [1, 2, 3]:len
-
-        fn bla<T>(arr: [T], index: int) -> T {
-            arr[index]
-        }
-
-        fn bla<T>(arr: [T]) -> T {
-            arr[0]
-        }
+        print(b)
+//        bla([true])
+//        bla([4], a)
+//
+//        let bla = [1, 2, 3]:len
+//
+//        fn bla<T>(arr: [T], index: int) -> T {
+//            arr[index]
+//        }
+//
+//        fn bla<T>(arr: [T]) -> T {
+//            arr[0]
+//        }
     ";
 
     // let source = "
@@ -58,11 +58,18 @@ pub fn main() {
 
     let mut jit_compiler = JIT::new(&type_checker);
 
-    if let Err(err) = jit_compiler.compile_doc(&lowered_doc) {
-        println!("===============================");
-        println!("Could not compile the document:");
-        println!("ERR: {}", err.to_string());
-        println!("===============================");
-        panic!();
+    match jit_compiler.compile_doc(&lowered_doc) {
+        Err(err) => {
+            println!("===============================");
+            println!("Could not compile the document:");
+            println!("ERR: {}", err.to_string());
+            println!("===============================");
+            panic!();
+        }
+        Ok(code_ptr) => {
+            let code_fn = unsafe { std::mem::transmute::<_, fn() -> ()>(code_ptr) };
+            println!("code ptr {:?}", code_ptr);
+            code_fn();
+        }
     }
 }
