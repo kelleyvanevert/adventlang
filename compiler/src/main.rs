@@ -7,6 +7,9 @@ pub fn main() {
         let a = 4
         let b = a + 2
         print(b)
+        print(stdin() :trim)
+        print(b)
+
 //        bla([true])
 //        bla([4], a)
 //

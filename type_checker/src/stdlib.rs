@@ -22,6 +22,7 @@ pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
         // STRINGS
         // ======
 
+        stdin: fn() -> str
         trim: fn(str) -> str
         split: fn(str, str) -> [str]
         split: fn(str, regex) -> [str]

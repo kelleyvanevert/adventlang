@@ -12,7 +12,10 @@ use type_checker::types::{FnMeta, FnType};
 use type_checker::{TypeCheckerCtx, types::Type as Ty};
 
 use crate::runtime::Runtime;
-use crate::stdlib_impl::{implement_stdlib_len, implement_stdlib_plus, implement_stdlib_print};
+use crate::stdlib_impl::{
+    implement_stdlib_len, implement_stdlib_plus, implement_stdlib_print, implement_stdlib_stdin,
+    implement_stdlib_trim,
+};
 
 pub mod lower;
 mod runtime;
@@ -45,7 +48,10 @@ impl Env {
     }
 
     fn get_local(&mut self, name: &str) -> Variable {
-        self.locals.get(name).unwrap().clone()
+        match self.locals.get(name).cloned() {
+            Some(var) => var,
+            None => panic!("Could not find local: {name}"),
+        }
     }
 }
 
@@ -187,10 +193,17 @@ impl<'a> JIT<'a> {
         builder.switch_to_block(entry_block);
         builder.seal_block(entry_block);
 
-        match def.meta.name.unwrap().as_str() {
-            "print" => implement_stdlib_print(&mut self.module, &mut builder, &self.runtime_fns),
-            "+" => implement_stdlib_plus(&mut self.module, &mut builder, &self.runtime_fns),
-            "len" => implement_stdlib_len(&mut self.module, &mut builder, &self.runtime_fns),
+        let name = def.meta.name.as_ref().clone().unwrap();
+        match &name[..] {
+            "print" => {
+                implement_stdlib_print(def, &mut self.module, &mut builder, &self.runtime_fns)
+            }
+            "+" => implement_stdlib_plus(def, &mut self.module, &mut builder, &self.runtime_fns),
+            "len" => implement_stdlib_len(def, &mut self.module, &mut builder, &self.runtime_fns),
+            "stdin" => {
+                implement_stdlib_stdin(def, &mut self.module, &mut builder, &self.runtime_fns)
+            }
+            "trim" => implement_stdlib_trim(def, &mut self.module, &mut builder, &self.runtime_fns),
             name => todo!("implement stdlib fn {name}"),
         }
 
