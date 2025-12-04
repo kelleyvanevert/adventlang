@@ -1,6 +1,6 @@
 use std::{cell::RefCell, io::IsTerminal};
 
-use cranelift::prelude::{AbiParam, types::I64};
+use cranelift::prelude::{AbiParam, Type, types::I64};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
 use fxhash::FxHashSet;
@@ -23,6 +23,21 @@ pub struct Runtime {
     pub al_str_trim: FuncId,
 }
 
+fn declare(module: &mut JITModule, name: &str, params: &[Type], ret: Option<Type>) -> FuncId {
+    let mut sig = module.make_signature();
+    for &param in params {
+        sig.params.push(AbiParam::new(param));
+    }
+    if let Some(ret) = ret {
+        sig.returns.push(AbiParam::new(ret));
+    }
+
+    module
+        .declare_function(name, Linkage::Import, &sig)
+        .map_err(|e| e.to_string())
+        .unwrap()
+}
+
 impl Runtime {
     pub fn new(mut builder: JITBuilder) -> (JITModule, Self) {
         builder.symbol("al_print_int", al_print_int as *const u8);
@@ -36,92 +51,14 @@ impl Runtime {
 
         let mut module = JITModule::new(builder);
 
-        let al_print_int = {
-            let mut sig = module.make_signature();
-            sig.params.push(AbiParam::new(I64));
-
-            module
-                .declare_function("al_print_int", Linkage::Import, &sig)
-                .map_err(|e| e.to_string())
-                .unwrap()
-        };
-
-        let al_print_str = {
-            let mut sig = module.make_signature();
-            sig.params.push(AbiParam::new(I64));
-
-            module
-                .declare_function("al_print_str", Linkage::Import, &sig)
-                .map_err(|e| e.to_string())
-                .unwrap()
-        };
-
-        let al_create_vec = {
-            let mut sig = module.make_signature();
-            sig.params.push(AbiParam::new(I64));
-            sig.params.push(AbiParam::new(I64));
-            sig.returns.push(AbiParam::new(I64));
-
-            module
-                .declare_function("al_create_vec", Linkage::Import, &sig)
-                .map_err(|e| e.to_string())
-                .unwrap()
-        };
-
-        let al_push_vec_64 = {
-            let mut sig = module.make_signature();
-            sig.params.push(AbiParam::new(I64));
-            sig.params.push(AbiParam::new(I64));
-
-            module
-                .declare_function("al_push_vec_64", Linkage::Import, &sig)
-                .map_err(|e| e.to_string())
-                .unwrap()
-        };
-
-        let al_index_vec_64 = {
-            let mut sig = module.make_signature();
-            sig.params.push(AbiParam::new(I64));
-            sig.params.push(AbiParam::new(I64));
-            sig.returns.push(AbiParam::new(I64));
-
-            module
-                .declare_function("al_index_vec_64", Linkage::Import, &sig)
-                .map_err(|e| e.to_string())
-                .unwrap()
-        };
-
-        let al_vec_len = {
-            let mut sig = module.make_signature();
-            sig.params.push(AbiParam::new(I64));
-            sig.returns.push(AbiParam::new(I64));
-
-            module
-                .declare_function("al_vec_len", Linkage::Import, &sig)
-                .map_err(|e| e.to_string())
-                .unwrap()
-        };
-
-        let al_stdin_as_str = {
-            let mut sig = module.make_signature();
-            sig.returns.push(AbiParam::new(I64));
-
-            module
-                .declare_function("al_stdin_as_str", Linkage::Import, &sig)
-                .map_err(|e| e.to_string())
-                .unwrap()
-        };
-
-        let al_str_trim = {
-            let mut sig = module.make_signature();
-            sig.params.push(AbiParam::new(I64));
-            sig.returns.push(AbiParam::new(I64));
-
-            module
-                .declare_function("al_str_trim", Linkage::Import, &sig)
-                .map_err(|e| e.to_string())
-                .unwrap()
-        };
+        let al_print_int = declare(&mut module, "al_print_int", &[I64], None);
+        let al_print_str = declare(&mut module, "al_print_str", &[I64], None);
+        let al_create_vec = declare(&mut module, "al_create_vec", &[I64, I64], Some(I64));
+        let al_push_vec_64 = declare(&mut module, "al_push_vec_64", &[I64, I64], None);
+        let al_index_vec_64 = declare(&mut module, "al_index_vec_64", &[I64, I64], Some(I64));
+        let al_vec_len = declare(&mut module, "al_vec_len", &[I64], Some(I64));
+        let al_stdin_as_str = declare(&mut module, "al_stdin_as_str", &[], Some(I64));
+        let al_str_trim = declare(&mut module, "al_str_trim", &[I64], Some(I64));
 
         (
             module,
@@ -140,6 +77,7 @@ impl Runtime {
 }
 
 const AL_VEC: u8 = 0x34;
+#[allow(unused)]
 const AL_CLOSURE: u8 = 0x14;
 const AL_STR: u8 = 0x27;
 
@@ -150,10 +88,12 @@ pub struct AlVec<T> {
     vec: Vec<T>, // not really 100% ffi safe .. but, it's 24 bytes and works fine for now
 }
 
+#[allow(unused)]
 pub extern "C" fn al_print_int(value: u64) {
     println!("{}", value);
 }
 
+#[allow(unused)]
 pub extern "C" fn al_create_vec(
     element_size_bits: u64,
     ptr_elements: u64, /* 0 or 1 */
@@ -197,6 +137,7 @@ pub fn using_al_vec<T: Copy, R, F: FnOnce(&[T]) -> R>(vecptr: *mut u64, f: F) ->
     f(slice)
 }
 
+#[allow(unused)]
 pub extern "C" fn al_index_vec<T: Copy>(vecptr: *mut u64, idx: u64) -> T {
     using_al_vec(vecptr, |vec: &[T]| {
         // TODO negative indices and bounds checks
@@ -204,6 +145,7 @@ pub extern "C" fn al_index_vec<T: Copy>(vecptr: *mut u64, idx: u64) -> T {
     })
 }
 
+#[allow(unused)]
 pub extern "C" fn al_push_vec<T: Copy>(ptr: *mut AlVec<T>, el: T) {
     let mut al_vec = unsafe { Box::from_raw(ptr) };
 
@@ -212,6 +154,7 @@ pub extern "C" fn al_push_vec<T: Copy>(ptr: *mut AlVec<T>, el: T) {
     std::mem::forget(al_vec);
 }
 
+#[allow(unused)]
 pub extern "C" fn al_vec_len(ptr: *mut AlVec<u128>) -> u64 {
     let al_vec = unsafe { Box::from_raw(ptr) };
 
@@ -229,6 +172,7 @@ pub struct AlStr {
     str: String, // not really 100% ffi safe .. but, it's 24 bytes and works fine for now
 }
 
+#[allow(unused)]
 pub extern "C" fn al_stdin_as_str() -> *mut () {
     let stdin = std::io::stdin();
 
@@ -258,6 +202,7 @@ fn mk_al_str(str: impl Into<String>) -> *mut () {
     ptr
 }
 
+#[allow(unused)]
 pub extern "C" fn al_create_str_from_literal(ptr: *mut u8) -> *mut () {
     let str = unsafe { std::ffi::CStr::from_ptr(ptr as *const i8) };
     let str = str.to_str().unwrap().to_string();
@@ -265,12 +210,14 @@ pub extern "C" fn al_create_str_from_literal(ptr: *mut u8) -> *mut () {
     mk_al_str(str)
 }
 
+#[allow(unused)]
 pub extern "C" fn al_print_str(ptr: *mut u64) {
     using_al_str(ptr, |str| {
         println!("{str}");
     })
 }
 
+#[allow(unused)]
 pub extern "C" fn al_str_in_strvec(strptr: *mut u64, vecptr: *mut u64) -> u8 {
     let found = using_al_vec(vecptr, |vec: &[u64]| {
         using_al_str(strptr, |needle| {
@@ -284,6 +231,7 @@ pub extern "C" fn al_str_in_strvec(strptr: *mut u64, vecptr: *mut u64) -> u8 {
     found as u8
 }
 
+#[allow(unused)]
 pub extern "C" fn al_str_lines(strptr: *mut u64) -> *mut u64 {
     using_al_str(strptr, |str| {
         let vecptr = al_create_vec(64, 1) as *mut AlVec<u64>;
@@ -297,6 +245,7 @@ pub extern "C" fn al_str_lines(strptr: *mut u64) -> *mut u64 {
     })
 }
 
+#[allow(unused)]
 pub extern "C" fn al_str_trim(strptr: *mut u64) -> *mut u64 {
     using_al_str(strptr, |str| {
         let trimmed = mk_al_str(str.trim()) as *mut u64;
@@ -304,6 +253,7 @@ pub extern "C" fn al_str_trim(strptr: *mut u64) -> *mut u64 {
     })
 }
 
+#[allow(unused)]
 pub extern "C" fn al_str_len(strptr: *mut u64) -> u64 {
     using_al_str(strptr, |str| str.len() as u64)
 }

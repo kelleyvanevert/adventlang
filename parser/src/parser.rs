@@ -941,9 +941,9 @@ impl<'a> Converter<'a> {
             })?)
     }
 
-    fn as_string(&mut self, node: Node) -> Result<String, ParseError> {
-        Ok(self.as_str(node)?.into())
-    }
+    // fn as_string(&mut self, node: Node) -> Result<String, ParseError> {
+    //     Ok(self.as_str(node)?.into())
+    // }
 
     fn as_identifier(&mut self, node: Node) -> Result<Identifier, ParseError> {
         Ok(Identifier {

@@ -112,7 +112,7 @@ impl std::fmt::Display for Expr {
                 }
                 write!(f, ")")
             }
-            Expr::Block { label, stmts } => write!(f, "<block>"),
+            Expr::Block { label: _, stmts: _ } => write!(f, "<block>"),
             Expr::Var(name) => write!(f, "{name}"),
             Expr::Coalesce(expr, fallback) => write!(f, "{expr} ?? {fallback}"),
             Expr::ListRest(expr, index) => write!(f, "{expr}[{index}..]"),
@@ -235,8 +235,8 @@ impl<'a> LoweringPass<'a> {
                 stmts.push(Stmt::Expr(expr));
             }
             ast::Stmt::NamedFn(ast::NamedFnItem {
-                id,
-                name,
+                id: _,
+                name: _,
                 generics: _,
                 ret: _,
                 params,
@@ -358,7 +358,7 @@ impl<'a> LoweringPass<'a> {
                 }
             }
             ast::Expr::Binary(ast::BinaryExpr {
-                id,
+                id: _,
                 left,
                 op,
                 right,
@@ -381,7 +381,7 @@ impl<'a> LoweringPass<'a> {
             ast::Expr::Call(ast::CallExpr {
                 id,
                 f,
-                postfix,
+                postfix: _,
                 coalesce,
                 args,
             }) => {
@@ -409,7 +409,7 @@ impl<'a> LoweringPass<'a> {
                 }
             }
             ast::Expr::List(ast::ListExpr {
-                id,
+                id: _,
                 elements,
                 splat,
             }) => Expr::List(
@@ -422,9 +422,9 @@ impl<'a> LoweringPass<'a> {
                     .map(|expr| self.lower_expr(fns, expr.as_ref(), true).into()),
             ),
             ast::Expr::Index(ast::IndexExpr {
-                id,
+                id: _,
                 expr,
-                coalesce,
+                coalesce: _,
                 index,
             }) => Expr::ListIndex(
                 self.lower_expr(fns, expr, true).into(),

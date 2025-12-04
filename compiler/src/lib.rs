@@ -1,6 +1,4 @@
-use std::error::Error;
-
-use cranelift::codegen::verifier::{VerifierError, VerifierErrors};
+use cranelift::codegen::verifier::VerifierErrors;
 use cranelift::prelude::isa::CallConv;
 use cranelift::prelude::*;
 use cranelift::{codegen::CodegenError, prelude::types::I64};
@@ -8,8 +6,8 @@ use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{DataDescription, FuncId, Linkage, Module, ModuleError};
 use fxhash::FxHashMap;
 use thiserror::Error;
-use type_checker::types::{FnMeta, FnType};
-use type_checker::{TypeCheckerCtx, types::Type as Ty};
+use type_checker::TypeCheckerCtx;
+use type_checker::types::FnType;
 
 use crate::runtime::Runtime;
 use crate::stdlib_impl::{
@@ -292,6 +290,7 @@ struct FnTranslator<'a> {
     builder: FunctionBuilder<'a>,
     env: Env,
     module: &'a mut JITModule,
+    #[allow(unused)]
     type_checker: &'a TypeCheckerCtx,
     entry_block: Block,
     call_conv: CallConv,
@@ -378,7 +377,7 @@ impl<'a> FnTranslator<'a> {
             lower::Expr::Call {
                 def,
                 fn_id,
-                fn_val,
+                fn_val: _, // will be used for closures...
                 args,
             } => {
                 // println!("    Needs {}", fn_id);
@@ -430,7 +429,7 @@ impl<'a> FnTranslator<'a> {
                     self.builder.inst_results(call)[0]
                 }
             }
-            lower::Expr::List(elements, rest) => {
+            lower::Expr::List(elements, _rest) => {
                 // Create list
                 let list_ptr = {
                     let fn_ref = self.module.declare_func_in_func(
@@ -453,7 +452,7 @@ impl<'a> FnTranslator<'a> {
                     );
 
                     let val = self.translate_expr(el);
-                    let call = self.builder.ins().call(fn_ref, &[list_ptr, val]);
+                    self.builder.ins().call(fn_ref, &[list_ptr, val]);
                 }
 
                 // TODO: maybe push rest

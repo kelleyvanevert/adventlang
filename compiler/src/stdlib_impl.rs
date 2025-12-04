@@ -11,19 +11,18 @@ pub fn implement_stdlib_print(
     builder: &mut FunctionBuilder,
     runtime_fns: &Runtime,
 ) {
-    let fn_id = match def.params[0] {
-        Type::Int => runtime_fns.al_print_int,
-        Type::Str => runtime_fns.al_print_str,
-        _ => unreachable!(),
-    };
-
     let curr_block = builder.current_block().unwrap();
     let val = builder.block_params(curr_block)[0];
 
     // Call runtime fn
     {
-        let fn_ref = module.declare_func_in_func(fn_id, &mut builder.func);
+        let fn_id = match def.params[0] {
+            Type::Int => runtime_fns.al_print_int,
+            Type::Str => runtime_fns.al_print_str,
+            _ => unreachable!(),
+        };
 
+        let fn_ref = module.declare_func_in_func(fn_id, &mut builder.func);
         builder.ins().call(fn_ref, &[val]);
     }
 
@@ -32,13 +31,12 @@ pub fn implement_stdlib_print(
 }
 
 pub fn implement_stdlib_plus(
-    def: FnType,
-    module: &mut JITModule,
+    _def: FnType,
+    _module: &mut JITModule,
     builder: &mut FunctionBuilder,
-    runtime_fns: &Runtime,
+    _runtime_fns: &Runtime,
 ) {
     let curr_block = builder.current_block().unwrap();
-
     let lhs = builder.block_params(curr_block)[0];
     let rhs = builder.block_params(curr_block)[1];
 
@@ -47,7 +45,7 @@ pub fn implement_stdlib_plus(
 }
 
 pub fn implement_stdlib_len(
-    def: FnType,
+    _def: FnType,
     module: &mut JITModule,
     builder: &mut FunctionBuilder,
     runtime_fns: &Runtime,
@@ -58,7 +56,6 @@ pub fn implement_stdlib_len(
     // Call runtime fn
     {
         let fn_ref = module.declare_func_in_func(runtime_fns.al_vec_len, &mut builder.func);
-
         let call = builder.ins().call(fn_ref, &[list_ptr]);
         let res = builder.inst_results(call)[0];
         builder.ins().return_(&[res]);
@@ -66,7 +63,7 @@ pub fn implement_stdlib_len(
 }
 
 pub fn implement_stdlib_stdin(
-    def: FnType,
+    _def: FnType,
     module: &mut JITModule,
     builder: &mut FunctionBuilder,
     runtime_fns: &Runtime,
@@ -74,7 +71,6 @@ pub fn implement_stdlib_stdin(
     // Call runtime fn
     {
         let fn_ref = module.declare_func_in_func(runtime_fns.al_stdin_as_str, &mut builder.func);
-
         let call = builder.ins().call(fn_ref, &[]);
         let res = builder.inst_results(call)[0];
         builder.ins().return_(&[res]);
@@ -82,7 +78,7 @@ pub fn implement_stdlib_stdin(
 }
 
 pub fn implement_stdlib_trim(
-    def: FnType,
+    _def: FnType,
     module: &mut JITModule,
     builder: &mut FunctionBuilder,
     runtime_fns: &Runtime,
@@ -93,7 +89,6 @@ pub fn implement_stdlib_trim(
     // Call runtime fn
     {
         let fn_ref = module.declare_func_in_func(runtime_fns.al_str_trim, &mut builder.func);
-
         let call = builder.ins().call(fn_ref, &[str_ptr]);
         let res = builder.inst_results(call)[0];
         builder.ins().return_(&[res]);
