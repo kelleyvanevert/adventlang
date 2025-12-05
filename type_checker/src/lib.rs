@@ -401,7 +401,7 @@ struct ChooseOverloadConstraint {
         FnType,    // just the whole fn ty, in order to record usages
                    //  (yes, there's a bit too much duplication of types by now, haha..)
     )>,
-    dependents: Vec<usize>,
+    dependents: Option<Vec<usize>>,
 }
 
 impl ChooseOverloadConstraint {
@@ -946,17 +946,19 @@ impl TypeCheckerCtx {
                 )?;
             }
 
-            self.depends(
-                &choose.dependents,
-                choose.overloads[i].1, // def node id
-                false,                 // ??
-            );
+            if let Some(dependents) = &choose.dependents {
+                self.depends(
+                    &dependents,
+                    choose.overloads[i].1, // def node id
+                    false,                 // ??
+                );
 
-            self.depends(
-                &choose.dependents,
-                choose.overloads[i].2.body_node_id, // body node id
-                false,                              // ??
-            );
+                self.depends(
+                    &dependents,
+                    choose.overloads[i].2.body_node_id, // body node id
+                    false,                              // ??
+                );
+            }
 
             return Ok(res);
         }
@@ -1150,7 +1152,57 @@ impl TypeCheckerCtx {
 
                 Ok(r_key + r_val)
             }
-            // (Type::NamedFn(defs)) => {}
+
+            (Type::NamedFnOverload { defs, choice_var }, Type::Fn(def))
+            | (Type::Fn(def), Type::NamedFnOverload { defs, choice_var }) => {
+                let FnType {
+                    meta: _,
+                    generics: _,
+                    params,
+                    ret,
+                } = self.instantiate_fn_ty(def, false);
+
+                let overloads = defs
+                    .into_iter()
+                    .enumerate()
+                    .filter(|(_, (_, f_ty))| f_ty.params.len() == 1)
+                    .map(|(i, (def_node_id, f_ty))| {
+                        let fn_ty = self.instantiate_fn_ty(f_ty, false);
+
+                        let FnType {
+                            meta,
+                            generics: _,
+                            mut params,
+                            ret,
+                        } = fn_ty.clone();
+
+                        params.push(*ret);
+
+                        (i, def_node_id, meta, params, fn_ty)
+                    })
+                    .collect_vec();
+
+                let mut types = params;
+                types.push(*ret);
+
+                // a bit unfortunate, but we don't have any other information
+                let nodes = types.iter().map(|_| 0).collect_vec();
+
+                // at this phase, we're not checking declaration circularity
+                let dependents = None;
+
+                Ok(ConstraintResult::ResolveTo(vec![
+                    Constraint::ChooseOverload(ChooseOverloadConstraint {
+                        node_id,
+                        choice_var,
+                        nodes,
+                        types,
+                        overloads,
+                        dependents,
+                    }),
+                ]))
+            }
+
             (
                 Type::Fn(FnType {
                     generics: a_generics,
@@ -2320,7 +2372,7 @@ impl TypeCheckerCtx {
                                 nodes: vec![expr.id(), *id],
                                 types: vec![expr_ty.clone(), res_ty.clone()],
                                 overloads,
-                                dependents: dependents.clone(),
+                                dependents: Some(dependents.clone()),
                             },
                         ))?;
 
@@ -2418,7 +2470,7 @@ impl TypeCheckerCtx {
                                 nodes: vec![left.id(), right.id(), *id],
                                 types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
                                 overloads,
-                                dependents: dependents.clone(),
+                                dependents: Some(dependents.clone()),
                             },
                         ))?;
 
@@ -2775,7 +2827,7 @@ impl TypeCheckerCtx {
                                 nodes: node_ids,
                                 types,
                                 overloads,
-                                dependents: dependents.clone(),
+                                dependents: Some(dependents.clone()),
                             },
                         ))?;
 
