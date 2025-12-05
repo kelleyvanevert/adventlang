@@ -116,7 +116,7 @@ impl std::fmt::Display for Expr {
             }
             Expr::Block { label: _, stmts: _ } => write!(f, "<block>"),
             Expr::Local(name) => write!(f, "{name}"),
-            Expr::FnRef { def, fn_id } => write!(f, "<fn-ref>"),
+            Expr::FnRef { def: _, fn_id: _ } => write!(f, "<fn-ref>"),
             Expr::Coalesce(expr, fallback) => write!(f, "{expr} ?? {fallback}"),
             Expr::ListRest(expr, index) => write!(f, "{expr}[{index}..]"),
             Expr::ListIndex(expr, index) => write!(f, "{expr}[{index}"),

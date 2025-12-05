@@ -11,12 +11,14 @@ thread_local! {
     pub static PTRS: RefCell<FxHashSet<*mut ()>> = RefCell::new(FxHashSet::default());
 }
 
+#[allow(unused)]
 pub fn register_heap_object(ptr: *mut ()) {
     PTRS.with_borrow_mut(|ptrs| {
         ptrs.insert(ptr as *mut ());
     });
 }
 
+#[allow(unused)]
 pub extern "C" fn al_gcroot(ptr: *mut ()) {
     register_heap_object(ptr);
 
@@ -25,12 +27,14 @@ pub extern "C" fn al_gcroot(ptr: *mut ()) {
     });
 }
 
+#[allow(unused)]
 pub extern "C" fn al_gcunroot(ptr: *mut ()) {
     ROOTED.with_borrow_mut(|roots| {
         roots.remove(&ptr);
     });
 }
 
+#[allow(unused)]
 pub extern "C" fn al_gc() {
     println!("GC!");
 

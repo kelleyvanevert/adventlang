@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use cranelift::prelude::types::I64;
 use cranelift::prelude::*;
 use cranelift_jit::{JITBuilder, JITModule};
-use cranelift_module::{DataDescription, Linkage, Module};
+use cranelift_module::{Linkage, Module};
 use fxhash::FxHashSet;
 
 /// The basic JIT class.
@@ -18,7 +18,7 @@ pub struct JIT {
     ctx: codegen::Context,
 
     /// The data description, which is to data objects what `ctx` is to functions.
-    data_description: DataDescription,
+    // data_description: DataDescription,
 
     /// The module, with the jit backend, which manages the JIT'd
     /// functions.
@@ -50,7 +50,7 @@ impl JIT {
         Self {
             builder_context: FunctionBuilderContext::new(),
             ctx: module.make_context(),
-            data_description: DataDescription::new(),
+            // data_description: DataDescription::new(),
             module,
         }
     }
@@ -62,8 +62,8 @@ thread_local! {
 }
 
 const AL_VEC: u8 = 0x34;
-const AL_CLOSURE: u8 = 0x14;
-const AL_STR: u8 = 0x27;
+// const AL_CLOSURE: u8 = 0x14;
+// const AL_STR: u8 = 0x27;
 
 #[repr(C)]
 #[derive(Debug, Clone)]

@@ -10,6 +10,7 @@ const AL_VEC: u8 = 0x34;
 const AL_CLOSURE: u8 = 0x14;
 const AL_STR: u8 = 0x27;
 
+#[allow(unused)]
 pub extern "C" fn al_create_closure(
     parent_closure_ptr: *mut u8,
     num_gc_elements: u8,
@@ -55,6 +56,7 @@ pub struct AlStr {
     str: String, // not really 100% ffi safe .. but, it's 24 bytes and works fine for now
 }
 
+#[allow(unused)]
 fn mk_al_str(str: impl Into<String>) -> *mut () {
     let info = AL_STR as u64;
 
@@ -68,6 +70,7 @@ fn mk_al_str(str: impl Into<String>) -> *mut () {
     ptr
 }
 
+#[allow(unused)]
 pub extern "C" fn al_create_str_from_literal(ptr: *mut u8) -> *mut () {
     let str = unsafe { CStr::from_ptr(ptr as *const i8) };
     let str = str.to_str().unwrap().to_string();
@@ -82,6 +85,7 @@ pub struct AlVec<T> {
     pub vec: Vec<T>, // not really 100% ffi safe .. but, it's 24 bytes and works fine for now
 }
 
+#[allow(unused)]
 pub extern "C" fn al_create_vec(element_size_bits: u64, ptr_elements: bool) -> *mut () {
     assert!(
         element_size_bits == 32 || element_size_bits == 64,
@@ -104,6 +108,7 @@ pub extern "C" fn al_create_vec(element_size_bits: u64, ptr_elements: bool) -> *
     ptr
 }
 
+#[allow(unused)]
 pub extern "C" fn al_index_vec<T: Copy>(vecptr: *mut u64, idx: i64) -> T {
     using_al_vec(vecptr, |vec: &[T]| {
         // TODO make this more dummy-proof, with modulo
@@ -116,18 +121,22 @@ pub extern "C" fn al_index_vec<T: Copy>(vecptr: *mut u64, idx: i64) -> T {
     })
 }
 
+#[allow(unused)]
 pub extern "C" fn al_index_vec_8(vecptr: *mut u64, idx: i64) -> u8 {
     al_index_vec::<u8>(vecptr, idx)
 }
 
+#[allow(unused)]
 pub extern "C" fn al_index_vec_32(vecptr: *mut u64, idx: i64) -> u32 {
     al_index_vec::<u32>(vecptr, idx)
 }
 
+#[allow(unused)]
 pub extern "C" fn al_index_vec_64(vecptr: *mut u64, idx: i64) -> u64 {
     al_index_vec::<u64>(vecptr, idx)
 }
 
+#[allow(unused)]
 pub extern "C" fn al_push_vec<T: Copy>(ptr: *mut AlVec<T>, el: T) {
     let mut al_vec = unsafe { Box::from_raw(ptr) };
 
@@ -136,6 +145,7 @@ pub extern "C" fn al_push_vec<T: Copy>(ptr: *mut AlVec<T>, el: T) {
     std::mem::forget(al_vec);
 }
 
+#[allow(unused)]
 pub fn using_al_str<R, F: FnOnce(&str) -> R>(strptr: *mut u64, f: F) -> R {
     // get str
     let string_ref: &String = unsafe { &*(strptr.add(1) as *const String) };
@@ -144,6 +154,7 @@ pub fn using_al_str<R, F: FnOnce(&str) -> R>(strptr: *mut u64, f: F) -> R {
     f(slice)
 }
 
+#[allow(unused)]
 pub fn using_al_vec<T: Copy, R, F: FnOnce(&[T]) -> R>(vecptr: *mut u64, f: F) -> R {
     // get str
     let vec_ref: &Vec<T> = unsafe { &*(vecptr.add(1) as *const Vec<T>) };
@@ -152,6 +163,7 @@ pub fn using_al_vec<T: Copy, R, F: FnOnce(&[T]) -> R>(vecptr: *mut u64, f: F) ->
     f(slice)
 }
 
+#[allow(unused)]
 pub extern "C" fn al_str_in_strvec(strptr: *mut u64, vecptr: *mut u64) -> u8 {
     let found = using_al_vec(vecptr, |vec: &[u64]| {
         using_al_str(strptr, |needle| {
@@ -165,6 +177,7 @@ pub extern "C" fn al_str_in_strvec(strptr: *mut u64, vecptr: *mut u64) -> u8 {
     found as u8
 }
 
+#[allow(unused)]
 pub extern "C" fn al_str_lines(strptr: *mut u64) -> *mut u64 {
     using_al_str(strptr, |str| {
         let vecptr = al_create_vec(64, true) as *mut AlVec<u64>;
@@ -178,16 +191,19 @@ pub extern "C" fn al_str_lines(strptr: *mut u64) -> *mut u64 {
     })
 }
 
+#[allow(unused)]
 pub extern "C" fn al_str_len(strptr: *mut u64) -> u64 {
     using_al_str(strptr, |str| str.len() as u64)
 }
 
+#[allow(unused)]
 pub extern "C" fn al_print(strptr: *mut u64) {
     using_al_str(strptr, |str| {
         println!("PRINT: {str}");
     });
 }
 
+#[allow(unused)]
 fn hash_collect<H: Hasher>(ptr: *mut (), state: &mut H) {
     match determine_heap_object_type(ptr) {
         HeapObjectType::AlClosure { .. } => {
@@ -248,6 +264,7 @@ fn hash_collect<H: Hasher>(ptr: *mut (), state: &mut H) {
     }
 }
 
+#[allow(unused)]
 pub extern "C" fn al_hash_heap_object(ptr: *mut ()) -> u64 {
     let mut hasher = DefaultHasher::new();
 

@@ -3,7 +3,7 @@ use std::mem;
 use inkwell::{
     OptimizationLevel,
     context::Context,
-    execution_engine::{ExecutionEngine, JitFunction},
+    execution_engine::JitFunction,
     memory_buffer::MemoryBuffer,
     module::Module,
     passes::PassBuilderOptions,

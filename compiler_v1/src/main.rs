@@ -17,5 +17,5 @@ fn main() {
     // crate::poc::vec_ptr_gc::main();
 
     // Cranelift JIT proof-of-concept
-    crate::poc::cranelift_jit::main();
+    let _ = crate::poc::cranelift_jit::main();
 }

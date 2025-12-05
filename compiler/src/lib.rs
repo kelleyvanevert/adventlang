@@ -1,5 +1,4 @@
 use cranelift::codegen::verifier::VerifierErrors;
-use cranelift::prelude::isa::CallConv;
 use cranelift::prelude::*;
 use cranelift::{codegen::CodegenError, prelude::types::I64};
 use cranelift_jit::{JITBuilder, JITModule};
@@ -238,7 +237,6 @@ impl<'a> JIT<'a> {
             self.ctx.func.signature.returns.push(AbiParam::new(I64));
 
             // start building
-            let call_conv = self.ctx.func.signature.call_conv;
             let mut builder = FunctionBuilder::new(&mut self.ctx.func, &mut self.builder_context);
             let entry_block = builder.create_block();
             builder.append_block_params_for_function_params(entry_block);
@@ -251,7 +249,6 @@ impl<'a> JIT<'a> {
                 module: &mut self.module,
                 type_checker: &self.type_checker,
                 entry_block,
-                call_conv,
                 runtime_fns: &self.runtime_fns,
                 fn_ids: &mut self.fn_ids,
             };
@@ -295,7 +292,6 @@ struct FnTranslator<'a> {
     #[allow(unused)]
     type_checker: &'a TypeCheckerCtx,
     entry_block: Block,
-    call_conv: CallConv,
     runtime_fns: &'a Runtime,
     fn_ids: &'a mut FxHashMap<String, (FuncId, Signature, FnType, bool)>,
 }
@@ -303,7 +299,7 @@ struct FnTranslator<'a> {
 impl<'a> FnTranslator<'a> {
     fn make_sig(&self, def: &FnType) -> Signature {
         // declare signature
-        let mut sig = Signature::new(self.call_conv);
+        let mut sig = self.module.make_signature();
         for _ in &def.params {
             sig.params.push(AbiParam::new(I64));
         }
