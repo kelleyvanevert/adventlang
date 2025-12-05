@@ -50,6 +50,35 @@ some_fn(len)
 
 
 // ======
+// Here, because f is not annotated, the overload choice is make inside
+//  the `CanInstantiateTo` constraint check.
+//
+// ok
+// ======
+
+fn some_fn(f) {
+    let a = [1, 2, 3, 4];
+    let r: int = f(a)
+}
+
+some_fn(len)
+
+
+// ======
+// Here, as above, but the overload choice fails
+//
+// err
+// ======
+
+fn some_fn(f) {
+    let a = [1, 2, 3, 4];
+    let r: bool = f(a)
+}
+
+some_fn(len)
+
+
+// ======
 // err
 // ======
 

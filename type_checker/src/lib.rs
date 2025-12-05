@@ -165,7 +165,7 @@ pub enum TypeErrorKind {
         member: String,
     },
     #[error("cannot instantiate function {scheme:?} to {concrete:?}")]
-    CannotInstantiate { scheme: Type, concrete: Type },
+    CannotInstantiate { scheme: Type, concrete: FnType },
     #[error("invalid tuple index")]
     InvalidTupleIndex,
     #[error("node did not end up with a concrete type: {0:?}")]
@@ -258,7 +258,7 @@ impl TypeErrorKind {
 enum Constraint {
     TypeEqual(usize, Type, Type),
     ReturnTyHack(usize, Type, Type, Type),
-    CanInstantiateTo(usize, usize, Type, Type, Vec<usize>),
+    CanInstantiateTo(usize, usize, Type, FnType, Vec<usize>),
     ChooseOverload(ChooseOverloadConstraint),
     CheckIndex(CheckIndexConstraint),
     CheckMember(CheckMemberConstraint),
@@ -492,7 +492,10 @@ pub struct TypeCheckerCtx {
     //  denotes the choice of overload. Which can be `None` if not yet decided,
     //  or `Some(index)`, referring to the index of the overload in the `NamedFnOverload`.
     overload_choices: Vec<Option<usize>>,
-    fn_usages: FxHashMap<usize, FnType>, // {unary,binary,call}-expr -> concrete usage
+    // Concrete usages at call-sites: {unary,binary,call}-expr => concrete usage
+    fn_usages: FxHashMap<usize, FnType>,
+    // Concrete local references
+    fn_refs: FxHashSet<Type>,
 
     // This is just for debugging the disjoint sets
     all_vars: Vec<TypeVar>,
@@ -524,6 +527,7 @@ impl TypeCheckerCtx {
             types: Default::default(),
             overload_choices: vec![],
             fn_usages: Default::default(),
+            fn_refs: Default::default(),
             all_vars: vec![],
             rigid_vars: Default::default(),
             fn_return_ty: Default::default(),
@@ -543,10 +547,16 @@ impl TypeCheckerCtx {
     }
 
     pub fn get_fn_usages(&self, body_node_id: usize) -> Vec<FnType> {
+        let refs = self.fn_refs.iter().cloned().filter_map(|ty| match ty {
+            Type::Fn(f) => (f.meta.body_node_id == body_node_id).then_some(f),
+            _ => unreachable!("fn ref that's not a fn: {:?}", ty),
+        });
+
         self.fn_usages
             .values()
             .filter(|f| f.meta.body_node_id == body_node_id)
             .cloned()
+            .chain(refs)
             .unique()
             .collect()
     }
@@ -590,13 +600,43 @@ impl TypeCheckerCtx {
                 err
             })?;
 
+        // for (_, ty) in self.types.clone() {
+        //     println!("SUB TY: {:?}", ty);
+        //     println!("  normalized -> {:?}", self.normalize_ty(ty));
+        // }
+
         // substitute throughout the doc
-        for (_, ty) in &mut self.types {
-            // *self.normalize_ty(ty.clone());
-            ty.substitute(&mut vec![], &mut self.unification_table);
-        }
-        for (_, usage) in &mut self.fn_usages {
-            usage.substitute(&mut vec![], &mut self.unification_table);
+        // The usage of `normalize` is only really necessary to resolve
+        //  `NamedFnOverload`s, whereas otherwise everything could be
+        //  done with `substitute`. But now that I'm using `normalize`
+        //  anyway, `substitute` is no longer necessary
+        {
+            self.types = std::mem::take(&mut self.types)
+                .into_iter()
+                .map(|(id, ty)| {
+                    let ty = self.normalize_ty(ty);
+                    // ty.substitute(&mut vec![], &mut self.unification_table);
+                    (id, ty)
+                })
+                .collect();
+
+            self.fn_usages = std::mem::take(&mut self.fn_usages)
+                .into_iter()
+                .map(|(call_id, def)| {
+                    let def = self.normalize_fn_ty(def);
+                    // def.substitute(&mut vec![], &mut self.unification_table);
+                    (call_id, def)
+                })
+                .collect();
+
+            self.fn_refs = std::mem::take(&mut self.fn_refs)
+                .into_iter()
+                .map(|ty| {
+                    let ty = self.normalize_ty(ty);
+                    // def.substitute(&mut vec![], &mut self.unification_table);
+                    ty
+                })
+                .collect();
         }
 
         // self.debug_disjoint_sets();
@@ -737,7 +777,15 @@ impl TypeCheckerCtx {
             Constraint::TypeEqual(node_id, left, right) => {
                 self.check_ty_equal(*node_id, left.clone(), right.clone())
             }
-            Constraint::CanInstantiateTo(call_node_id, node_id, scheme, concrete, dependents) => {
+            Constraint::CanInstantiateTo(
+                call_node_id,
+                node_id,
+                scheme,
+                concrete_fn_ty,
+                dependents,
+            ) => {
+                debug_assert_eq!(concrete_fn_ty.generics.len(), 0);
+
                 match self.normalize_ty(scheme.clone()) {
                     Type::TypeVar(_) => {
                         // solve later
@@ -757,8 +805,46 @@ impl TypeCheckerCtx {
                         Ok(ConstraintResult::ResolveTo(vec![Constraint::TypeEqual(
                             *node_id,
                             Type::Fn(fn_ty),
-                            concrete.clone(),
+                            Type::Fn(concrete_fn_ty.clone()),
                         )]))
+                    }
+                    Type::NamedFnOverload { defs, choice_var } => {
+                        let overloads = defs
+                            .into_iter()
+                            .enumerate()
+                            .filter(|(_, (_, f_ty))| f_ty.params.len() == 1)
+                            .map(|(i, (def_node_id, f_ty))| {
+                                let fn_ty = self.instantiate_fn_ty(f_ty, false);
+
+                                let FnType {
+                                    meta,
+                                    generics: _,
+                                    mut params,
+                                    ret,
+                                } = fn_ty.clone();
+
+                                params.push(*ret);
+
+                                (i, def_node_id, meta, params, fn_ty)
+                            })
+                            .collect_vec();
+
+                        let mut types = concrete_fn_ty.params.clone();
+                        types.push(concrete_fn_ty.ret.as_ref().clone());
+
+                        // a bit unfortunate, but we don't have any other information
+                        let nodes = types.iter().map(|_| 0).collect_vec();
+
+                        Ok(ConstraintResult::ResolveTo(vec![
+                            Constraint::ChooseOverload(ChooseOverloadConstraint {
+                                node_id: *call_node_id, // !important, because it gets insert into `fn_usages`
+                                choice_var,
+                                nodes,
+                                types,
+                                overloads,
+                                dependents: Some(dependents.clone()),
+                            }),
+                        ]))
                     }
                     other => {
                         return Err(TypeError {
@@ -929,11 +1015,14 @@ impl TypeCheckerCtx {
         }
 
         if let Some(i) = found {
-            // println!("  - found! {:?}", choose.overloads[i].1);
-
             let overload_index = choose.overloads[i].0;
             self.overload_choices[choose.choice_var] = Some(overload_index);
 
+            // println!("  - found overload! {:?}", choose.overloads[i].1);
+            // println!(
+            //     "   + insert fn usage {} => {:?}",
+            //     choose.node_id, choose.overloads[i].4
+            // );
             self.fn_usages
                 .insert(choose.node_id, choose.overloads[i].4.clone());
 
@@ -1316,7 +1405,7 @@ impl TypeCheckerCtx {
     }
 
     // do something with double nullability?
-    fn normalize_ty(&mut self, ty: Type) -> Type {
+    pub fn normalize_ty(&mut self, ty: Type) -> Type {
         match ty {
             Type::Never => ty,
             Type::Nil | Type::Bool | Type::Str | Type::Int | Type::Float | Type::Regex => ty,
@@ -1465,7 +1554,7 @@ impl TypeCheckerCtx {
         }
     }
 
-    fn get_assignable_local(
+    fn get_regular_local(
         &mut self,
         node_id: usize,
         env: &Env,
@@ -1486,20 +1575,22 @@ impl TypeCheckerCtx {
         node_id: usize,
         env: &Env,
         name: &str,
-    ) -> Result<(usize, Type), TypeError> {
+    ) -> Result<(usize, Type, bool), TypeError> {
         if let Some(mut defs) = env.named_fns.get(name).cloned() {
             if defs.len() == 1 {
                 let (def_node_id, fn_ty) = defs.pop().unwrap();
-                return Ok((def_node_id, Type::Fn(fn_ty)));
+                return Ok((def_node_id, Type::Fn(fn_ty), true));
             } else {
                 let choice_var = self.fresh_overload_choice_var();
                 return Ok((
                     0, // hack -- don't use
                     Type::NamedFnOverload { defs, choice_var },
+                    true,
                 ));
             }
         } else {
-            self.get_assignable_local(node_id, env, name)
+            let (id, ty) = self.get_regular_local(node_id, env, name)?;
+            Ok((id, ty, false))
         }
     }
 
@@ -1961,7 +2052,7 @@ impl TypeCheckerCtx {
     ) -> Result<Type, TypeError> {
         match loc {
             ast::AssignLoc::Var(ast::AssignLocVar { id, var }) => {
-                let (local_id, ty) = self.get_assignable_local(*id, env, var.as_str())?;
+                let (local_id, ty) = self.get_regular_local(*id, env, var.as_str())?;
 
                 self.depends(dependents, local_id, true);
 
@@ -2288,7 +2379,11 @@ impl TypeCheckerCtx {
                 return self.assign_extra(*id, Type::Float, false);
             }
             ast::Expr::Var(ast::VarExpr { id, var }) => {
-                let (def_node_id, ty) = self.get_local(*id, env, var.as_str())?;
+                let (def_node_id, ty, is_named_fn) = self.get_local(*id, env, var.as_str())?;
+
+                if is_named_fn {
+                    self.fn_refs.insert(ty.clone());
+                }
 
                 self.depends(dependents, def_node_id, true);
 
@@ -2305,7 +2400,7 @@ impl TypeCheckerCtx {
                 let res_ty = Type::TypeVar(self.fresh_ty_var(false));
 
                 match self.get_local(*id, env, &op.str)? {
-                    (def_node_id, Type::Fn(f_ty)) => {
+                    (def_node_id, Type::Fn(f_ty), _is_named_fn) => {
                         self.depends(dependents, def_node_id, false);
                         self.depends(dependents, f_ty.meta.body_node_id, false);
 
@@ -2336,7 +2431,7 @@ impl TypeCheckerCtx {
                         );
                     }
 
-                    (_, Type::NamedFnOverload { defs, choice_var }) => {
+                    (_, Type::NamedFnOverload { defs, choice_var }, _is_named_fn) => {
                         self.assign(
                             op.id(),
                             Type::NamedFnOverload {
@@ -2397,7 +2492,7 @@ impl TypeCheckerCtx {
                 let res_ty = Type::TypeVar(self.fresh_ty_var(false));
 
                 match self.get_local(*id, env, &op.str)? {
-                    (def_node_id, Type::Fn(f_ty)) => {
+                    (def_node_id, Type::Fn(f_ty), _is_named_fn) => {
                         self.depends(dependents, def_node_id, false);
                         self.depends(dependents, f_ty.meta.body_node_id, false);
 
@@ -2434,7 +2529,7 @@ impl TypeCheckerCtx {
                         );
                     }
 
-                    (_, Type::NamedFnOverload { defs, choice_var }) => {
+                    (_, Type::NamedFnOverload { defs, choice_var }, _is_named_fn) => {
                         self.assign(
                             op.id(),
                             Type::NamedFnOverload {
@@ -2724,12 +2819,12 @@ impl TypeCheckerCtx {
                             *id,
                             f.id(),
                             Type::TypeVar(v),
-                            Type::Fn(FnType {
+                            FnType {
                                 meta: FnMeta::none(), // TODO check that this is never used
                                 generics: vec![],
                                 params,
                                 ret: ret.clone().into(),
-                            }),
+                            },
                             dependents.clone(),
                         ))?;
 

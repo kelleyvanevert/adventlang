@@ -1,4 +1,4 @@
-use fxhash::FxHashMap;
+use fxhash::{FxHashMap, FxHashSet};
 use parser::ast::{self, AstNode};
 use type_checker::types::{FnMeta, FnType, Type as Ty};
 
@@ -71,7 +71,6 @@ pub enum Expr {
     Bool(bool),
     Call {
         def: FnType,
-        fn_id: String,
         fn_val: Box<Expr>,
         args: Vec<Expr>,
     },
@@ -101,11 +100,10 @@ impl std::fmt::Display for Expr {
             Expr::Bool(value) => write!(f, "{value}"),
             Expr::Call {
                 def: _,
-                fn_id,
                 fn_val,
                 args,
             } => {
-                write!(f, "call {fn_id} [{fn_val}] (")?;
+                write!(f, "call [{fn_val}] (")?;
                 let mut first = true;
                 for arg in args {
                     if !first {
@@ -142,6 +140,31 @@ impl std::fmt::Display for Expr {
             }
             Expr::TupleIndex(expr, index) => write!(f, "{expr}[{index}"),
             Expr::If(cond, then, els) => write!(f, "if {cond} then {then} else {els}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Env {
+    // TODO: record info about closure usage, lifetime, etc.
+    locals: FxHashSet<String>,
+}
+
+impl Env {
+    fn new() -> Self {
+        Self {
+            locals: FxHashSet::default(),
+        }
+    }
+
+    fn add_local(&mut self, name: String) {
+        self.locals.insert(name);
+    }
+
+    fn has_local(&mut self, name: &str) -> bool {
+        match self.locals.get(name).cloned() {
+            Some(_) => true,
+            None => false,
         }
     }
 }
@@ -189,9 +212,10 @@ impl<'a> LoweringPass<'a> {
     pub fn lower_doc(&mut self, doc: &ast::Document) -> Document {
         let mut stmts = vec![];
         let mut fns = vec![];
+        let mut env = Env::new();
 
         for stmt in &doc.body.stmts {
-            self.lower_stmt(&mut fns, &mut stmts, stmt, false);
+            self.lower_stmt(&mut env, &mut fns, &mut stmts, stmt, false);
         }
 
         fns.push(Function {
@@ -218,6 +242,7 @@ impl<'a> LoweringPass<'a> {
 
     fn lower_stmt(
         &mut self,
+        env: &mut Env,
         fns: &mut Vec<Function>,
         stmts: &mut Vec<Stmt>,
         stmt: &ast::Stmt,
@@ -227,16 +252,16 @@ impl<'a> LoweringPass<'a> {
             ast::Stmt::Return(ast::ReturnStmt { expr, .. }) => {
                 stmts.push(Stmt::Return(
                     expr.as_ref()
-                        .map(|expr| self.lower_expr(fns, &expr, true))
+                        .map(|expr| self.lower_expr(env, fns, &expr, true))
                         .unwrap_or(Expr::Nil),
                 ));
             }
             ast::Stmt::Declare(ast::DeclareStmt { pattern, expr, .. }) => {
-                let expr = self.lower_expr(fns, expr, true);
-                self.lower_unpack_declaration_pattern(fns, stmts, pattern, expr);
+                let expr = self.lower_expr(env, fns, expr, true);
+                self.lower_unpack_declaration_pattern(env, fns, stmts, pattern, expr);
             }
             ast::Stmt::Expr(ast::ExprStmt { expr, .. }) => {
-                let expr = self.lower_expr(fns, expr, use_result);
+                let expr = self.lower_expr(env, fns, expr, use_result);
                 stmts.push(Stmt::Expr(expr));
             }
             ast::Stmt::NamedFn(ast::NamedFnItem {
@@ -249,37 +274,58 @@ impl<'a> LoweringPass<'a> {
             }) => {
                 // Stamp out implementations for every concrete usage of this function
                 // (TODO: closure stuff)
-                // println!("Usages of named fn:");
-
                 for def in self.type_checker.get_fn_usages(body.id()) {
-                    // println!("- {usage:?}");
-
-                    let mut fn_body_stmts = vec![];
-
-                    for (i, decl) in params.iter().enumerate() {
-                        self.lower_unpack_declarable(fns, &mut fn_body_stmts, decl, Expr::Param(i));
-                    }
-
-                    for (i, stmt) in body.stmts.iter().enumerate() {
-                        let is_last = i == body.stmts.len() - 1;
-                        self.lower_stmt(fns, &mut fn_body_stmts, stmt, is_last);
-                    }
-
-                    let id = self.get_concrete_fn_id(def.clone());
-
-                    fns.push(Function {
-                        fn_id: id,
-                        def,
-                        body: fn_body_stmts,
-                    });
+                    self.define_concrete_function(env, fns, def, params, body);
                 }
             }
             _ => todo!("lower stmt {:?}", stmt),
         }
     }
 
+    fn define_concrete_function(
+        &mut self,
+        env: &mut Env,
+        fns: &mut Vec<Function>,
+        concrete_usage_def: FnType,
+        params: &Vec<ast::Declarable>,
+        body: &ast::Block,
+    ) {
+        println!("Defining concrete fn {concrete_usage_def:?}");
+        let id = self.get_concrete_fn_id(concrete_usage_def.clone());
+
+        if fns.iter().find(|f| f.fn_id == id).is_some() {
+            println!("  -> already defined!");
+            return;
+        }
+
+        let mut child_env = env.clone();
+        let mut fn_body_stmts = vec![];
+
+        for (i, decl) in params.iter().enumerate() {
+            self.lower_unpack_declarable(
+                &mut child_env,
+                fns,
+                &mut fn_body_stmts,
+                decl,
+                Expr::Param(i),
+            );
+        }
+
+        for (i, stmt) in body.stmts.iter().enumerate() {
+            let is_last = i == body.stmts.len() - 1;
+            self.lower_stmt(&mut child_env, fns, &mut fn_body_stmts, stmt, is_last);
+        }
+
+        fns.push(Function {
+            fn_id: id,
+            def: concrete_usage_def,
+            body: fn_body_stmts,
+        });
+    }
+
     fn lower_unpack_declaration_pattern(
         &mut self,
+        env: &mut Env,
         fns: &mut Vec<Function>,
         stmts: &mut Vec<Stmt>,
         pattern: &ast::DeclarePattern,
@@ -287,13 +333,17 @@ impl<'a> LoweringPass<'a> {
     ) {
         match pattern {
             ast::DeclarePattern::Single(ast::DeclareSingle { var, .. }) => {
-                stmts.push(Stmt::Declare(var.as_str().to_owned(), expr));
+                let name = var.as_str().to_owned();
+                env.add_local(name.clone());
+                stmts.push(Stmt::Declare(name, expr));
             }
             ast::DeclarePattern::List(ast::DeclareList { elements, rest, .. }) => {
                 let tmp = self.fresh_tmp_var_name();
+                env.add_local(tmp.clone());
                 stmts.push(Stmt::Declare(tmp.clone(), expr));
                 for (i, el) in elements.iter().enumerate() {
                     self.lower_unpack_declarable(
+                        env,
                         fns,
                         stmts,
                         el,
@@ -304,17 +354,21 @@ impl<'a> LoweringPass<'a> {
                     );
                 }
                 if let Some(ast::DeclareRest { var, .. }) = rest {
+                    let name = var.as_str().to_string();
+                    env.add_local(name.clone());
                     stmts.push(Stmt::Declare(
-                        var.as_str().to_string(),
+                        name,
                         Expr::ListRest(Expr::Local(tmp.clone()).into(), elements.len()),
                     ));
                 }
             }
             ast::DeclarePattern::Tuple(ast::DeclareTuple { elements, .. }) => {
                 let tmp = self.fresh_tmp_var_name();
+                env.add_local(tmp.clone());
                 stmts.push(Stmt::Declare(tmp.clone(), expr));
                 for (i, el) in elements.iter().enumerate() {
                     self.lower_unpack_declarable(
+                        env,
                         fns,
                         stmts,
                         el,
@@ -327,6 +381,7 @@ impl<'a> LoweringPass<'a> {
 
     fn lower_unpack_declarable(
         &mut self,
+        env: &mut Env,
         fns: &mut Vec<Function>,
         stmts: &mut Vec<Stmt>,
         decl: &ast::Declarable,
@@ -336,25 +391,42 @@ impl<'a> LoweringPass<'a> {
             None => expr,
             Some(fallback_expr) => Expr::Coalesce(
                 expr.into(),
-                self.lower_expr(fns, fallback_expr, true).into(),
+                self.lower_expr(env, fns, fallback_expr, true).into(),
             ),
         };
 
-        self.lower_unpack_declaration_pattern(fns, stmts, &decl.pattern, expr);
+        self.lower_unpack_declaration_pattern(env, fns, stmts, &decl.pattern, expr);
     }
 
-    fn lower_expr(&mut self, fns: &mut Vec<Function>, expr: &ast::Expr, use_result: bool) -> Expr {
+    fn lower_expr(
+        &mut self,
+        env: &mut Env,
+        fns: &mut Vec<Function>,
+        expr: &ast::Expr,
+        use_result: bool,
+    ) -> Expr {
         match expr {
             ast::Expr::Var(ast::VarExpr { id, var }) => {
+                // A regular local, not a known named fn reference
+                // This is crucial for e.g. fn's given as arguments
+                if env.has_local(&var.name) {
+                    return Expr::Local(var.name.clone());
+                }
+
                 let ty = self.type_checker.get_type(*id);
-                println!("lowering var {}", var.name.to_string());
+
+                println!("lowering var {}", var.name);
                 println!("  of type: {:?}", ty);
+                // println!("  normalized: {:?}", self.type_checker.normalize_ty(ty));
                 match ty {
                     Ty::Fn(def) => Expr::FnRef {
                         fn_id: self.get_concrete_fn_id(def.clone()),
                         def,
                     },
-                    _ => Expr::Local(var.name.to_string()),
+                    _ => panic!(
+                        "Should not happen: local not found, and also not a fn ref: {}",
+                        var.name
+                    ),
                 }
             }
             ast::Expr::Int(ast::IntExpr { value, .. }) => Expr::Int(*value),
@@ -363,7 +435,7 @@ impl<'a> LoweringPass<'a> {
                 let mut stmts = vec![];
 
                 for stmt in &body.stmts {
-                    self.lower_stmt(fns, &mut stmts, stmt, false);
+                    self.lower_stmt(env, fns, &mut stmts, stmt, false);
                 }
 
                 if !use_result {
@@ -383,17 +455,15 @@ impl<'a> LoweringPass<'a> {
                 right,
             }) => {
                 let def = self.type_checker.get_type(op.id()).as_fn_ty();
-                // println!("function: `{}: {:?}`", op.str, ty);
 
                 let fn_id = self.get_concrete_fn_id(def.clone());
 
                 Expr::Call {
-                    def,
-                    fn_id,
-                    fn_val: Expr::Nil.into(), // irrelevant, in this case
+                    def: def.clone(),
+                    fn_val: Expr::FnRef { def, fn_id }.into(),
                     args: vec![
-                        self.lower_expr(fns, left, true),
-                        self.lower_expr(fns, right, true),
+                        self.lower_expr(env, fns, left, true),
+                        self.lower_expr(env, fns, right, true),
                     ],
                 }
             }
@@ -408,22 +478,19 @@ impl<'a> LoweringPass<'a> {
                     todo!()
                 }
 
-                // what to do?
-                let callee = self.lower_expr(fns, f, true);
+                let callee = self.lower_expr(env, fns, f, true);
 
                 let def = self.type_checker.get_fn_usage(*id);
-                // println!("function: `#{}: {:?}`", usage.body_node_id, usage);
 
-                let fn_id = self.get_concrete_fn_id(def.clone());
+                // let fn_id = self.get_concrete_fn_id(def.clone());
 
                 Expr::Call {
                     def,
-                    fn_id,
                     fn_val: callee.into(),
                     // TODO: postfix should first calculate
                     args: args
                         .iter()
-                        .map(|arg| self.lower_expr(fns, &arg.expr, true))
+                        .map(|arg| self.lower_expr(env, fns, &arg.expr, true))
                         .collect(),
                 }
             }
@@ -434,11 +501,11 @@ impl<'a> LoweringPass<'a> {
             }) => Expr::List(
                 elements
                     .into_iter()
-                    .map(|el| self.lower_expr(fns, el, true))
+                    .map(|el| self.lower_expr(env, fns, el, true))
                     .collect(),
                 splat
                     .as_ref()
-                    .map(|expr| self.lower_expr(fns, expr.as_ref(), true).into()),
+                    .map(|expr| self.lower_expr(env, fns, expr.as_ref(), true).into()),
             ),
             ast::Expr::Index(ast::IndexExpr {
                 id: _,
@@ -446,8 +513,8 @@ impl<'a> LoweringPass<'a> {
                 coalesce: _,
                 index,
             }) => Expr::ListIndex(
-                self.lower_expr(fns, expr, true).into(),
-                self.lower_expr(fns, index, true).into(),
+                self.lower_expr(env, fns, expr, true).into(),
+                self.lower_expr(env, fns, index, true).into(),
             ),
             _ => todo!("lower expr {:?}", expr),
         }

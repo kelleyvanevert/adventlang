@@ -3,7 +3,30 @@ use parser::{AdventlangParser, print_parse_error};
 use type_checker::{TypeCheckerCtx, print_type_error};
 
 pub fn main() {
-    //     let source = "
+    // // Works, because `len` is immediately resolved
+    // //  to concrete implementation `fn([int]) -> int`,
+    // //  and passed as such to `some_fn`.
+    // let source = "
+    //     fn some_fn(f) {
+    //         let a = [1, 2, 3, 4];
+    //         print(f(a))
+    //     }
+    //
+    //     some_fn(len)
+    // ";
+
+    // // This is tricker, because here `some_fn` actually
+    // //  wants its arg to be a generic fn.
+    // let source = "
+    //     fn some_fn(f: fn<A>([A]) -> int) {
+    //         let a = [1, 2, 3, 4];
+    //         print(f(a))
+    //     }
+    //
+    //     some_fn(len)
+    // ";
+
+    // let source = "
     //         let a = 4
     //         let b = a + 2
     //         print(b)
@@ -25,9 +48,16 @@ pub fn main() {
     // //        }
     //     ";
 
+    // Works, because the local reference of `add_one` is stored
+    //  by the type checker in `fn_refs`. Also, the right overload
+    //  is chosen in each case.
     let source = "
         fn add_one(n: int) {
           n + 1
+        }
+
+        fn add_one(b: bool) {
+          42
         }
 
         fn add_two(n: int) {
@@ -38,8 +68,13 @@ pub fn main() {
           f(10)
         }
 
-        print(some_fn(add_one)) // 11
-        print(some_fn(add_two)) // 12
+        fn some_other_fn(f: fn(bool) -> int) -> int {
+          f(true)
+        }
+
+        print(some_fn(add_one))       // 11
+        print(some_fn(add_two))       // 12
+        print(some_other_fn(add_one)) // 42
     ";
 
     let mut parser = AdventlangParser::new();

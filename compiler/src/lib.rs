@@ -148,8 +148,8 @@ impl<'a> JIT<'a> {
             if def.meta.stdlib {
                 self.compile_stdlib_fn(id, sig.clone(), def.clone())?;
             } else {
-                println!("  Hmm, declaring user-defined fn {name}: {def:?}");
-                println!("   meta: {:?}", def.meta);
+                println!("  Should not happen, declaring user-defined fn {name}: {def:?}");
+                println!("   w/ meta: {:?}", def.meta);
                 todo!()
             }
 
@@ -301,20 +301,30 @@ struct FnTranslator<'a> {
 }
 
 impl<'a> FnTranslator<'a> {
-    fn ensure_gets_compiled(&mut self, name: &str, def: FnType) -> Result<FuncId, CompileError> {
-        println!("    Ensuring gets compiled: {}: {:?}", name, def);
-        if let Some((id, _, _, _)) = self.fn_ids.get(name).cloned() {
-            return Ok(id);
-        }
-
-        println!("      new: {}: {:?}", name, def);
-
+    fn make_sig(&self, def: &FnType) -> Signature {
         // declare signature
         let mut sig = Signature::new(self.call_conv);
         for _ in &def.params {
             sig.params.push(AbiParam::new(I64));
         }
         sig.returns.push(AbiParam::new(I64));
+
+        sig
+    }
+
+    fn ensure_gets_compiled(&mut self, name: &str, def: FnType) -> Result<FuncId, CompileError> {
+        if let Some((id, _, _, _)) = self.fn_ids.get(name).cloned() {
+            return Ok(id);
+        }
+
+        if !def.meta.stdlib {
+            println!("    Should not happen:");
+            println!("    Ensuring gets compiled: {}: {:?}", name, def);
+            panic!();
+        }
+
+        // declare signature
+        let sig = self.make_sig(&def);
 
         let id = self
             .module
@@ -377,35 +387,20 @@ impl<'a> FnTranslator<'a> {
             }
             lower::Expr::Int(value) => self.builder.ins().iconst(I64, *value),
             lower::Expr::Bool(value) => self.builder.ins().iconst(I64, *value as i64),
-            lower::Expr::Call {
-                def,
-                fn_id,
-                fn_val: _, // will be used for closures...
-                args,
-            } => {
-                // println!("    Needs {}", fn_id);
-                let compiled_fn_id = self.ensure_gets_compiled(fn_id, def.clone()).expect("msg");
-                // println!("      -> {}", compiled_fn_id);
+            lower::Expr::Call { def, fn_val, args } => {
+                let fn_ptr = self.translate_expr(fn_val);
 
-                // let (compiled_fn_id, _, _) = *self
-                //     .fn_ids
-                //     .get(fn_id)
-                //     .expect(&format!("have fn_id {:?}", fn_id));
+                let sig = self.make_sig(&def);
 
-                let compiled_fn_ref = self
-                    .module
-                    .declare_func_in_func(compiled_fn_id, &mut self.builder.func);
-                // println!("      ->> {}", compiled_fn_ref);
+                let sig_ref = self.builder.import_signature(sig);
 
                 let args = args
                     .into_iter()
                     .map(|arg| self.translate_expr(arg))
                     .collect::<Vec<_>>();
 
-                let call = self.builder.ins().call(compiled_fn_ref, &args);
-                let res = self.builder.inst_results(call)[0];
-
-                res
+                let call = self.builder.ins().call_indirect(sig_ref, fn_ptr, &args);
+                self.builder.inst_results(call)[0]
             }
             // lower::Expr::Block {
             //     label: Option<String>,
