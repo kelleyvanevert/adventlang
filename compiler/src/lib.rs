@@ -383,7 +383,34 @@ impl<'a> FnTranslator<'a> {
             }
             lower::Expr::Int(value) => self.builder.ins().iconst(I64, *value),
             lower::Expr::Bool(value) => self.builder.ins().iconst(I64, *value as i64),
-            lower::Expr::Call { def, fn_val, args } => {
+            lower::Expr::Call {
+                def,
+                fn_id,
+                fn_val,
+                args,
+            } => {
+                if def.meta.body_node_id > 0
+                    && def.meta.stdlib == false
+                    && let Some((id, _sig, _ty, _)) = self.fn_ids.get(fn_id).cloned()
+                {
+                    // it's statically fully known which function is being called,
+                    //  so we can optimize by directly calling it instead of
+                    //  indirectly via fn ptr.
+                    // TODO: check if this is actually an optimization or not
+
+                    let _fn_ptr = self.translate_expr(fn_val);
+
+                    let args = args
+                        .into_iter()
+                        .map(|arg| self.translate_expr(arg))
+                        .collect::<Vec<_>>();
+
+                    let fn_ref = self.module.declare_func_in_func(id, &mut self.builder.func);
+
+                    let call = self.builder.ins().call(fn_ref, &args);
+                    return self.builder.inst_results(call)[0];
+                }
+
                 let fn_ptr = self.translate_expr(fn_val);
 
                 let sig = self.make_sig(&def);

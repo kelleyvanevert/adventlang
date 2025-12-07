@@ -72,6 +72,7 @@ pub enum Expr {
     Call {
         def: FnType,
         fn_val: Box<Expr>,
+        fn_id: String,
         args: Vec<Expr>,
     },
     Block {
@@ -100,6 +101,7 @@ impl std::fmt::Display for Expr {
             Expr::Bool(value) => write!(f, "{value}"),
             Expr::Call {
                 def: _,
+                fn_id: _,
                 fn_val,
                 args,
             } => {
@@ -460,6 +462,7 @@ impl<'a> LoweringPass<'a> {
 
                 Expr::Call {
                     def: def.clone(),
+                    fn_id: fn_id.clone(),
                     fn_val: Expr::FnRef { def, fn_id }.into(),
                     args: vec![
                         self.lower_expr(env, fns, left, true),
@@ -482,10 +485,11 @@ impl<'a> LoweringPass<'a> {
 
                 let def = self.type_checker.get_fn_usage(*id);
 
-                // let fn_id = self.get_concrete_fn_id(def.clone());
+                let fn_id = self.get_concrete_fn_id(def.clone());
 
                 Expr::Call {
                     def,
+                    fn_id,
                     fn_val: callee.into(),
                     // TODO: postfix should first calculate
                     args: args
