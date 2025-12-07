@@ -13,6 +13,7 @@ pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
         print: fn(int) -> nil
         print: fn(str) -> nil
         assert: fn(bool) -> nil
+        assert_eq: fn<T>(T, T) -> nil
         panic: fn<T>() -> T
         panic: fn<T>(str) -> T
         unreachable: fn<T>() -> T

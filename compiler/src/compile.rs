@@ -11,8 +11,8 @@ use type_checker::{TypeCheckerCtx, TypeError};
 
 use crate::runtime::Runtime;
 use crate::stdlib_impl::{
-    implement_stdlib_len, implement_stdlib_plus, implement_stdlib_print, implement_stdlib_stdin,
-    implement_stdlib_trim,
+    implement_stdlib_len, implement_stdlib_lines, implement_stdlib_plus, implement_stdlib_print,
+    implement_stdlib_stdin, implement_stdlib_trim,
 };
 use crate::{RuntimeOverrides, lower};
 
@@ -201,6 +201,9 @@ impl<'a> JIT<'a> {
             }
             "+" => implement_stdlib_plus(def, &mut self.module, &mut builder, &self.runtime_fns),
             "len" => implement_stdlib_len(def, &mut self.module, &mut builder, &self.runtime_fns),
+            "lines" => {
+                implement_stdlib_lines(def, &mut self.module, &mut builder, &self.runtime_fns)
+            }
             "stdin" => {
                 implement_stdlib_stdin(def, &mut self.module, &mut builder, &self.runtime_fns)
             }
@@ -385,6 +388,36 @@ impl<'a> FnTranslator<'a> {
             }
             lower::Expr::Int(value) => self.builder.ins().iconst(I64, *value),
             lower::Expr::Bool(value) => self.builder.ins().iconst(I64, *value as i64),
+            lower::Expr::Str { id, str } => {
+                let data_id = self
+                    .module
+                    .declare_data(&format!("str_{}", id), Linkage::Local, false, false)
+                    .unwrap();
+
+                let mut data = DataDescription::new();
+                data.define(str.clone().into_bytes().into());
+
+                self.module.define_data(data_id, &data).unwrap();
+
+                let data_global_value = self
+                    .module
+                    .declare_data_in_func(data_id, &mut self.builder.func);
+
+                let data_ptr = self.builder.ins().global_value(
+                    self.module.target_config().pointer_type(),
+                    data_global_value,
+                );
+
+                let str_u8_len = self.builder.ins().iconst(I64, str.len() as i64);
+
+                let fn_ref = self.module.declare_func_in_func(
+                    self.runtime_fns.al_create_str_from_literal,
+                    &mut self.builder.func,
+                );
+
+                let call = self.builder.ins().call(fn_ref, &[data_ptr, str_u8_len]);
+                return self.builder.inst_results(call)[0];
+            }
             lower::Expr::Call {
                 def,
                 fn_id,

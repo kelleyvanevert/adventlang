@@ -1,4 +1,4 @@
-use compiler::{RuntimeOverrides, compile::CompileError, compile_to_fn};
+use compiler::{RuntimeOverrides, compile::CompileError, compile_to_fn, runtime};
 use parser::print_parse_error;
 use rstest::rstest;
 use std::cell::RefCell;
@@ -11,6 +11,15 @@ thread_local! {
 pub extern "C" fn override_al_print_int(value: u64) {
     PRINTED_LINES.with_borrow_mut(|lines| {
         lines.push(value.to_string());
+    });
+}
+
+#[allow(unused)]
+pub extern "C" fn override_al_print_str(ptr: *mut u64) {
+    runtime::str::using_al_str(ptr, |str| {
+        PRINTED_LINES.with_borrow_mut(|lines| {
+            lines.push(str.to_string());
+        });
     });
 }
 
@@ -28,6 +37,7 @@ fn run_corpus_test_case(
 
     let runtime_overrides = RuntimeOverrides {
         al_print_int: Some(override_al_print_int as *const u8),
+        al_print_str: Some(override_al_print_str as *const u8),
     };
 
     let compiled_fn = match compile_to_fn(source, runtime_overrides) {

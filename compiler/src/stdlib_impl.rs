@@ -45,18 +45,43 @@ pub fn implement_stdlib_plus(
 }
 
 pub fn implement_stdlib_len(
-    _def: FnType,
+    def: FnType,
     module: &mut JITModule,
     builder: &mut FunctionBuilder,
     runtime_fns: &Runtime,
 ) {
     let curr_block = builder.current_block().unwrap();
-    let list_ptr = builder.block_params(curr_block)[0];
+    let ptr = builder.block_params(curr_block)[0];
 
     // Call runtime fn
     {
-        let fn_ref = module.declare_func_in_func(runtime_fns.al_vec_len, &mut builder.func);
-        let call = builder.ins().call(fn_ref, &[list_ptr]);
+        let fn_ref = module.declare_func_in_func(
+            if def.params[0].is_str() {
+                runtime_fns.al_str_len
+            } else {
+                runtime_fns.al_vec_len
+            },
+            &mut builder.func,
+        );
+        let call = builder.ins().call(fn_ref, &[ptr]);
+        let res = builder.inst_results(call)[0];
+        builder.ins().return_(&[res]);
+    }
+}
+
+pub fn implement_stdlib_lines(
+    def: FnType,
+    module: &mut JITModule,
+    builder: &mut FunctionBuilder,
+    runtime_fns: &Runtime,
+) {
+    let curr_block = builder.current_block().unwrap();
+    let ptr = builder.block_params(curr_block)[0];
+
+    // Call runtime fn
+    {
+        let fn_ref = module.declare_func_in_func(runtime_fns.al_str_lines, &mut builder.func);
+        let call = builder.ins().call(fn_ref, &[ptr]);
         let res = builder.inst_results(call)[0];
         builder.ins().return_(&[res]);
     }

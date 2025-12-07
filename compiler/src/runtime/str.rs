@@ -52,11 +52,18 @@ fn mk_al_str(str: impl Into<String>) -> *mut () {
 }
 
 #[allow(unused)]
-pub extern "C" fn al_create_str_from_literal(ptr: *mut u8) -> *mut () {
-    let str = unsafe { std::ffi::CStr::from_ptr(ptr as *const i8) };
-    let str = str.to_str().unwrap().to_string();
+pub extern "C" fn al_create_str_from_literal(ptr: *mut u8, len: u64) -> *mut () {
+    let info = AL_STR as u64;
 
-    mk_al_str(str)
+    let str = unsafe { String::from_raw_parts(ptr, len as usize, len as usize) };
+
+    let ptr = Box::into_raw(Box::new(AlStr { info, str })) as *mut ();
+
+    PTRS.with_borrow_mut(|ptrs| {
+        ptrs.insert(ptr);
+    });
+
+    ptr
 }
 
 #[allow(unused)]

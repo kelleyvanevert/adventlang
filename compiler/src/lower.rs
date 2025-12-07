@@ -69,6 +69,10 @@ pub enum Expr {
     Param(usize),
     Int(i64),
     Bool(bool),
+    Str {
+        id: usize,
+        str: String,
+    },
     Call {
         def: FnType,
         fn_val: Box<Expr>,
@@ -99,6 +103,7 @@ impl std::fmt::Display for Expr {
             Expr::Param(index) => write!(f, "param-#{index}"),
             Expr::Int(value) => write!(f, "{value}"),
             Expr::Bool(value) => write!(f, "{value}"),
+            Expr::Str { id: _, str } => write!(f, "\"{str}\""),
             Expr::Call {
                 def: _,
                 fn_id: _,
@@ -526,6 +531,21 @@ impl<'a> LoweringPass<'a> {
                 self.lower_expr(env, fns, expr, true).into(),
                 self.lower_expr(env, fns, index, true).into(),
             ),
+            ast::Expr::Str(ast::StrExpr { id, pieces }) => {
+                if pieces.len() > 1 {
+                    panic!("TODO: handle str interpolations");
+                }
+
+                let ast::StrPiece::Fragment(ast::StrPieceFragment { id: _, str }) = &pieces[0]
+                else {
+                    unreachable!()
+                };
+
+                Expr::Str {
+                    id: *id,
+                    str: str.clone(),
+                }
+            }
             _ => todo!("lower expr {:?}", expr),
         }
     }

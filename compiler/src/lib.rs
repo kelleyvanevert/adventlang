@@ -8,7 +8,7 @@ use crate::{
 
 pub mod compile;
 mod lower;
-mod runtime;
+pub mod runtime;
 mod stdlib_impl;
 
 pub use runtime::RuntimeOverrides;

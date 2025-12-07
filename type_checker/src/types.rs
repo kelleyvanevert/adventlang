@@ -216,6 +216,13 @@ impl Type {
         }
     }
 
+    pub fn is_str(&self) -> bool {
+        match self {
+            Type::Str => true,
+            _ => false,
+        }
+    }
+
     pub fn irreconcilable(&self, other: &Type) -> bool {
         match (self, other) {
             (

@@ -5,7 +5,7 @@ use cranelift_module::{FuncId, Linkage, Module};
 use crate::runtime::{
     list::{al_create_vec, al_index_vec, al_push_vec, al_vec_len},
     print::{al_print_int, al_print_str},
-    str::{al_stdin_as_str, al_str_trim},
+    str::{al_create_str_from_literal, al_stdin_as_str, al_str_len, al_str_lines, al_str_trim},
 };
 
 pub mod gc;
@@ -21,11 +21,15 @@ pub const AL_STR: u8 = 0x27;
 #[derive(Debug, Clone)]
 pub struct RuntimeOverrides {
     pub al_print_int: Option<*const u8>,
+    pub al_print_str: Option<*const u8>,
 }
 
 impl RuntimeOverrides {
     pub fn none() -> Self {
-        Self { al_print_int: None }
+        Self {
+            al_print_int: None,
+            al_print_str: None,
+        }
     }
 }
 
@@ -37,8 +41,11 @@ pub struct Runtime {
     pub al_push_vec_64: FuncId,
     pub al_index_vec_64: FuncId,
     pub al_vec_len: FuncId,
+    pub al_create_str_from_literal: FuncId,
     pub al_stdin_as_str: FuncId,
     pub al_str_trim: FuncId,
+    pub al_str_len: FuncId,
+    pub al_str_lines: FuncId,
 }
 
 fn declare(module: &mut JITModule, name: &str, params: &[Type], ret: Option<Type>) -> FuncId {
@@ -62,13 +69,22 @@ impl Runtime {
             "al_print_int",
             overrides.al_print_int.unwrap_or(al_print_int as *const u8),
         );
-        builder.symbol("al_print_str", al_print_str as *const u8);
+        builder.symbol(
+            "al_print_str",
+            overrides.al_print_str.unwrap_or(al_print_str as *const u8),
+        );
         builder.symbol("al_create_vec", al_create_vec as *const u8);
         builder.symbol("al_push_vec_64", al_push_vec::<u64> as *const u8);
         builder.symbol("al_index_vec_64", al_index_vec::<u64> as *const u8);
         builder.symbol("al_vec_len", al_vec_len as *const u8);
+        builder.symbol(
+            "al_create_str_from_literal",
+            al_create_str_from_literal as *const u8,
+        );
         builder.symbol("al_stdin_as_str", al_stdin_as_str as *const u8);
         builder.symbol("al_str_trim", al_str_trim as *const u8);
+        builder.symbol("al_str_len", al_str_len as *const u8);
+        builder.symbol("al_str_lines", al_str_lines as *const u8);
 
         let mut module = JITModule::new(builder);
 
@@ -78,8 +94,16 @@ impl Runtime {
         let al_push_vec_64 = declare(&mut module, "al_push_vec_64", &[I64, I64], None);
         let al_index_vec_64 = declare(&mut module, "al_index_vec_64", &[I64, I64], Some(I64));
         let al_vec_len = declare(&mut module, "al_vec_len", &[I64], Some(I64));
+        let al_create_str_from_literal = declare(
+            &mut module,
+            "al_create_str_from_literal",
+            &[I64, I64],
+            Some(I64),
+        );
         let al_stdin_as_str = declare(&mut module, "al_stdin_as_str", &[], Some(I64));
         let al_str_trim = declare(&mut module, "al_str_trim", &[I64], Some(I64));
+        let al_str_len = declare(&mut module, "al_str_len", &[I64], Some(I64));
+        let al_str_lines = declare(&mut module, "al_str_lines", &[I64], Some(I64));
 
         (
             module,
@@ -90,8 +114,11 @@ impl Runtime {
                 al_push_vec_64,
                 al_index_vec_64,
                 al_vec_len,
+                al_create_str_from_literal,
                 al_stdin_as_str,
                 al_str_trim,
+                al_str_len,
+                al_str_lines,
             },
         )
     }
