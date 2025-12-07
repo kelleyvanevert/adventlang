@@ -26,14 +26,11 @@ pub fn compile_to_fn(
     type_checker.typecheck(&parse_result.document)?;
 
     let mut lowering_pass = LoweringPass::new(&type_checker);
-
     let lowered_doc = lowering_pass.lower_doc(&parse_result.document);
 
     let mut jit_compiler = JIT::new(&type_checker, runtime_overrides);
-
     let code_ptr = jit_compiler.compile_doc(&lowered_doc)?;
 
     let code_fn = unsafe { std::mem::transmute::<_, fn() -> ()>(code_ptr) };
-
     Ok(code_fn)
 }
