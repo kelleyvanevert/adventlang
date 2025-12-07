@@ -220,6 +220,11 @@ impl<'a> LoweringPass<'a> {
             self.lower_stmt(&mut env, &mut fns, &mut stmts, stmt, false);
         }
 
+        // edge-case
+        if doc.body.stmts.len() == 0 {
+            stmts.push(Stmt::Expr(Expr::Nil));
+        }
+
         fns.push(Function {
             fn_id: "@doc".to_string(),
             def: FnType {
@@ -431,6 +436,7 @@ impl<'a> LoweringPass<'a> {
                     ),
                 }
             }
+            ast::Expr::Nil(ast::NilExpr { .. }) => Expr::Nil,
             ast::Expr::Int(ast::IntExpr { value, .. }) => Expr::Int(*value),
             ast::Expr::Bool(ast::BoolExpr { value, .. }) => Expr::Bool(*value),
             ast::Expr::Do(ast::DoExpr { label, body, .. }) => {

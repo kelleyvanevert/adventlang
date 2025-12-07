@@ -18,6 +18,17 @@ pub const AL_VEC: u8 = 0x34;
 pub const AL_CLOSURE: u8 = 0x14;
 pub const AL_STR: u8 = 0x27;
 
+#[derive(Debug, Clone)]
+pub struct RuntimeOverrides {
+    pub al_print_int: Option<*const u8>,
+}
+
+impl RuntimeOverrides {
+    pub fn none() -> Self {
+        Self { al_print_int: None }
+    }
+}
+
 #[derive(Debug)]
 pub struct Runtime {
     pub al_print_int: FuncId,
@@ -46,8 +57,11 @@ fn declare(module: &mut JITModule, name: &str, params: &[Type], ret: Option<Type
 }
 
 impl Runtime {
-    pub fn new(mut builder: JITBuilder) -> (JITModule, Self) {
-        builder.symbol("al_print_int", al_print_int as *const u8);
+    pub fn new(mut builder: JITBuilder, overrides: RuntimeOverrides) -> (JITModule, Self) {
+        builder.symbol(
+            "al_print_int",
+            overrides.al_print_int.unwrap_or(al_print_int as *const u8),
+        );
         builder.symbol("al_print_str", al_print_str as *const u8);
         builder.symbol("al_create_vec", al_create_vec as *const u8);
         builder.symbol("al_push_vec_64", al_push_vec::<u64> as *const u8);
