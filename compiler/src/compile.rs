@@ -1,3 +1,4 @@
+use cranelift::codegen::ir::BlockArg;
 use cranelift::codegen::verifier::VerifierErrors;
 use cranelift::prelude::*;
 use cranelift::{codegen::CodegenError, prelude::types::I64};
@@ -302,6 +303,10 @@ struct FnTranslator<'a> {
 }
 
 impl<'a> FnTranslator<'a> {
+    fn ptr_ty(&self) -> Type {
+        self.module.target_config().pointer_type()
+    }
+
     fn make_sig(&self, def: &FnType) -> Signature {
         // declare signature
         let mut sig = self.module.make_signature();
@@ -389,6 +394,8 @@ impl<'a> FnTranslator<'a> {
             lower::Expr::Int(value) => self.builder.ins().iconst(I64, *value),
             lower::Expr::Bool(value) => self.builder.ins().iconst(I64, *value as i64),
             lower::Expr::Str { id, str } => {
+                let ptr_ty = self.ptr_ty();
+
                 let data_id = self
                     .module
                     .declare_data(&format!("str_{}", id), Linkage::Local, false, false)
@@ -403,10 +410,7 @@ impl<'a> FnTranslator<'a> {
                     .module
                     .declare_data_in_func(data_id, &mut self.builder.func);
 
-                let data_ptr = self.builder.ins().global_value(
-                    self.module.target_config().pointer_type(),
-                    data_global_value,
-                );
+                let data_ptr = self.builder.ins().global_value(ptr_ty, data_global_value);
 
                 let str_u8_len = self.builder.ins().iconst(I64, str.len() as i64);
 
@@ -528,6 +532,85 @@ impl<'a> FnTranslator<'a> {
                 }
 
                 list_ptr
+            }
+            lower::Expr::For(label, var_name, range, stmts) => {
+                let ptr_ty = self.ptr_ty();
+                let range_val = self.translate_expr(range);
+
+                // prepare three blocks:
+                // - header (index) -> check if condition holds, jump appropriately
+                // - body           -> eval stmts, jump back to header
+                // - exit           -> exit loop
+                let header_block = self.builder.create_block();
+                self.builder.append_block_param(header_block, ptr_ty);
+                let body_block = self.builder.create_block();
+                let exit_block = self.builder.create_block();
+
+                let list_len = {
+                    let fn_ref = self
+                        .module
+                        .declare_func_in_func(self.runtime_fns.al_vec_len, &mut self.builder.func);
+                    let call = self.builder.ins().call(fn_ref, &[range_val]);
+                    self.builder.inst_results(call)[0]
+                };
+
+                // Enter loop
+                {
+                    let initial_index = self.builder.ins().iconst(ptr_ty, 0);
+                    self.builder
+                        .ins()
+                        .jump(header_block, &[initial_index.into()]);
+                }
+
+                // Header
+                let current_index = self.builder.block_params(header_block)[0];
+                {
+                    self.builder.switch_to_block(header_block);
+                    let condition =
+                        self.builder
+                            .ins()
+                            .icmp(IntCC::UnsignedLessThan, current_index, list_len);
+
+                    self.builder
+                        .ins()
+                        .brif(condition, body_block, &[], exit_block, &[]);
+                }
+
+                // Body
+                let var = self.builder.declare_var(I64);
+                self.env.add_local(var_name.clone(), var);
+                {
+                    self.builder.switch_to_block(body_block);
+
+                    let fn_ref = self.module.declare_func_in_func(
+                        self.runtime_fns.al_index_vec_64,
+                        &mut self.builder.func,
+                    );
+                    let call = self.builder.ins().call(fn_ref, &[range_val, current_index]);
+                    let val = self.builder.inst_results(call)[0];
+                    self.builder.def_var(var, val);
+
+                    // Execute body
+                    for stmt in stmts {
+                        self.translate_stmt(stmt, false);
+                    }
+
+                    // Increment index
+                    let one = self.builder.ins().iconst(ptr_ty, 1);
+                    let next_index = self.builder.ins().iadd(current_index, one);
+                    self.builder.ins().jump(header_block, &[next_index.into()]);
+                }
+
+                // Exit loop
+                self.builder.switch_to_block(exit_block);
+
+                // Seal blocks
+                self.builder.seal_block(header_block);
+                self.builder.seal_block(body_block);
+                self.builder.seal_block(exit_block);
+
+                // Evaluate to NIL
+                self.builder.ins().iconst(I64, 0)
             }
             // lower::Expr::TupleIndex(Box<Expr>, usize),
             // lower::Expr::If(Box<Expr>, Box<Expr>, Box<Expr>),

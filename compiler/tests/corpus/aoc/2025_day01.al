@@ -12,7 +12,7 @@ L82"
 
 fn solve(input: str) {
   for let line in input :lines {
-    // todo
+    // print(line)
   }
 }
 

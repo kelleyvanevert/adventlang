@@ -68,6 +68,7 @@ Status:
   - postponed nice-to-haves:
     - named and optional arguments for functions
     - automatic conversions (?) / allowing non-bools in conditions
+    - allow `for-each` looping over custom types (if `[]` and `:len` defined)
 - [ ] 10% create a compiler
   - [ ] 10% lowering
     - [ ] monomorphized implementations of generic functions, etc.

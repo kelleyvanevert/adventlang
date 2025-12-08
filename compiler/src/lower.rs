@@ -1,6 +1,6 @@
 use fxhash::{FxHashMap, FxHashSet};
 use parser::ast::{self, AstNode};
-use type_checker::types::{FnMeta, FnType, Type as Ty};
+use type_checker::types::{FnMeta, FnType, Type};
 
 #[derive(Debug, Clone)]
 pub struct Document {
@@ -92,6 +92,7 @@ pub enum Expr {
     ListRest(Box<Expr>, usize),
     ListIndex(Box<Expr>, Box<Expr>),
     List(Vec<Expr>, Option<Box<Expr>>),
+    For(Option<String>, String, Box<Expr>, Vec<Stmt>),
     TupleIndex(Box<Expr>, usize),
     If(Box<Expr>, Box<Expr>, Box<Expr>),
 }
@@ -145,6 +146,7 @@ impl std::fmt::Display for Expr {
                 }
                 write!(f, "]")
             }
+            Expr::For(_label, var, list, _stmts) => write!(f, "for {var} in ({list}) {{ <body> }}"),
             Expr::TupleIndex(expr, index) => write!(f, "{expr}[{index}"),
             Expr::If(cond, then, els) => write!(f, "if {cond} then {then} else {els}"),
         }
@@ -236,7 +238,7 @@ impl<'a> LoweringPass<'a> {
                 meta: FnMeta::none(),
                 generics: vec![],
                 params: vec![],
-                ret: Ty::Nil.into(),
+                ret: Type::Nil.into(),
             },
             body: stmts,
         });
@@ -431,7 +433,7 @@ impl<'a> LoweringPass<'a> {
                 println!("  of type: {:?}", ty);
                 // println!("  normalized: {:?}", self.type_checker.normalize_ty(ty));
                 match ty {
-                    Ty::Fn(def) => Expr::FnRef {
+                    Type::Fn(def) => Expr::FnRef {
                         fn_id: self.get_concrete_fn_id(def.clone()),
                         def,
                     },
@@ -545,6 +547,40 @@ impl<'a> LoweringPass<'a> {
                     id: *id,
                     str: str.clone(),
                 }
+            }
+            ast::Expr::For(ast::ForExpr {
+                id: _,
+                label,
+                pattern,
+                range,
+                body,
+            }) => {
+                let ast::DeclarePattern::Single(ast::DeclareSingle { id, var, ty }) = pattern
+                else {
+                    todo!("deal with for-loop let pattern");
+                };
+
+                let Type::List(el) = self.type_checker.get_type(range.id()) else {
+                    todo!("deal with for-loops over ranges other than lists")
+                };
+
+                let range = self.lower_expr(env, fns, range, true).into();
+
+                let mut stmts = vec![];
+
+                let mut body_env = env.clone();
+                body_env.add_local(var.name.clone());
+
+                for stmt in &body.stmts {
+                    self.lower_stmt(&mut body_env, fns, &mut stmts, stmt, false);
+                }
+
+                Expr::For(
+                    label.as_ref().map(|s| s.str.clone()),
+                    var.name.clone(),
+                    range,
+                    stmts,
+                )
             }
             _ => todo!("lower expr {:?}", expr),
         }
