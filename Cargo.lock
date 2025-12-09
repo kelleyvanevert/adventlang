@@ -121,13 +121,8 @@ dependencies = [
  "fxhash",
  "hexdump",
  "indenter",
- "inkwell",
- "lazy_static",
- "libffi",
- "ouroboros",
  "parser",
  "rstest",
- "safer-ffi",
  "thiserror 2.0.17",
  "type_checker",
 ]
