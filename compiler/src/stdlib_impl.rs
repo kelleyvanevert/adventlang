@@ -24,15 +24,22 @@ impl Stdlib {
         };
 
         stdlib
+            // misc
+            .runtime_fn("print: fn(int) -> nil", runtime.al_print_int)
+            .runtime_fn("print: fn(str) -> nil", runtime.al_print_str)
             // set operations
             .runtime_fn("in: fn(:64, set[:64]) -> bool", runtime.al_push_vec_64) // TODO
             // list operations
+            .runtime_fn("new_list: fn() -> [:64]", runtime.al_create_vec)
             .runtime_fn("in: fn(:64, [:64]) -> bool", runtime.al_push_vec_64) // TODO
             .runtime_fn("push: fn([:64], :64) -> [:64]", runtime.al_push_vec_64)
             .runtime_fn("len: fn([:64]) -> int", runtime.al_vec_len)
             // string operations
             .runtime_fn("len: fn(str) -> int", runtime.al_str_len)
             .runtime_fn("+: fn(str, str) -> str", runtime.al_str_concat)
+            .runtime_fn("stdin: fn() -> str", runtime.al_stdin_as_str)
+            .runtime_fn("trim: fn(str) -> str", runtime.al_str_trim)
+            .runtime_fn("lines: fn(str) -> [str]", runtime.al_str_lines)
             // booleans
             .inline("!: fn(bool) -> bool", |_, br, _, params| {
                 let fals = br.ins().iconst(I64, 0);
