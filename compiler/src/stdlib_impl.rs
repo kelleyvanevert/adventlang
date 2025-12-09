@@ -70,7 +70,7 @@ pub fn implement_stdlib_len(
 }
 
 pub fn implement_stdlib_lines(
-    def: FnType,
+    _def: FnType,
     module: &mut JITModule,
     builder: &mut FunctionBuilder,
     runtime_fns: &Runtime,

@@ -75,6 +75,7 @@ pub enum Expr {
     },
     StrConvert(usize, Box<Expr>, Type),
     StrJoin(Box<Expr>),
+    StrIndex(Box<Expr>, Box<Expr>),
     Call {
         def: FnType,
         fn_val: Box<Expr>,
@@ -109,6 +110,7 @@ impl std::fmt::Display for Expr {
             Expr::Str { id: _, str } => write!(f, "\"{str}\""),
             Expr::StrJoin(_str_list) => write!(f, "str-join(<str-list>)"),
             Expr::StrConvert(_, expr, _ty) => write!(f, "str({expr})"),
+            Expr::StrIndex(str, i) => write!(f, "{str}[{i}]"),
             Expr::Call {
                 def: _,
                 fn_id: _,
@@ -533,10 +535,17 @@ impl<'a> LoweringPass<'a> {
                 expr,
                 coalesce: _,
                 index,
-            }) => Expr::ListIndex(
-                self.lower_expr(env, fns, expr, true).into(),
-                self.lower_expr(env, fns, index, true).into(),
-            ),
+            }) => match self.type_checker.get_type(expr.id()) {
+                Type::List(_) => Expr::ListIndex(
+                    self.lower_expr(env, fns, expr, true).into(),
+                    self.lower_expr(env, fns, index, true).into(),
+                ),
+                Type::Str => Expr::StrIndex(
+                    self.lower_expr(env, fns, expr, true).into(),
+                    self.lower_expr(env, fns, index, true).into(),
+                ),
+                _ => todo!("index other things than lists and strings"),
+            },
             ast::Expr::Str(ast::StrExpr { id: _, pieces }) if pieces.len() == 1 => {
                 let ast::StrPiece::Fragment(ast::StrPieceFragment { id, str }) = &pieces[0] else {
                     unreachable!()

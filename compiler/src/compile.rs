@@ -531,7 +531,7 @@ impl<'a> FnTranslator<'a> {
             // lower::Expr::Coalesce(Box<Expr>, Box<Expr>),
             // lower::Expr::ListRest(Box<Expr>, usize),
             lower::Expr::ListIndex(list, index) => {
-                let list_ptr = self.translate_expr(list);
+                let ptr = self.translate_expr(list);
                 let index = self.translate_expr(index);
 
                 // Access
@@ -541,7 +541,22 @@ impl<'a> FnTranslator<'a> {
                         &mut self.builder.func,
                     );
 
-                    let call = self.builder.ins().call(fn_ref, &[list_ptr, index]);
+                    let call = self.builder.ins().call(fn_ref, &[ptr, index]);
+                    self.builder.inst_results(call)[0]
+                }
+            }
+            lower::Expr::StrIndex(str, index) => {
+                let ptr = self.translate_expr(str);
+                let index = self.translate_expr(index);
+
+                // Access
+                {
+                    let fn_ref = self.module.declare_func_in_func(
+                        self.runtime_fns.al_str_index,
+                        &mut self.builder.func,
+                    );
+
+                    let call = self.builder.ins().call(fn_ref, &[ptr, index]);
                     self.builder.inst_results(call)[0]
                 }
             }

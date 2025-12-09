@@ -109,16 +109,27 @@ pub extern "C" fn al_str_join(str_list_ptr: *mut u64) -> *mut () {
 }
 
 #[allow(unused)]
-pub extern "C" fn al_str_trim(strptr: *mut u64) -> *mut u64 {
-    using_al_str(strptr, |str| {
+pub extern "C" fn al_str_trim(ptr: *mut u64) -> *mut u64 {
+    using_al_str(ptr, |str| {
         let trimmed = mk_al_str(str.trim()) as *mut u64;
         trimmed
     })
 }
 
 #[allow(unused)]
-pub extern "C" fn al_str_len(strptr: *mut u64) -> u64 {
-    using_al_str(strptr, |str| str.len() as u64)
+pub extern "C" fn al_str_len(ptr: *mut u64) -> u64 {
+    using_al_str(ptr, |str| str.len() as u64)
+}
+
+#[allow(unused)]
+pub extern "C" fn al_str_index(ptr: *mut u64, index: usize) -> *mut () {
+    using_al_str(ptr, |str| {
+        if str.len() <= index {
+            panic!("out of bounds str index")
+        } else {
+            mk_al_str(str.get((index..index + 1)).unwrap())
+        }
+    })
 }
 
 #[allow(unused)]

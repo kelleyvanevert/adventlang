@@ -12,7 +12,9 @@ L82"
 
 fn solve(input: str) {
   for let line in input :lines {
-    // print(line)
+    let dir = line[0]
+    // let num = line :slice 1
+    // print(dir)
   }
 }
 
