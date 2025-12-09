@@ -7,7 +7,7 @@ use crate::runtime::{
     print::{al_print_int, al_print_str},
     str::{
         al_conv_bool_to_str, al_conv_int_to_str, al_create_str_from_literal, al_stdin_as_str,
-        al_str_index, al_str_join, al_str_len, al_str_lines, al_str_trim,
+        al_str_concat, al_str_index, al_str_join, al_str_len, al_str_lines, al_str_trim,
     },
 };
 
@@ -103,6 +103,7 @@ declare_runtime! {
     @declare al_str_lines:               [I64]       => [I64];
     @declare al_str_join:                [I64]       => [I64];
     @declare al_str_index:               [I64, I64]  => [I64];
+    @declare al_str_concat:              [I64, I64]  => [I64];
     @declare al_conv_int_to_str:         [I64]       => [I64];
     @declare al_conv_bool_to_str:        [I64]       => [I64];
 

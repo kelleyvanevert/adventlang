@@ -90,7 +90,7 @@ pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
         range:          fn(int, int) -> [int]                   {al_range}
 
         len:            fn(str) -> int                          {al_str_len}
-        len:            fn<A>([A]) -> int                       {al_list_len}
+        len:            fn<A>([A]) -> int                       {al_list_len_A}
 
         max:            fn(int, int) -> int                     {al_max_int_int}
 
@@ -111,8 +111,8 @@ pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
         sqrt:           fn(int) -> float                        {al_sqrt_int}
         sqrt:           fn(float) -> float                      {al_sqrt_float}
 
-        is_some: fn<A>(?A) -> bool
-        unwrap: fn<A>(?A) -> A
+        is_some:        fn<A>(?A) -> bool                       {al_is_some}
+        unwrap:         fn<A>(?A) -> A                          {al_unwrap}
 
 
         // CONSTANTS

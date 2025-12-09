@@ -95,6 +95,15 @@ pub extern "C" fn al_str_lines(strptr: *mut u64) -> *mut u64 {
 }
 
 #[allow(unused)]
+pub extern "C" fn al_str_concat(ptr_1: *mut u64, ptr_2: *mut u64) -> *mut () {
+    using_al_str(ptr_1, |str_1| {
+        using_al_str(ptr_2, |str_2| {
+            return mk_al_str(&[str_1, str_2].concat());
+        })
+    })
+}
+
+#[allow(unused)]
 pub extern "C" fn al_str_join(str_list_ptr: *mut u64) -> *mut () {
     using_al_vec(str_list_ptr, |str_list: &[*mut u64]| {
         let str_vec = str_list
