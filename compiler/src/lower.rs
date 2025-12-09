@@ -73,6 +73,8 @@ pub enum Expr {
         id: usize,
         str: String,
     },
+    StrConvert(usize, Box<Expr>, Type),
+    StrJoin(Box<Expr>),
     Call {
         def: FnType,
         fn_val: Box<Expr>,
@@ -105,6 +107,8 @@ impl std::fmt::Display for Expr {
             Expr::Int(value) => write!(f, "{value}"),
             Expr::Bool(value) => write!(f, "{value}"),
             Expr::Str { id: _, str } => write!(f, "\"{str}\""),
+            Expr::StrJoin(_str_list) => write!(f, "str-join(<str-list>)"),
+            Expr::StrConvert(_, expr, _ty) => write!(f, "str({expr})"),
             Expr::Call {
                 def: _,
                 fn_id: _,
@@ -533,13 +537,8 @@ impl<'a> LoweringPass<'a> {
                 self.lower_expr(env, fns, expr, true).into(),
                 self.lower_expr(env, fns, index, true).into(),
             ),
-            ast::Expr::Str(ast::StrExpr { id, pieces }) => {
-                if pieces.len() > 1 {
-                    panic!("TODO: handle str interpolations");
-                }
-
-                let ast::StrPiece::Fragment(ast::StrPieceFragment { id: _, str }) = &pieces[0]
-                else {
+            ast::Expr::Str(ast::StrExpr { id: _, pieces }) if pieces.len() == 1 => {
+                let ast::StrPiece::Fragment(ast::StrPieceFragment { id, str }) = &pieces[0] else {
                     unreachable!()
                 };
 
@@ -548,6 +547,31 @@ impl<'a> LoweringPass<'a> {
                     str: str.clone(),
                 }
             }
+            ast::Expr::Str(ast::StrExpr { id: _, pieces }) => Expr::StrJoin(
+                Expr::List(
+                    pieces
+                        .into_iter()
+                        .map(|piece| match piece {
+                            ast::StrPiece::Fragment(ast::StrPieceFragment { id, str }) => {
+                                Expr::Str {
+                                    id: *id,
+                                    str: str.clone(),
+                                }
+                            }
+                            ast::StrPiece::Interpolation(ast::StrPieceInterpolation {
+                                id,
+                                expr,
+                            }) => Expr::StrConvert(
+                                *id,
+                                self.lower_expr(env, fns, expr, true).into(),
+                                self.type_checker.get_type(expr.id()),
+                            ),
+                        })
+                        .collect(),
+                    None,
+                )
+                .into(),
+            ),
             ast::Expr::For(ast::ForExpr {
                 id: _,
                 label,

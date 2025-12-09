@@ -1,4 +1,3 @@
-use cranelift::codegen::ir::BlockArg;
 use cranelift::codegen::verifier::VerifierErrors;
 use cranelift::prelude::*;
 use cranelift::{codegen::CodegenError, prelude::types::I64};
@@ -7,7 +6,7 @@ use cranelift_module::{DataDescription, FuncId, Linkage, Module, ModuleError};
 use fxhash::FxHashMap;
 use parser::ParseError;
 use thiserror::Error;
-use type_checker::types::FnType;
+use type_checker::types::{FnType, Type as Ty};
 use type_checker::{TypeCheckerCtx, TypeError};
 
 use crate::runtime::Runtime;
@@ -420,7 +419,53 @@ impl<'a> FnTranslator<'a> {
                 );
 
                 let call = self.builder.ins().call(fn_ref, &[data_ptr, str_u8_len]);
-                return self.builder.inst_results(call)[0];
+                self.builder.inst_results(call)[0]
+            }
+            lower::Expr::StrConvert(id, expr, ty) => {
+                if ty == &Ty::Str {
+                    // no conversion needed
+                    return self.translate_expr(expr);
+                } else if ty == &Ty::Nil {
+                    // nil -> empty str
+                    return self.translate_expr(&lower::Expr::Str {
+                        id: *id,
+                        str: "".to_string(),
+                    });
+                }
+
+                // decide on conversion function
+                let func_id = match ty {
+                    Ty::Int => Some(self.runtime_fns.al_conv_int_to_str),
+                    Ty::Bool => Some(self.runtime_fns.al_conv_bool_to_str),
+                    _ => None,
+                };
+
+                if let Some(func_id) = func_id {
+                    let val = self.translate_expr(expr);
+
+                    let fn_ref = self
+                        .module
+                        .declare_func_in_func(func_id, &mut self.builder.func);
+
+                    let call = self.builder.ins().call(fn_ref, &[val]);
+                    return self.builder.inst_results(call)[0];
+                }
+
+                // fallback
+                self.translate_expr(&lower::Expr::Str {
+                    id: *id,
+                    str: "{?}".to_string(),
+                })
+            }
+            lower::Expr::StrJoin(str_list) => {
+                let str_list_ptr = self.translate_expr(str_list);
+
+                let fn_ref = self
+                    .module
+                    .declare_func_in_func(self.runtime_fns.al_str_join, &mut self.builder.func);
+
+                let call = self.builder.ins().call(fn_ref, &[str_list_ptr]);
+                self.builder.inst_results(call)[0]
             }
             lower::Expr::Call {
                 def,
@@ -533,7 +578,7 @@ impl<'a> FnTranslator<'a> {
 
                 list_ptr
             }
-            lower::Expr::For(label, var_name, range, stmts) => {
+            lower::Expr::For(_label, var_name, range, stmts) => {
                 let ptr_ty = self.ptr_ty();
                 let range_val = self.translate_expr(range);
 

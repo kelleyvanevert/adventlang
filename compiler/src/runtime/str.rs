@@ -95,6 +95,20 @@ pub extern "C" fn al_str_lines(strptr: *mut u64) -> *mut u64 {
 }
 
 #[allow(unused)]
+pub extern "C" fn al_str_join(str_list_ptr: *mut u64) -> *mut () {
+    using_al_vec(str_list_ptr, |str_list: &[*mut u64]| {
+        let str_vec = str_list
+            .iter()
+            .map(|str_ptr| using_al_str(*str_ptr, |str| str.to_string()))
+            .collect::<Vec<_>>();
+
+        let joined_str = str_vec.join("");
+
+        mk_al_str(joined_str)
+    })
+}
+
+#[allow(unused)]
 pub extern "C" fn al_str_trim(strptr: *mut u64) -> *mut u64 {
     using_al_str(strptr, |str| {
         let trimmed = mk_al_str(str.trim()) as *mut u64;
@@ -105,4 +119,14 @@ pub extern "C" fn al_str_trim(strptr: *mut u64) -> *mut u64 {
 #[allow(unused)]
 pub extern "C" fn al_str_len(strptr: *mut u64) -> u64 {
     using_al_str(strptr, |str| str.len() as u64)
+}
+
+#[allow(unused)]
+pub extern "C" fn al_conv_int_to_str(value: u64) -> *mut () {
+    mk_al_str(value.to_string())
+}
+
+#[allow(unused)]
+pub extern "C" fn al_conv_bool_to_str(value: u64) -> *mut () {
+    mk_al_str(if value == 0 { "false" } else { "true" })
 }

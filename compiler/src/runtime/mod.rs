@@ -5,7 +5,10 @@ use cranelift_module::{FuncId, Linkage, Module};
 use crate::runtime::{
     list::{al_create_vec, al_index_vec, al_push_vec, al_vec_len},
     print::{al_print_int, al_print_str},
-    str::{al_create_str_from_literal, al_stdin_as_str, al_str_len, al_str_lines, al_str_trim},
+    str::{
+        al_conv_bool_to_str, al_conv_int_to_str, al_create_str_from_literal, al_stdin_as_str,
+        al_str_join, al_str_len, al_str_lines, al_str_trim,
+    },
 };
 
 pub mod gc;
@@ -46,6 +49,9 @@ pub struct Runtime {
     pub al_str_trim: FuncId,
     pub al_str_len: FuncId,
     pub al_str_lines: FuncId,
+    pub al_str_join: FuncId,
+    pub al_conv_int_to_str: FuncId,
+    pub al_conv_bool_to_str: FuncId,
 }
 
 fn declare(module: &mut JITModule, name: &str, params: &[Type], ret: Option<Type>) -> FuncId {
@@ -85,6 +91,9 @@ impl Runtime {
         builder.symbol("al_str_trim", al_str_trim as *const u8);
         builder.symbol("al_str_len", al_str_len as *const u8);
         builder.symbol("al_str_lines", al_str_lines as *const u8);
+        builder.symbol("al_str_join", al_str_join as *const u8);
+        builder.symbol("al_conv_int_to_str", al_conv_int_to_str as *const u8);
+        builder.symbol("al_conv_bool_to_str", al_conv_bool_to_str as *const u8);
 
         let mut module = JITModule::new(builder);
 
@@ -104,6 +113,9 @@ impl Runtime {
         let al_str_trim = declare(&mut module, "al_str_trim", &[I64], Some(I64));
         let al_str_len = declare(&mut module, "al_str_len", &[I64], Some(I64));
         let al_str_lines = declare(&mut module, "al_str_lines", &[I64], Some(I64));
+        let al_str_join = declare(&mut module, "al_str_join", &[I64], Some(I64));
+        let al_conv_int_to_str = declare(&mut module, "al_conv_int_to_str", &[I64], Some(I64));
+        let al_conv_bool_to_str = declare(&mut module, "al_conv_bool_to_str", &[I64], Some(I64));
 
         (
             module,
@@ -119,6 +131,9 @@ impl Runtime {
                 al_str_trim,
                 al_str_len,
                 al_str_lines,
+                al_str_join,
+                al_conv_int_to_str,
+                al_conv_bool_to_str,
             },
         )
     }

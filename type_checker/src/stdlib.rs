@@ -46,6 +46,7 @@ pub fn add_stdlib_types(env: &mut Env, ctx: &mut TypeCheckerCtx) {
         // CONVERSIONS
         // ======
 
+        str: fn<T>(T) -> str
         int: fn(str) -> int
         bool: fn<A>(A) -> bool
         float: fn<A>(A) -> float
