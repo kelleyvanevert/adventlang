@@ -44,15 +44,15 @@ pub extern "C" fn al_create_vec(
 }
 
 #[allow(unused)]
-pub extern "C" fn al_index_vec<T: Copy>(vecptr: *mut u64, idx: u64) -> T {
-    using_al_vec(vecptr, |vec: &[T]| {
+pub extern "C" fn al_index_vec_64(vecptr: *mut u64, idx: u64) -> u64 {
+    using_al_vec(vecptr, |vec: &[u64]| {
         // TODO negative indices and bounds checks
         vec[idx as usize]
     })
 }
 
 #[allow(unused)]
-pub extern "C" fn al_push_vec<T: Copy>(ptr: *mut AlVec<T>, el: T) {
+pub extern "C" fn al_push_vec_64(ptr: *mut AlVec<u64>, el: u64) {
     let mut al_vec = unsafe { Box::from_raw(ptr) };
 
     al_vec.vec.push(el);

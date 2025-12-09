@@ -3,7 +3,7 @@ use std::io::IsTerminal;
 use crate::runtime::{
     AL_STR, al_create_vec,
     gc::PTRS,
-    list::{AlVec, al_push_vec, using_al_vec},
+    list::{AlVec, al_push_vec_64, using_al_vec},
 };
 
 #[repr(C)]
@@ -87,7 +87,7 @@ pub extern "C" fn al_str_lines(strptr: *mut u64) -> *mut u64 {
 
         for line in str.lines() {
             let strptr = mk_al_str(line);
-            al_push_vec(vecptr, strptr as u64);
+            al_push_vec_64(vecptr, strptr as u64);
         }
 
         vecptr as *mut u64
