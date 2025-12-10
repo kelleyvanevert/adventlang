@@ -42,7 +42,14 @@ pub enum Type {
         child: Box<Type>,
     },
     TypeVar(TypeVar),
+
+    // special case: types that are irrelevant for compilation purposes, because they never occur
     Never,
+
+    // special case: checking type equality between generic functions
+    //  -> replace bound generics with these positionally bound, which
+    //     must match up exactly, but can otherwise be disregarded
+    Bound(usize),
 }
 
 impl EqUnifyValue for Type {}
@@ -175,7 +182,7 @@ impl FnType {
         Ok(())
     }
 
-    pub fn substitute_vars(&mut self, sub: &FxHashMap<TypeVar, TypeVar>) {
+    pub fn substitute_vars(&mut self, sub: &FxHashMap<TypeVar, Type>) {
         let mut new_sub = sub.clone();
         for v in &self.generics {
             new_sub.remove(v);
@@ -305,13 +312,20 @@ impl Type {
             Type::Set { key } => key.is_concrete(bound),
             Type::Map { key, val } => key.is_concrete(bound) && val.is_concrete(bound),
             Type::Nullable { child } => child.is_concrete(bound),
+            Type::Bound(_) => true,
         }
     }
 
     pub fn occurs_check(&self, var: TypeVar) -> Result<(), Type> {
         match self {
             Type::Never => Ok(()),
-            Type::Nil | Type::Bool | Type::Str | Type::Int | Type::Float | Type::Regex => Ok(()),
+            Type::Nil
+            | Type::Bool
+            | Type::Str
+            | Type::Int
+            | Type::Float
+            | Type::Regex
+            | Type::Bound(_) => Ok(()),
             Type::TypeVar(v) => {
                 if *v == var {
                     Err(Type::TypeVar(*v))
@@ -361,13 +375,19 @@ impl Type {
         }
     }
 
-    pub fn substitute_vars(&mut self, sub: &FxHashMap<TypeVar, TypeVar>) {
+    pub fn substitute_vars(&mut self, sub: &FxHashMap<TypeVar, Type>) {
         match self {
             Type::Never => {}
-            Type::Bool | Type::Int | Type::Float | Type::Regex | Type::Str | Type::Nil => {}
+            Type::Bool
+            | Type::Int
+            | Type::Float
+            | Type::Regex
+            | Type::Str
+            | Type::Nil
+            | Type::Bound(_) => {}
             Type::TypeVar(v) => {
-                if let Some(new_v) = sub.get(v).cloned() {
-                    *self = Type::TypeVar(new_v);
+                if let Some(new_ty) = sub.get(v).cloned() {
+                    *self = new_ty;
                 }
             }
             Type::Fn(def) => {
@@ -415,7 +435,13 @@ impl Type {
 
         match self {
             Type::Never => {}
-            Type::Bool | Type::Int | Type::Float | Type::Regex | Type::Str | Type::Nil => {}
+            Type::Bool
+            | Type::Int
+            | Type::Float
+            | Type::Regex
+            | Type::Str
+            | Type::Nil
+            | Type::Bound(_) => {}
             Type::TypeVar(v) => {
                 if bound.contains(v) {
                     return;
@@ -522,6 +548,7 @@ impl Debug for Type {
             Type::Set { key } => write!(f, "set[{key:?}]"),
             Type::Map { key, val } => write!(f, "map[{key:?}, {val:?}]"),
             Type::Nullable { child } => write!(f, "?{child:?}"),
+            Type::Bound(index) => write!(f, "#{index}"),
         }
     }
 }

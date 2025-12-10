@@ -1,4 +1,5 @@
 use crate::{Env, TypeCheckerCtx, TypeErrorKind, print_type_error};
+use fxhash::FxHashMap;
 use parser::{AdventlangParser, ast::SExpPrintJob};
 
 fn run_test_case(
@@ -6,6 +7,7 @@ fn run_test_case(
     lineno: usize,
     description: &str,
     expectation: &str,
+    debug: bool,
     _error_location: Option<(usize, usize)>,
     source: &str,
 ) {
@@ -16,6 +18,21 @@ fn run_test_case(
     let mut ctx = TypeCheckerCtx::new();
     match ctx.typecheck(&parse_result.document) {
         Ok(_typed_doc) => {
+            if debug {
+                println!(
+                    "{}",
+                    SExpPrintJob {
+                        document: &parse_result.document,
+                        annotations: ctx
+                            .types
+                            .iter()
+                            .map(|(id, ty)| { (*id, (id, ty)) })
+                            .collect(),
+                    }
+                );
+                ctx.debug_info();
+            }
+
             if expectation != "ok" {
                 println!("");
                 println!("====================");
@@ -34,8 +51,23 @@ fn run_test_case(
                 );
                 panic!();
             }
+
+            if debug {
+                panic!("Nothing wrong, just debugging");
+            }
         }
         Err(err) => {
+            if debug {
+                println!(
+                    "{}",
+                    SExpPrintJob {
+                        document: &parse_result.document,
+                        annotations: ctx.types.clone(),
+                    }
+                );
+                ctx.debug_info();
+            }
+
             if expectation == "ok" {
                 println!("");
                 println!("====================");
@@ -114,6 +146,10 @@ fn run_test_case(
                     panic!()
                 }
             }
+
+            if debug {
+                panic!("Nothing wrong, just debugging");
+            }
         }
     }
 }
@@ -132,6 +168,7 @@ macro_rules! run_test_cases_in_file {
             let mut description: Vec<&str> = vec![];
             let mut expectation = "";
             let mut skip = false;
+            let mut debug = false;
             let mut only = false;
             let mut error_location = None;
             let mut test_lines: Vec<&str> = vec![];
@@ -146,6 +183,7 @@ macro_rules! run_test_cases_in_file {
                             lineno,
                             expectation,
                             skip,
+                            debug,
                             error_location.clone(),
                             test_lines.join("\n"),
                         );
@@ -160,6 +198,7 @@ macro_rules! run_test_cases_in_file {
                     description = vec![];
                     expectation = "";
                     skip = false;
+                    debug = false;
                     error_location = None;
                     test_lines = vec![];
                     if only {
@@ -171,6 +210,8 @@ macro_rules! run_test_cases_in_file {
                     expectation = "ok";
                 } else if status == "meta" && line.starts_with("// only") {
                     only = true;
+                } else if status == "meta" && line.starts_with("// debug") {
+                    debug = true;
                 } else if status == "meta" && line.starts_with("// err") {
                     expectation = &line[3..].trim();
                 } else if status == "meta" && line.starts_with("// ======") {
@@ -199,6 +240,7 @@ macro_rules! run_test_cases_in_file {
                     lineno,
                     expectation,
                     skip,
+                    debug,
                     error_location.clone(),
                     test_lines.join("\n"),
                 );
@@ -209,13 +251,16 @@ macro_rules! run_test_cases_in_file {
                 }
             }
 
-            for (description, lineno, expectation, skip, error_location, source) in test_cases {
+            for (description, lineno, expectation, skip, debug, error_location, source) in
+                test_cases
+            {
                 if !skip {
                     run_test_case(
                         filename,
                         lineno,
                         &description,
                         expectation,
+                        debug,
                         error_location,
                         &source,
                     );

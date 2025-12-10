@@ -159,6 +159,27 @@ impl std::fmt::Display for Expr {
     }
 }
 
+fn type_width(ty: Type) -> usize {
+    match ty {
+        Type::Nil | Type::Bool | Type::Str | Type::Int | Type::Float => 64, // scalars
+        Type::Fn(_)
+        | Type::Regex
+        | Type::List(_)
+        | Type::Tuple(_)
+        | Type::Struct { .. }
+        | Type::Map { .. }
+        | Type::Set { .. }
+        | Type::Nullable { .. } => 64, // pointers
+        Type::Never => 64,
+
+        Type::NamedFnOverload { .. } | Type::TypeVar(_) | Type::Bound(_) => {
+            unreachable!(
+                "This type is a type checking abstraction that shouldn't end up in the compiler"
+            )
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct Env {
     // TODO: record info about closure usage, lifetime, etc.
@@ -200,18 +221,26 @@ impl<'a> LoweringPass<'a> {
     }
 
     fn get_concrete_fn_id(&mut self, def: FnType) -> String {
-        assert!(def.is_concrete(&vec![]), "lowered fn type must be concrete");
+        assert!(
+            def.is_concrete(&vec![]),
+            "lowered fn type must be concrete: {def:?}"
+        );
 
-        if let Some(name) = self.concrete_fn_id.get(&def).cloned() {
-            return name;
+        if let Some(name) = self.concrete_fn_id.get(&def) {
+            return name.clone();
         }
 
-        let name = format!(
-            "{}{}-{}",
-            if def.meta.stdlib { "@stdlib-" } else { "" },
-            def.meta.name.clone().unwrap_or("anonymous".to_string()),
-            self.concrete_fn_id.len()
-        );
+        let name = if def.meta.stdlib {
+            let name = format!("std/{}: {:?}", def.meta.name.as_ref().unwrap().clone(), def);
+            println!("concrete: {name}");
+            name
+        } else {
+            format!(
+                "{}-{}",
+                def.meta.name.clone().unwrap_or("anonymous".to_string()),
+                self.concrete_fn_id.len()
+            )
+        };
 
         self.concrete_fn_id.insert(def, name.clone());
 
@@ -255,7 +284,10 @@ impl<'a> LoweringPass<'a> {
                 .type_checker
                 .get_stdlib_fn_usages()
                 .into_iter()
-                .map(|def| (self.get_concrete_fn_id(def.clone()), def))
+                .map(|def| {
+                    println!("found stdlib usage: {def:?}");
+                    (self.get_concrete_fn_id(def.clone()), def)
+                })
                 .collect(),
         }
     }
@@ -433,11 +465,14 @@ impl<'a> LoweringPass<'a> {
                     return Expr::Local(var.name.clone());
                 }
 
+                // Note: although this type WILL be a specific chosen overload,
+                //  it might still be generic.
+                // Which means we'll have to wait until we see the final call-site node,
+                //  to know which instantiation is used.
                 let ty = self.type_checker.get_type(*id);
 
-                println!("lowering var {}", var.name);
-                println!("  of type: {:?}", ty);
-                // println!("  normalized: {:?}", self.type_checker.normalize_ty(ty));
+                // println!("lowering var {}", var.name);
+                // println!("  of type: {:?}", ty);
                 match ty {
                     Type::Fn(def) => Expr::FnRef {
                         fn_id: self.get_concrete_fn_id(def.clone()),
@@ -502,7 +537,12 @@ impl<'a> LoweringPass<'a> {
 
                 let callee = self.lower_expr(env, fns, f, true);
 
+                println!(
+                    "What is going on here? {:?}",
+                    self.type_checker.get_type(f.id())
+                );
                 let def = self.type_checker.get_fn_usage(*id);
+                println!("  -> {def:?}");
 
                 let fn_id = self.get_concrete_fn_id(def.clone());
 

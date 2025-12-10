@@ -25,99 +25,108 @@ impl Stdlib {
 
         stdlib
             // misc
-            .runtime_fn("print: fn(int) -> nil", runtime.al_print_int)
-            .runtime_fn("print: fn(str) -> nil", runtime.al_print_str)
+            .runtime_fn("std/print: fn(int) -> nil", runtime.al_print_int)
+            .runtime_fn("std/print: fn(str) -> nil", runtime.al_print_str)
             // set operations
-            .runtime_fn("in: fn(:64, set[:64]) -> bool", runtime.al_push_vec_64) // TODO
+            .runtime_fn(
+                "std/in: fn<:64>(:64, set[:64]) -> bool",
+                runtime.al_push_vec_64,
+            ) // TODO
             // list operations
-            .runtime_fn("new_list: fn() -> [:64]", runtime.al_create_vec)
-            .runtime_fn("in: fn(:64, [:64]) -> bool", runtime.al_push_vec_64) // TODO
-            .runtime_fn("push: fn([:64], :64) -> [:64]", runtime.al_push_vec_64)
-            .runtime_fn("len: fn([:64]) -> int", runtime.al_vec_len)
+            .runtime_fn("std/new_list: fn() -> [:64]", runtime.al_create_vec)
+            .runtime_fn(
+                "std/in: fn<:64>(:64, [:64]) -> bool",
+                runtime.al_push_vec_64,
+            ) // TODO
+            .runtime_fn(
+                "std/push: fn<:64>([:64], :64) -> [:64]",
+                runtime.al_push_vec_64,
+            )
+            .runtime_fn("std/len: fn<:64>([:64]) -> int", runtime.al_vec_len)
             // string operations
-            .runtime_fn("len: fn(str) -> int", runtime.al_str_len)
-            .runtime_fn("+: fn(str, str) -> str", runtime.al_str_concat)
-            .runtime_fn("stdin: fn() -> str", runtime.al_stdin_as_str)
-            .runtime_fn("trim: fn(str) -> str", runtime.al_str_trim)
-            .runtime_fn("lines: fn(str) -> [str]", runtime.al_str_lines)
+            .runtime_fn("std/len: fn(str) -> int", runtime.al_str_len)
+            .runtime_fn("std/+: fn(str, str) -> str", runtime.al_str_concat)
+            .runtime_fn("std/stdin: fn() -> str", runtime.al_stdin_as_str)
+            .runtime_fn("std/trim: fn(str) -> str", runtime.al_str_trim)
+            .runtime_fn("std/lines: fn(str) -> [str]", runtime.al_str_lines)
             // booleans
-            .inline("!: fn(bool) -> bool", |_, br, _, params| {
+            .inline("std/!: fn(bool) -> bool", |_, br, _, params| {
                 let fals = br.ins().iconst(I64, 0);
                 br.ins().icmp(IntCC::Equal, params[0], fals)
             })
             // minus
-            .inline("-: fn(int) -> int", |_, br, _, params| {
+            .inline("std/-: fn(int) -> int", |_, br, _, params| {
                 let zero = br.ins().iconst(I64, 0);
                 br.ins().isub(zero, params[0])
             })
-            .inline("-: fn(float) -> float", |_, br, _, params| {
+            .inline("std/-: fn(float) -> float", |_, br, _, params| {
                 let zero = br.ins().f64const(0.0);
                 br.ins().fsub(zero, params[0])
             })
-            .inline("-: fn(int, int) -> int", |_, br, _, params| {
+            .inline("std/-: fn(int, int) -> int", |_, br, _, params| {
                 br.ins().isub(params[0], params[1])
             })
-            .inline("-: fn(int, float) -> int", |_, br, _, params| {
+            .inline("std/-: fn(int, float) -> int", |_, br, _, params| {
                 let lhs = br.ins().fcvt_from_sint(F64, params[0]);
                 br.ins().fsub(lhs, params[1])
             })
-            .inline("-: fn(float, int) -> int", |_, br, _, params| {
+            .inline("std/-: fn(float, int) -> int", |_, br, _, params| {
                 let rhs = br.ins().fcvt_from_sint(F64, params[1]);
                 br.ins().fsub(params[0], rhs)
             })
-            .inline("-: fn(float, float) -> float", |_, br, _, params| {
+            .inline("std/-: fn(float, float) -> float", |_, br, _, params| {
                 br.ins().fsub(params[0], params[1])
             })
             // addition
-            .inline("+: fn(int, int) -> int", |_, br, _, params| {
+            .inline("std/+: fn(int, int) -> int", |_, br, _, params| {
                 br.ins().iadd(params[0], params[1])
             })
-            .inline("+: fn(int, float) -> int", |_, br, _, params| {
+            .inline("std/+: fn(int, float) -> int", |_, br, _, params| {
                 let lhs = br.ins().fcvt_from_sint(F64, params[0]);
                 br.ins().fadd(lhs, params[1])
             })
-            .inline("+: fn(float, int) -> int", |_, br, _, params| {
+            .inline("std/+: fn(float, int) -> int", |_, br, _, params| {
                 let rhs = br.ins().fcvt_from_sint(F64, params[1]);
                 br.ins().fadd(params[0], rhs)
             })
-            .inline("+: fn(float, float) -> float", |_, br, _, params| {
+            .inline("std/+: fn(float, float) -> float", |_, br, _, params| {
                 br.ins().fadd(params[0], params[1])
             })
             // multiplication
-            .inline("*: fn(int, int) -> int", |_, br, _, params| {
+            .inline("std/*: fn(int, int) -> int", |_, br, _, params| {
                 br.ins().imul(params[0], params[1])
             })
-            .inline("*: fn(int, float) -> int", |_, br, _, params| {
+            .inline("std/*: fn(int, float) -> int", |_, br, _, params| {
                 let lhs = br.ins().fcvt_from_sint(F64, params[0]);
                 br.ins().fmul(lhs, params[1])
             })
-            .inline("*: fn(float, int) -> int", |_, br, _, params| {
+            .inline("std/*: fn(float, int) -> int", |_, br, _, params| {
                 let rhs = br.ins().fcvt_from_sint(F64, params[1]);
                 br.ins().fmul(params[0], rhs)
             })
-            .inline("*: fn(float, float) -> float", |_, br, _, params| {
+            .inline("std/*: fn(float, float) -> float", |_, br, _, params| {
                 br.ins().fmul(params[0], params[1])
             })
             // division
-            .inline("/: fn(int, int) -> int", |_, br, _, params| {
+            .inline("std//: fn(int, int) -> int", |_, br, _, params| {
                 br.ins().sdiv(params[0], params[1])
             })
-            .inline("/: fn(int, float) -> int", |_, br, _, params| {
+            .inline("std//: fn(int, float) -> int", |_, br, _, params| {
                 let lhs = br.ins().fcvt_from_sint(F64, params[0]);
                 br.ins().fdiv(lhs, params[1])
             })
-            .inline("/: fn(float, int) -> int", |_, br, _, params| {
+            .inline("std//: fn(float, int) -> int", |_, br, _, params| {
                 let rhs = br.ins().fcvt_from_sint(F64, params[1]);
                 br.ins().fdiv(params[0], rhs)
             })
-            .inline("/: fn(float, float) -> float", |_, br, _, params| {
+            .inline("std//: fn(float, float) -> float", |_, br, _, params| {
                 br.ins().fdiv(params[0], params[1])
             })
             // modulo
-            .inline("%: fn(int, int) -> int", |_, br, _, params| {
+            .inline("std/%: fn(int, int) -> int", |_, br, _, params| {
                 br.ins().srem(params[0], params[1])
             })
-            .inline("%: fn(int, float) -> int", |_, br, _, params| {
+            .inline("std/%: fn(int, float) -> int", |_, br, _, params| {
                 let x = br.ins().fcvt_from_sint(F64, params[0]);
                 let y = params[1];
 
@@ -127,7 +136,7 @@ impl Stdlib {
                 let product = br.ins().fmul(truncated_quotient, y);
                 br.ins().fsub(x, product)
             })
-            .inline("%: fn(float, int) -> int", |_, br, _, params| {
+            .inline("std/%: fn(float, int) -> int", |_, br, _, params| {
                 let x = params[0];
                 let y = br.ins().fcvt_from_sint(F64, params[1]);
 
@@ -137,7 +146,7 @@ impl Stdlib {
                 let product = br.ins().fmul(truncated_quotient, y);
                 br.ins().fsub(x, product)
             })
-            .inline("%: fn(float, float) -> float", |_, br, _, params| {
+            .inline("std/%: fn(float, float) -> float", |_, br, _, params| {
                 let x = params[0];
                 let y = params[1];
 
@@ -148,10 +157,10 @@ impl Stdlib {
                 br.ins().fsub(x, product)
             })
             // shifting operations
-            .inline("<<: fn(int, int) -> int", |_, br, _, params| {
+            .inline("std/<<: fn(int, int) -> int", |_, br, _, params| {
                 br.ins().ishl(params[0], params[1])
             })
-            .inline(">>: fn(int, int) -> int", |_, br, _, params| {
+            .inline("std/>>: fn(int, int) -> int", |_, br, _, params| {
                 br.ins().sshr(params[0], params[1])
             });
 

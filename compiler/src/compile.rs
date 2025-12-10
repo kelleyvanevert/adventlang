@@ -520,6 +520,8 @@ impl<'a> FnTranslator<'a> {
             lower::Expr::FnRef { def, fn_id } => {
                 let compiled_fn_id = self.ensure_gets_compiled(fn_id, def.clone()).expect("msg");
 
+                println!("COMPILE fn ref: {def:?}");
+
                 let compiled_fn_ref = self
                     .module
                     .declare_func_in_func(compiled_fn_id, &mut self.builder.func);

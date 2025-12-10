@@ -658,6 +658,10 @@ impl TypeCheckerCtx {
         Ok(())
     }
 
+    fn debug_info(&mut self) {
+        self.debug_disjoint_sets();
+    }
+
     fn dep_check(&self, id: usize, mut prev: Vec<usize>) -> Result<(), TypeError> {
         if prev.contains(&id) {
             // println!("");
@@ -775,7 +779,7 @@ impl TypeCheckerCtx {
     ) -> Result<ConstraintResult, TypeError> {
         match &constraint {
             Constraint::TypeEqual(node_id, left, right) => {
-                self.check_ty_equal(*node_id, left.clone(), right.clone())
+                self.check_ty_equal(*node_id, left.clone(), right.clone(), 0)
             }
             Constraint::CanInstantiateTo(
                 call_node_id,
@@ -946,7 +950,7 @@ impl TypeCheckerCtx {
         let substitutions = FxHashMap::from_iter(
             std::mem::take(&mut f_ty.generics)
                 .into_iter()
-                .map(|v| (v, self.fresh_ty_var(skolemize))),
+                .map(|v| (v, Type::TypeVar(self.fresh_ty_var(skolemize)))),
         );
 
         for param in &mut f_ty.params {
@@ -988,6 +992,7 @@ impl TypeCheckerCtx {
                     choose.nodes[ti],
                     choose.types[ti].clone(),
                     choose.overloads[i].3[ti].clone(),
+                    0,
                 ) {
                     Err(_) => {
                         possible = false;
@@ -1032,6 +1037,7 @@ impl TypeCheckerCtx {
                     choose.nodes[ti],
                     choose.types[ti].clone(),
                     choose.overloads[i].3[ti].clone(),
+                    0,
                 )?;
             }
 
@@ -1172,6 +1178,7 @@ impl TypeCheckerCtx {
         node_id: usize,
         left: Type,
         right: Type,
+        num_bindings: usize,
     ) -> Result<ConstraintResult, TypeError> {
         let left = self.normalize_ty(left);
         let right = self.normalize_ty(right);
@@ -1186,12 +1193,12 @@ impl TypeCheckerCtx {
             (Type::Int, Type::Int) => Ok(ConstraintResult::Succeed),
             (Type::Float, Type::Float) => Ok(ConstraintResult::Succeed),
             (Type::Regex, Type::Regex) => Ok(ConstraintResult::Succeed),
-            (Type::List(a), Type::List(b)) => self.check_ty_equal(node_id, *a, *b),
+            (Type::List(a), Type::List(b)) => self.check_ty_equal(node_id, *a, *b, num_bindings),
             (Type::Tuple(a), Type::Tuple(b)) if a.len() == b.len() => {
                 let mut r = ConstraintResult::Succeed;
 
                 for (a, b) in a.into_iter().zip(b.into_iter()) {
-                    r += self.check_ty_equal(node_id, a, b)?;
+                    r += self.check_ty_equal(node_id, a, b, num_bindings)?;
                 }
 
                 Ok(r)
@@ -1216,13 +1223,18 @@ impl TypeCheckerCtx {
                     let a_val = a_fields.iter().find(|f| &f.0 == key).unwrap();
                     let b_val = b_fields.iter().find(|f| &f.0 == key).unwrap();
 
-                    r += self.check_ty_equal(node_id, a_val.1.clone(), b_val.1.clone())?;
+                    r += self.check_ty_equal(
+                        node_id,
+                        a_val.1.clone(),
+                        b_val.1.clone(),
+                        num_bindings,
+                    )?;
                 }
 
                 Ok(r)
             }
             (Type::Set { key: a_key }, Type::Set { key: b_key }) => {
-                let r_key = self.check_ty_equal(node_id, *a_key, *b_key)?;
+                let r_key = self.check_ty_equal(node_id, *a_key, *b_key, num_bindings)?;
 
                 Ok(r_key)
             }
@@ -1236,12 +1248,13 @@ impl TypeCheckerCtx {
                     val: b_val,
                 },
             ) => {
-                let r_key = self.check_ty_equal(node_id, *a_key, *b_key)?;
-                let r_val = self.check_ty_equal(node_id, *a_val, *b_val)?;
+                let r_key = self.check_ty_equal(node_id, *a_key, *b_key, num_bindings)?;
+                let r_val = self.check_ty_equal(node_id, *a_val, *b_val, num_bindings)?;
 
                 Ok(r_key + r_val)
             }
 
+            // There's problems in here -- I don't think I can just instantiate here
             (Type::NamedFnOverload { defs, choice_var }, Type::Fn(def))
             | (Type::Fn(def), Type::NamedFnOverload { defs, choice_var }) => {
                 let FnType {
@@ -1292,48 +1305,68 @@ impl TypeCheckerCtx {
                 ]))
             }
 
-            (
-                Type::Fn(FnType {
-                    generics: a_generics,
-                    params: a_params,
-                    ret: a_ret,
-                    ..
-                }),
-                Type::Fn(FnType {
-                    generics: b_generics,
-                    params: b_params,
-                    ret: b_ret,
-                    ..
-                }),
-            ) => {
-                if a_generics.len() != b_generics.len() {
+            (Type::Fn(mut f_a), Type::Fn(mut f_b)) => {
+                if f_a.generics.len() != f_b.generics.len() {
                     return Err(TypeError {
                         node_id,
                         kind: TypeErrorKind::GenericsMismatch,
                     });
                 }
 
-                // TODO actually check generics -- ??
-
-                if a_params.len() != b_params.len() {
+                if f_a.params.len() != f_b.params.len() {
                     return Err(TypeError {
                         node_id,
-                        kind: TypeErrorKind::ArgsMismatch(a_params.len(), b_params.len()),
+                        kind: TypeErrorKind::ArgsMismatch(f_a.params.len(), f_b.params.len()),
                     });
                 }
 
-                let mut r = ConstraintResult::Succeed;
+                // To check the equality of generic functions, we need to check precise positional
+                //  matching up of the generic type var placements. So, let's substitute them
+                //  for "positional bound markers".
+                {
+                    // println!("CHECK FN TYPES EQUAL?");
+                    // println!("{f_a:?}");
+                    // println!("{f_b:?}");
 
-                for (a, b) in a_params.into_iter().zip(b_params) {
-                    r += self.check_ty_equal(node_id, a, b)?;
+                    let substitutions_a = f_a
+                        .generics
+                        .iter()
+                        .enumerate()
+                        .map(|(i, v)| (*v, Type::Bound(num_bindings + i)))
+                        .collect();
+
+                    f_a.generics = vec![];
+                    f_a.substitute_vars(&substitutions_a);
+
+                    let substitutions_b = f_b
+                        .generics
+                        .iter()
+                        .enumerate()
+                        .map(|(i, v)| (*v, Type::Bound(num_bindings + i)))
+                        .collect();
+
+                    f_b.generics = vec![];
+                    f_b.substitute_vars(&substitutions_b);
+
+                    // println!(" => CHECK FN TYPES EQUAL?");
+                    // println!(" => {f_a:?}");
+                    // println!(" => {f_b:?}");
                 }
 
-                r += self.check_ty_equal(node_id, *a_ret, *b_ret)?;
+                let num_bindings = num_bindings + f_a.generics.len();
+
+                let mut r = ConstraintResult::Succeed;
+
+                for (a, b) in f_a.params.into_iter().zip(f_b.params) {
+                    r += self.check_ty_equal(node_id, a, b, num_bindings)?;
+                }
+
+                r += self.check_ty_equal(node_id, *f_a.ret, *f_b.ret, num_bindings)?;
 
                 Ok(r)
             }
             (Type::Nullable { child: a_child }, Type::Nullable { child: b_child }) => {
-                self.check_ty_equal(node_id, *a_child, *b_child)
+                self.check_ty_equal(node_id, *a_child, *b_child, num_bindings)
             }
 
             (Type::TypeVar(x), Type::TypeVar(y)) => {
@@ -1378,6 +1411,19 @@ impl TypeCheckerCtx {
                     })?;
 
                 Ok(ConstraintResult::Succeed)
+            }
+            (Type::Bound(index_left), Type::Bound(index_right)) => {
+                if index_left == index_right {
+                    Ok(ConstraintResult::Succeed)
+                } else {
+                    Err(TypeError {
+                        node_id,
+                        kind: TypeErrorKind::NotEqual(
+                            Type::Bound(index_left),
+                            Type::Bound(index_right),
+                        ),
+                    })
+                }
             }
 
             (left, right) => Err(TypeError {
@@ -1457,6 +1503,7 @@ impl TypeCheckerCtx {
                     None => Type::TypeVar(self.unification_table.find(var)),
                 }
             }
+            Type::Bound(index) => Type::Bound(index),
         }
     }
 
@@ -1715,7 +1762,7 @@ impl TypeCheckerCtx {
                     })
                     .collect_vec();
 
-                let params = params
+                let param_types = params
                     .iter()
                     //
                     // Super interesting!!
@@ -1742,7 +1789,7 @@ impl TypeCheckerCtx {
                         stdlib: false,
                     },
                     generics,
-                    params,
+                    params: param_types,
                     ret: ret.into(),
                 };
 
@@ -1797,7 +1844,7 @@ impl TypeCheckerCtx {
 
                 let mut declare_locals = FxHashMap::default();
 
-                let params = params
+                let param_types = params
                     .into_iter()
                     .map(|decl| {
                         self.infer_declarable(
@@ -1809,6 +1856,11 @@ impl TypeCheckerCtx {
                         )
                     })
                     .collect::<Result<Vec<_>, TypeError>>()?;
+
+                println!("PARAM TYPES OF NAMED FN: {:?}", param_types);
+                for param in params {
+                    println!(" - typed: {} = {:?}", param.id, self.types.get(&param.id));
+                }
 
                 let ret_ty = ret
                     .as_ref()
@@ -1823,7 +1875,7 @@ impl TypeCheckerCtx {
                 let ty = Type::Fn(FnType {
                     meta: FnMeta::none(), // TODO: verify that it's never used
                     generics: generics.clone(),
-                    params: params.clone(),
+                    params: param_types.clone(),
                     ret: ret_ty.clone().into(),
                 });
 
