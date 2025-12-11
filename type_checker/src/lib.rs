@@ -1258,6 +1258,8 @@ impl TypeCheckerCtx {
                 Ok(r_key + r_val)
             }
 
+            // TODO don't filter the defs because then the choice var index can get messed up
+            // TODO don't 'keep' marked defs, rather keep a copy of the overloads for future use
             (
                 Type::NamedFnOverload {
                     mut defs,
