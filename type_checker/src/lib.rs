@@ -402,6 +402,9 @@ struct ChooseOverloadConstraint {
                    //  (yes, there's a bit too much duplication of types by now, haha..)
     )>,
     dependents: Option<Vec<usize>>,
+
+    // super specific: the num of `Type::Bound(i)` generics that have been used to far
+    num_bindings: usize,
 }
 
 impl ChooseOverloadConstraint {
@@ -847,6 +850,7 @@ impl TypeCheckerCtx {
                                 types,
                                 overloads,
                                 dependents: Some(dependents.clone()),
+                                num_bindings: 0,
                             }),
                         ]))
                     }
@@ -992,7 +996,7 @@ impl TypeCheckerCtx {
                     choose.nodes[ti],
                     choose.types[ti].clone(),
                     choose.overloads[i].3[ti].clone(),
-                    0,
+                    choose.num_bindings,
                 ) {
                     Err(_) => {
                         possible = false;
@@ -1037,7 +1041,7 @@ impl TypeCheckerCtx {
                     choose.nodes[ti],
                     choose.types[ti].clone(),
                     choose.overloads[i].3[ti].clone(),
-                    0,
+                    choose.num_bindings,
                 )?;
             }
 
@@ -1254,38 +1258,50 @@ impl TypeCheckerCtx {
                 Ok(r_key + r_val)
             }
 
-            // There's problems in here -- I don't think I can just instantiate here
-            (Type::NamedFnOverload { defs, choice_var }, Type::Fn(def))
-            | (Type::Fn(def), Type::NamedFnOverload { defs, choice_var }) => {
-                let FnType {
-                    meta: _,
-                    generics: _,
-                    params,
-                    ret,
-                } = self.instantiate_fn_ty(def, false);
+            (
+                Type::NamedFnOverload {
+                    mut defs,
+                    choice_var,
+                },
+                Type::Fn(mut def),
+            )
+            | (
+                Type::Fn(mut def),
+                Type::NamedFnOverload {
+                    mut defs,
+                    choice_var,
+                },
+            ) => {
+                let ng = def.generics.len();
+
+                // remove overloads with different amount of generics
+                defs.retain(|d| d.1.generics.len() == ng);
+
+                def.mark_generics_positionally(num_bindings);
 
                 let overloads = defs
                     .into_iter()
                     .enumerate()
-                    .filter(|(_, (_, f_ty))| f_ty.params.len() == 1)
-                    .map(|(i, (def_node_id, f_ty))| {
-                        let fn_ty = self.instantiate_fn_ty(f_ty, false);
+                    .map(|(i, (def_node_id, mut f_ty))| {
+                        f_ty.mark_generics_positionally(num_bindings);
 
                         let FnType {
                             meta,
                             generics: _,
                             mut params,
                             ret,
-                        } = fn_ty.clone();
+                        } = f_ty.clone();
 
                         params.push(*ret);
 
-                        (i, def_node_id, meta, params, fn_ty)
+                        (i, def_node_id, meta, params, f_ty)
                     })
                     .collect_vec();
 
-                let mut types = params;
-                types.push(*ret);
+                let num_bindings = num_bindings + ng;
+
+                let mut types = def.params;
+                types.push(*def.ret);
 
                 // a bit unfortunate, but we don't have any other information
                 let nodes = types.iter().map(|_| 0).collect_vec();
@@ -1301,6 +1317,7 @@ impl TypeCheckerCtx {
                         types,
                         overloads,
                         dependents,
+                        num_bindings,
                     }),
                 ]))
             }
@@ -1320,40 +1337,15 @@ impl TypeCheckerCtx {
                     });
                 }
 
+                let ng = f_a.generics.len();
+
                 // To check the equality of generic functions, we need to check precise positional
                 //  matching up of the generic type var placements. So, let's substitute them
                 //  for "positional bound markers".
-                {
-                    // println!("CHECK FN TYPES EQUAL?");
-                    // println!("{f_a:?}");
-                    // println!("{f_b:?}");
+                f_a.mark_generics_positionally(num_bindings);
+                f_b.mark_generics_positionally(num_bindings);
 
-                    let substitutions_a = f_a
-                        .generics
-                        .iter()
-                        .enumerate()
-                        .map(|(i, v)| (*v, Type::Bound(num_bindings + i)))
-                        .collect();
-
-                    f_a.generics = vec![];
-                    f_a.substitute_vars(&substitutions_a);
-
-                    let substitutions_b = f_b
-                        .generics
-                        .iter()
-                        .enumerate()
-                        .map(|(i, v)| (*v, Type::Bound(num_bindings + i)))
-                        .collect();
-
-                    f_b.generics = vec![];
-                    f_b.substitute_vars(&substitutions_b);
-
-                    // println!(" => CHECK FN TYPES EQUAL?");
-                    // println!(" => {f_a:?}");
-                    // println!(" => {f_b:?}");
-                }
-
-                let num_bindings = num_bindings + f_a.generics.len();
+                let num_bindings = num_bindings + ng;
 
                 let mut r = ConstraintResult::Succeed;
 
@@ -2520,6 +2512,7 @@ impl TypeCheckerCtx {
                                 types: vec![expr_ty.clone(), res_ty.clone()],
                                 overloads,
                                 dependents: Some(dependents.clone()),
+                                num_bindings: 0,
                             },
                         ))?;
 
@@ -2618,6 +2611,7 @@ impl TypeCheckerCtx {
                                 types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
                                 overloads,
                                 dependents: Some(dependents.clone()),
+                                num_bindings: 0,
                             },
                         ))?;
 
@@ -2975,6 +2969,7 @@ impl TypeCheckerCtx {
                                 types,
                                 overloads,
                                 dependents: Some(dependents.clone()),
+                                num_bindings: 0,
                             },
                         ))?;
 

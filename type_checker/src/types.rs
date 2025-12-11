@@ -156,6 +156,19 @@ impl FnType {
                 && self.ret.irreconcilable(&other.ret)
     }
 
+    // See `Type::Bound(_)`
+    pub fn mark_generics_positionally(&mut self, start_index: usize) {
+        let substitutions = self
+            .generics
+            .iter()
+            .enumerate()
+            .map(|(i, v)| (*v, Type::Bound(start_index + i)))
+            .collect();
+
+        self.generics = vec![];
+        self.substitute_vars(&substitutions);
+    }
+
     // TODO test
     pub fn alpha_eq(&self, other: &FnType, bound: &Vec<(TypeVar, TypeVar)>) -> bool {
         if self.generics.len() != other.generics.len() || self.params.len() != other.params.len() {

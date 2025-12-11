@@ -120,7 +120,7 @@ some_fn(len)
 
 
 // ======
-// It's unclear what's happening here, if it's correct, and if I want this, haha
+// It's unclear to me what's happening here, if it's correct, and if I want this, haha
 // ok
 // ======
 
