@@ -103,3 +103,63 @@ let g: fn<t>(t) -> t = |x| { x + 1 }
 // ======
 
 let g: fn<t>([t]) -> t = |x| { x[0] }
+
+
+// ======
+// Explicitly passing `len` as a generic function
+// ok
+// ======
+
+fn my_len<T>(arr: [T]) { 5 }
+
+fn some_fn(f: fn<A>([A]) -> int) {
+    let a = [1, 2, 3, 4];
+    print(f(a))
+}
+
+some_fn(len)
+
+
+// ======
+// It's unclear to me what's happening here, if it's correct, and if I want this, haha
+// ok
+// ======
+
+fn my_len<T>(arr: [T]) { 5 }
+
+fn some_fn(f) {
+    let a = [1, 2, 3, 4];
+    print(f(a))
+}
+
+some_fn(my_len)
+
+
+// ======
+// Explicitly passing `len` as a concrete implementation
+// err
+// ======
+
+fn my_len<T>(arr: [T]) { 5 }
+
+fn some_fn(f: fn([int]) -> int) {
+    let a = [1, 2, 3, 4];
+    print(f(a))
+}
+
+some_fn(my_len)
+
+
+// ======
+// Passing a generic function -- needs to be instantiated
+// ok
+// ======
+
+fn my_len<T>(arr: [T]) { 5 }
+
+fn some_fn(f: fn<T>([T]) -> int) {
+  print(f([1, 2]))
+  print(f([true, false]))
+}
+
+some_fn(my_len)

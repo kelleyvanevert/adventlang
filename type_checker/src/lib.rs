@@ -402,6 +402,7 @@ struct ChooseOverloadConstraint {
                    //  (yes, there's a bit too much duplication of types by now, haha..)
     )>,
     dependents: Option<Vec<usize>>,
+    impossible: Vec<bool>,
 
     // super specific: the num of `Type::Bound(i)` generics that have been used to far
     num_bindings: usize,
@@ -661,6 +662,7 @@ impl TypeCheckerCtx {
         Ok(())
     }
 
+    #[allow(unused)]
     fn debug_info(&mut self) {
         self.debug_disjoint_sets();
     }
@@ -819,7 +821,6 @@ impl TypeCheckerCtx {
                         let overloads = defs
                             .into_iter()
                             .enumerate()
-                            .filter(|(_, (_, f_ty))| f_ty.params.len() == 1)
                             .map(|(i, (def_node_id, f_ty))| {
                                 let fn_ty = self.instantiate_fn_ty(f_ty, false);
 
@@ -848,6 +849,7 @@ impl TypeCheckerCtx {
                                 choice_var,
                                 nodes,
                                 types,
+                                impossible: vec![false; overloads.len()],
                                 overloads,
                                 dependents: Some(dependents.clone()),
                                 num_bindings: 0,
@@ -980,6 +982,10 @@ impl TypeCheckerCtx {
 
         for i in 0..num_overloads {
             // TODO: bail out if already deemed impossible in a previous check
+
+            if choose.impossible[i] {
+                continue;
+            }
 
             // println!(
             //     "  - checking overload {i} (index {}): {:?}",
@@ -1258,26 +1264,14 @@ impl TypeCheckerCtx {
                 Ok(r_key + r_val)
             }
 
-            // TODO don't filter the defs because then the choice var index can get messed up
-            // TODO don't 'keep' marked defs, rather keep a copy of the overloads for future use
-            (
-                Type::NamedFnOverload {
-                    mut defs,
-                    choice_var,
-                },
-                Type::Fn(mut def),
-            )
-            | (
-                Type::Fn(mut def),
-                Type::NamedFnOverload {
-                    mut defs,
-                    choice_var,
-                },
-            ) => {
+            (Type::NamedFnOverload { defs, choice_var }, Type::Fn(mut def))
+            | (Type::Fn(mut def), Type::NamedFnOverload { defs, choice_var }) => {
                 let ng = def.generics.len();
 
-                // remove overloads with different amount of generics
-                defs.retain(|d| d.1.generics.len() == ng);
+                // We note which overloads are not possible. for the reason that they have a different
+                //  amount of generic args, in this way, instead of by just removing them from `defs`,
+                //  because we need the `choice_var` index to stay correct w.r.t. the `defs` list.
+                let impossible = defs.iter().map(|d| d.1.generics.len() != ng).collect_vec();
 
                 def.mark_generics_positionally(num_bindings);
 
@@ -1285,6 +1279,11 @@ impl TypeCheckerCtx {
                     .into_iter()
                     .enumerate()
                     .map(|(i, (def_node_id, mut f_ty))| {
+                        // We keep the original unmarked and generic function type,
+                        //  for when the overload is chosen, so that it can then be
+                        //  correctly assigned in `self.fn_usages`
+                        let orig_f_ty = f_ty.clone();
+
                         f_ty.mark_generics_positionally(num_bindings);
 
                         let FnType {
@@ -1296,7 +1295,7 @@ impl TypeCheckerCtx {
 
                         params.push(*ret);
 
-                        (i, def_node_id, meta, params, f_ty)
+                        (i, def_node_id, meta, params, orig_f_ty)
                     })
                     .collect_vec();
 
@@ -1320,6 +1319,7 @@ impl TypeCheckerCtx {
                         overloads,
                         dependents,
                         num_bindings,
+                        impossible,
                     }),
                 ]))
             }
@@ -2512,6 +2512,7 @@ impl TypeCheckerCtx {
                                 choice_var,
                                 nodes: vec![expr.id(), *id],
                                 types: vec![expr_ty.clone(), res_ty.clone()],
+                                impossible: vec![false; overloads.len()],
                                 overloads,
                                 dependents: Some(dependents.clone()),
                                 num_bindings: 0,
@@ -2611,6 +2612,7 @@ impl TypeCheckerCtx {
                                 choice_var,
                                 nodes: vec![left.id(), right.id(), *id],
                                 types: vec![left_ty.clone(), right_ty.clone(), res_ty.clone()],
+                                impossible: vec![false; overloads.len()],
                                 overloads,
                                 dependents: Some(dependents.clone()),
                                 num_bindings: 0,
@@ -2969,6 +2971,7 @@ impl TypeCheckerCtx {
                                 choice_var,
                                 nodes: node_ids,
                                 types,
+                                impossible: vec![false; overloads.len()],
                                 overloads,
                                 dependents: Some(dependents.clone()),
                                 num_bindings: 0,
@@ -3236,7 +3239,7 @@ impl TypeCheckerCtx {
         }
     }
 
-    #[allow(dead_code)]
+    #[allow(unused)]
     fn debug_disjoint_sets(&mut self) {
         let mut sets: FxHashMap<Type, FxHashSet<Type>> = FxHashMap::default();
         for v in self.all_vars.clone() {
