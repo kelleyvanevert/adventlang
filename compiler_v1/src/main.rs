@@ -1,5 +1,3 @@
-#![feature(box_patterns)]
-
 mod poc;
 mod runtime;
 

@@ -1,5 +1,3 @@
-#![feature(if_let_guard)]
-
 use std::ops::{Add, AddAssign};
 
 use ena::unify::InPlaceUnificationTable;
@@ -2879,49 +2877,6 @@ impl TypeCheckerCtx {
                         ))?;
 
                         return self.assign_extra(*id, ret, certainly_returns);
-                    }
-
-                    // it's an undecided overloaded named fn usage, but we're in luck, because
-                    //  there's only one overload that works due to the number of arguments
-                    Type::NamedFnOverload { defs, choice_var }
-                        if let Some(overload_index) =
-                            find_unique_match(&defs, |(_, f_ty)| f_ty.params.len() == num_args) =>
-                    {
-                        self.overload_choices[choice_var] = Some(overload_index);
-                        let (_def_node_id, f_ty) = defs[overload_index].clone();
-
-                        // self.depends(dependents, def_node_id, false);
-                        self.depends(dependents, f_ty.meta.body_node_id, false);
-
-                        // instantiate if generic
-                        let f_ty = self.instantiate_fn_ty(f_ty, false);
-
-                        self.fn_usages.insert(*id, f_ty.clone());
-
-                        if f_ty.params.len() != args.len() {
-                            return Err(TypeError {
-                                node_id: f.id(),
-                                kind: TypeErrorKind::ArgsMismatch(f_ty.params.len(), args.len()),
-                            });
-                        }
-
-                        for (i, ast::Argument { id, name: _, expr }) in args.into_iter().enumerate()
-                        {
-                            let (expr_ty, cr) =
-                                self.check_expr(env, expr, dependents, f_ty.params[i].clone())?;
-
-                            if cr {
-                                certainly_returns = true;
-                            }
-
-                            self.assign(*id, expr_ty)?;
-                        }
-
-                        return self.assign_extra(
-                            *id,
-                            f_ty.ret.as_ref().clone().into(),
-                            certainly_returns,
-                        );
                     }
 
                     // it's an overloaded named fn, and we don't yet know which one to choose
