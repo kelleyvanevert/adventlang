@@ -537,14 +537,15 @@ impl<'a> LoweringPass<'a> {
 
                 let callee = self.lower_expr(env, fns, f, true);
 
-                println!(
-                    "What is going on here? {:?}",
-                    self.type_checker.get_type(f.id())
-                );
+                // println!(
+                //     "What is going on here? {:?}",
+                //     self.type_checker.get_type(f.id())
+                // );
                 let def = self.type_checker.get_fn_usage(*id);
-                println!("  -> {def:?}");
+                println!("  lowering call of: {def:?}");
 
                 let fn_id = self.get_concrete_fn_id(def.clone());
+                println!("    with ID: {fn_id}");
 
                 Expr::Call {
                     def,

@@ -560,7 +560,7 @@ impl TypeCheckerCtx {
             .values()
             .filter(|f| f.meta.body_node_id == body_node_id)
             .cloned()
-            .chain(refs)
+            // .chain(refs)
             .unique()
             .collect()
     }
