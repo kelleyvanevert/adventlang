@@ -12,14 +12,12 @@ use thiserror::Error;
 use crate::{
     stdlib::add_stdlib_types,
     types::{FnMeta, FnType, Type, TypeVar},
-    util::find_unique_match,
 };
 
 mod stdlib;
 #[cfg(test)]
 mod tests;
 pub mod types;
-mod util;
 
 // TODO:
 // - [ ] named and optional params/args
@@ -132,13 +130,13 @@ impl TypeError {
 
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub enum TypeErrorKind {
-    #[error("types are not equal: {0:?} != {1:?}")]
+    #[error("types are not equal: {0} != {1}")]
     NotEqual(Type, Type),
     #[error("none of the overloads match")]
     NoOverload,
-    #[error("infinite type: {0:?} in {1:?}")]
+    #[error("infinite type: {0} in {1}")]
     InfiniteType(TypeVar, Type),
-    #[error("callee is not a function: {0:?}")]
+    #[error("callee is not a function: {0}")]
     NotCallable(Type),
     #[error("generics don't match up equally")]
     GenericsMismatch,
@@ -148,28 +146,28 @@ pub enum TypeErrorKind {
     BreakOutsideLoop,
     #[error("use of return statement outside function body")]
     ReturnOutsideFn,
-    #[error("named fn shadows local {0} with type {1:?}")]
+    #[error("named fn shadows local {0} with type {1}")]
     NamedFnShadow(String, Type),
-    #[error("cannot index container type: {0:?}")]
+    #[error("cannot index container type: {0}")]
     CannotIndexContainer(Type),
-    #[error("cannot index container of type {container_type:?} with index of type {index_type:?}")]
+    #[error("cannot index container of type {container_type} with index of type {index_type}")]
     CannotIndex {
         container_type: Type,
         index_type: Type,
     },
-    #[error("cannot get member `{member}` of struct type {container_type:?}")]
+    #[error("cannot get member `{member}` of struct type {container_type}")]
     CannotMember {
         container_type: Type,
         member: String,
     },
-    #[error("cannot instantiate function {scheme:?} to {concrete:?}")]
+    #[error("cannot instantiate function {scheme} to {concrete}")]
     CannotInstantiate { scheme: Type, concrete: FnType },
     #[error("invalid tuple index")]
     InvalidTupleIndex,
-    #[error("node did not end up with a concrete type: {0:?}")]
+    #[error("node did not end up with a concrete type: {0}")]
     NotConcrete(Type),
     #[error(
-        "return type does not match up; explicit return type {0:?}; body type: {1:?}; expected type: {2:?}"
+        "return type does not match up; explicit return type {0}; body type: {1}; expected type: {2}"
     )]
     ReturnTypeDoesNotMatch(Type, Type, Type),
     #[error("found a circular dependency: {}", cycle.join("\n"))]
@@ -558,7 +556,7 @@ impl TypeCheckerCtx {
             .values()
             .filter(|f| f.meta.body_node_id == body_node_id)
             .cloned()
-            // .chain(refs)
+            .chain(refs)
             .unique()
             .collect()
     }
@@ -616,7 +614,8 @@ impl TypeCheckerCtx {
             self.types = std::mem::take(&mut self.types)
                 .into_iter()
                 .map(|(id, ty)| {
-                    let ty = self.normalize_ty(ty);
+                    let mut ty = self.normalize_ty(ty);
+                    ty.normalize_var_naming();
                     // ty.substitute(&mut vec![], &mut self.unification_table);
                     (id, ty)
                 })
@@ -625,7 +624,8 @@ impl TypeCheckerCtx {
             self.fn_usages = std::mem::take(&mut self.fn_usages)
                 .into_iter()
                 .map(|(call_id, def)| {
-                    let def = self.normalize_fn_ty(def);
+                    let mut def = self.normalize_fn_ty(def);
+                    def.normalize_var_naming();
                     // def.substitute(&mut vec![], &mut self.unification_table);
                     (call_id, def)
                 })
@@ -634,7 +634,8 @@ impl TypeCheckerCtx {
             self.fn_refs = std::mem::take(&mut self.fn_refs)
                 .into_iter()
                 .map(|ty| {
-                    let ty = self.normalize_ty(ty);
+                    let mut ty = self.normalize_ty(ty);
+                    ty.normalize_var_naming();
                     // def.substitute(&mut vec![], &mut self.unification_table);
                     ty
                 })
@@ -799,9 +800,10 @@ impl TypeCheckerCtx {
                         Ok(ConstraintResult::NeedsMoreInformation)
                     }
                     Type::Fn(fn_type) => {
-                        let fn_ty = self.instantiate_fn_ty(fn_type, false);
+                        // doesn't have to be generic anymore, because I'm using uniform representation
+                        self.fn_usages.insert(*call_node_id, fn_type.clone());
 
-                        self.fn_usages.insert(*call_node_id, fn_ty.clone());
+                        let fn_ty = self.instantiate_fn_ty(fn_type, false);
 
                         self.depends(
                             dependents,
@@ -1036,6 +1038,8 @@ impl TypeCheckerCtx {
             //     "   + insert fn usage {} => {:?}",
             //     choose.node_id, choose.overloads[i].4
             // );
+
+            // this is the original, not concrete, which is ok, because I now use uniform representation
             self.fn_usages
                 .insert(choose.node_id, choose.overloads[i].4.clone());
 
@@ -1636,7 +1640,7 @@ impl TypeCheckerCtx {
     fn assign_extra<E>(&mut self, id: usize, ty: Type, extra: E) -> Result<(Type, E), TypeError> {
         if let Some(prev) = self.types.insert(id, ty.clone()) {
             panic!(
-                "Error: node {id} was already assigned a type: {prev:?}, while being assign a new type: {ty:?}"
+                "Error: node {id} was already assigned a type: {prev}, while being assign a new type: {ty}"
             );
         }
 
@@ -2448,12 +2452,13 @@ impl TypeCheckerCtx {
                         self.depends(dependents, def_node_id, false);
                         self.depends(dependents, f_ty.meta.body_node_id, false);
 
+                        // doesn't need to be concrete any more, because, uniform representation
+                        self.fn_usages.insert(*id, f_ty.clone());
+
                         // instantiate if generic
                         let f_ty = self.instantiate_fn_ty(f_ty, false);
 
                         self.assign(op.id(), Type::Fn(f_ty.clone()))?;
-
-                        self.fn_usages.insert(*id, f_ty.clone());
 
                         if f_ty.params.len() != 1 {
                             return Err(TypeError {
@@ -2542,12 +2547,13 @@ impl TypeCheckerCtx {
                         self.depends(dependents, def_node_id, false);
                         self.depends(dependents, f_ty.meta.body_node_id, false);
 
+                        // doesn't have to be concrete anymore, because, uniform representation
+                        self.fn_usages.insert(*id, f_ty.clone());
+
                         // instantiate if generic
                         let f_ty = self.instantiate_fn_ty(f_ty, false);
 
                         self.assign(op.id(), Type::Fn(f_ty.clone()))?;
-
-                        self.fn_usages.insert(*id, f_ty.clone());
 
                         if f_ty.params.len() != 2 {
                             return Err(TypeError {
@@ -2814,10 +2820,11 @@ impl TypeCheckerCtx {
                             !self.named_fn_bodies.contains(&f_ty.meta.body_node_id),
                         );
 
+                        // doesn't have to be concrete anymore, because, uniform representation
+                        self.fn_usages.insert(*id, f_ty.clone());
+
                         // instantiate if generic
                         let f_ty = self.instantiate_fn_ty(f_ty, false);
-
-                        self.fn_usages.insert(*id, f_ty.clone());
 
                         if f_ty.params.len() != args.len() {
                             return Err(TypeError {
@@ -3215,14 +3222,14 @@ impl TypeCheckerCtx {
                     .map(|ty| {
                         match ty {
                             Type::TypeVar(v) => format!(
-                                "{v:?}{}",
+                                "{v}{}",
                                 if self.rigid_vars.contains(&v) {
                                     "(rigid)"
                                 } else {
                                     ""
                                 }
                             ),
-                            ty => format!("{ty:?}"),
+                            ty => format!("{ty}"),
                         }
                     })
                     .join(", ")

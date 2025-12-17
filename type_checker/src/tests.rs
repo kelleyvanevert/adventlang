@@ -1,5 +1,4 @@
 use crate::{Env, TypeCheckerCtx, TypeErrorKind, print_type_error};
-use fxhash::FxHashMap;
 use parser::{AdventlangParser, ast::SExpPrintJob};
 
 fn run_test_case(
@@ -113,10 +112,10 @@ fn run_test_case(
                         .convert_hint_to_type(&Env::new(), &parser.parse_type(b).unwrap())
                         .unwrap();
 
-                    let a = format!("{a:?}");
-                    let b = format!("{b:?}");
-                    let le = format!("{le:?}");
-                    let ri = format!("{ri:?}");
+                    let a = format!("{a}");
+                    let b = format!("{b}");
+                    let le = format!("{le}");
+                    let ri = format!("{ri}");
 
                     if a == le && b == ri || a == ri && b == le {
                         // all good
@@ -127,8 +126,8 @@ fn run_test_case(
                         );
                         println!("- test case: `{test_file_name}`, line {lineno}");
                         println!("- description: {description}");
-                        println!("- expected: {:?} != {:?}", a, b);
-                        println!("- encountered: {:?} != {:?}", le, ri);
+                        println!("- expected: {} != {}", a, b);
+                        println!("- encountered: {} != {}", le, ri);
                         println!("====================");
                         print_type_error(&parse_result, err);
                         panic!();

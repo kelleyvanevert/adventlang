@@ -205,10 +205,21 @@ impl Env {
     }
 }
 
+/// Because I've now chosen for the "uniform representation" solution of dealing with
+///  higher-order polymorphism, polymorphism in general has become simpler, and
+///  we don't need to generate concrete names for specific types any more.
+pub fn get_concrete_fn_id(def: &FnType) -> String {
+    assert!(
+        def.is_concrete(&vec![]),
+        "lowered fn type must be concrete: {def:?}"
+    );
+
+    format!("{}: {}", def.meta, def)
+}
+
 pub struct LoweringPass<'a> {
     type_checker: &'a type_checker::TypeCheckerCtx,
     next_tmp_id: usize,
-    concrete_fn_id: FxHashMap<FnType, String>,
 }
 
 impl<'a> LoweringPass<'a> {
@@ -216,35 +227,7 @@ impl<'a> LoweringPass<'a> {
         Self {
             type_checker,
             next_tmp_id: 0,
-            concrete_fn_id: Default::default(),
         }
-    }
-
-    fn get_concrete_fn_id(&mut self, def: FnType) -> String {
-        assert!(
-            def.is_concrete(&vec![]),
-            "lowered fn type must be concrete: {def:?}"
-        );
-
-        if let Some(name) = self.concrete_fn_id.get(&def) {
-            return name.clone();
-        }
-
-        let name = if def.meta.stdlib {
-            let name = format!("std/{}: {:?}", def.meta.name.as_ref().unwrap().clone(), def);
-            println!("concrete: {name}");
-            name
-        } else {
-            format!(
-                "{}-{}",
-                def.meta.name.clone().unwrap_or("anonymous".to_string()),
-                self.concrete_fn_id.len()
-            )
-        };
-
-        self.concrete_fn_id.insert(def, name.clone());
-
-        name
     }
 
     fn fresh_tmp_var_name(&mut self) -> String {
@@ -285,8 +268,8 @@ impl<'a> LoweringPass<'a> {
                 .get_stdlib_fn_usages()
                 .into_iter()
                 .map(|def| {
-                    println!("found stdlib usage: {def:?}");
-                    (self.get_concrete_fn_id(def.clone()), def)
+                    println!("found stdlib usage: {}", def);
+                    (get_concrete_fn_id(&def), def)
                 })
                 .collect(),
         }
@@ -343,7 +326,7 @@ impl<'a> LoweringPass<'a> {
         body: &ast::Block,
     ) {
         println!("Defining concrete fn {concrete_usage_def:?}");
-        let id = self.get_concrete_fn_id(concrete_usage_def.clone());
+        let id = get_concrete_fn_id(&concrete_usage_def);
 
         if fns.iter().find(|f| f.fn_id == id).is_some() {
             println!("  -> already defined!");
@@ -475,7 +458,7 @@ impl<'a> LoweringPass<'a> {
                 // println!("  of type: {:?}", ty);
                 match ty {
                     Type::Fn(def) => Expr::FnRef {
-                        fn_id: self.get_concrete_fn_id(def.clone()),
+                        fn_id: get_concrete_fn_id(&def),
                         def,
                     },
                     _ => panic!(
@@ -512,7 +495,7 @@ impl<'a> LoweringPass<'a> {
             }) => {
                 let def = self.type_checker.get_type(op.id()).as_fn_ty();
 
-                let fn_id = self.get_concrete_fn_id(def.clone());
+                let fn_id = get_concrete_fn_id(&def);
 
                 Expr::Call {
                     def: def.clone(),
@@ -537,15 +520,9 @@ impl<'a> LoweringPass<'a> {
 
                 let callee = self.lower_expr(env, fns, f, true);
 
-                // println!(
-                //     "What is going on here? {:?}",
-                //     self.type_checker.get_type(f.id())
-                // );
                 let def = self.type_checker.get_fn_usage(*id);
-                println!("  lowering call of: {def:?}");
 
-                let fn_id = self.get_concrete_fn_id(def.clone());
-                println!("    with ID: {fn_id}");
+                let fn_id = get_concrete_fn_id(&def);
 
                 Expr::Call {
                     def,

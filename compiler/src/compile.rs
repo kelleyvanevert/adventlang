@@ -9,6 +9,7 @@ use thiserror::Error;
 use type_checker::types::{FnType, Type as Ty};
 use type_checker::{TypeCheckerCtx, TypeError};
 
+use crate::lower::get_concrete_fn_id;
 use crate::runtime::Runtime;
 use crate::stdlib_impl::{
     implement_stdlib_len, implement_stdlib_lines, implement_stdlib_plus, implement_stdlib_print,
@@ -263,6 +264,7 @@ impl<'a> JIT<'a> {
                 translator.translate_stmt(stmt, is_last);
             }
 
+            println!("");
             println!("// {}: {:?}", f.fn_id, f.def);
             println!("{}", translator.builder.func.to_string());
 
@@ -520,7 +522,7 @@ impl<'a> FnTranslator<'a> {
             lower::Expr::FnRef { def, fn_id } => {
                 let compiled_fn_id = self.ensure_gets_compiled(fn_id, def.clone()).expect("msg");
 
-                println!("COMPILE fn ref: {def:?}");
+                println!("COMPILE fn ref: {}", get_concrete_fn_id(&def));
 
                 let compiled_fn_ref = self
                     .module

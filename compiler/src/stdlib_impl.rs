@@ -28,21 +28,12 @@ impl Stdlib {
             .runtime_fn("std/print: fn(int) -> nil", runtime.al_print_int)
             .runtime_fn("std/print: fn(str) -> nil", runtime.al_print_str)
             // set operations
-            .runtime_fn(
-                "std/in: fn<:64>(:64, set[:64]) -> bool",
-                runtime.al_push_vec_64,
-            ) // TODO
+            .runtime_fn("std/in: fn<T>(T, set[T]) -> bool", runtime.al_push_vec_64) // TODO
             // list operations
-            .runtime_fn("std/new_list: fn() -> [:64]", runtime.al_create_vec)
-            .runtime_fn(
-                "std/in: fn<:64>(:64, [:64]) -> bool",
-                runtime.al_push_vec_64,
-            ) // TODO
-            .runtime_fn(
-                "std/push: fn<:64>([:64], :64) -> [:64]",
-                runtime.al_push_vec_64,
-            )
-            .runtime_fn("std/len: fn<:64>([:64]) -> int", runtime.al_vec_len)
+            .runtime_fn("std/new_list: fn() -> [T]", runtime.al_create_vec)
+            .runtime_fn("std/in: fn<T>(T, [T]) -> bool", runtime.al_push_vec_64) // TODO
+            .runtime_fn("std/push: fn<T>([T], T) -> [T]", runtime.al_push_vec_64)
+            .runtime_fn("std/len: fn<T>([T]) -> int", runtime.al_vec_len)
             // string operations
             .runtime_fn("std/len: fn(str) -> int", runtime.al_str_len)
             .runtime_fn("std/+: fn(str, str) -> str", runtime.al_str_concat)

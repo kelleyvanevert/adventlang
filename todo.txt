@@ -915,3 +915,46 @@ heap allocated:
     tuples
     map
     set
+
+
+===
+
+fn bla(f: fn<T>([T]) -> int) {
+    print(f([1, 2]))
+    print(f([false, true]))
+    if expensive_calculation() {
+        print(f([[1], [2]]))
+    }
+}
+
+bla(len) // <- what is `len` concretely?
+                - can't be a pointer to a concrete (e.g. T=64bit) implementation,
+                   because `bla` uses multiple
+                    - or, well, it can, if my type system would simply disallow,
+                       by always attaching a width to all generics
+                - might be a closure (in a different case), so can't be just
+                   phantom and then chosen at the call-site
+                - in fact, when the fn is resolved at runtime, e.g. `f = if calc() { f1 } else { f2 }`,
+                   then it shows that `f(...)` can never fully be decided at compile time,
+                   so `len`/`f` must concretely contain something at runtime,
+                   like a f ptr or a vtable ptr
+                - COULD be a pointer to a vtable of sorts
+
+-> I'd actually want to only record actual USAGES, not just references,
+    but then I need to track them better as they get passed around.
+
+    -> Usage tracking is substantially different from type tracking,
+        because it's combinatorial in nature. (A fn usage that takes
+        a generic fn arg as above can become multiple concrete usages.)
+
+
+ (!) This is "higher rank polymorphism" (!)
+
+Three solutions:
+
+    1. VTables: like Rust, using traits (in Rust plain gen args like this are unsupported)
+    2. Full monomorphization: expand to multiple args/implementations
+    3. Uniform representation: trivialize by making every type 64 bits wide (like ML/Haskell)
+
+..I think I'll go for solution 3 actually, to keep it "fun and doable" for now,
+ although it does feel like a bit of a concession...

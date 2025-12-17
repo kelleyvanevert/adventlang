@@ -1,19 +1,18 @@
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 
 use ena::unify::{EqUnifyValue, InPlaceUnificationTable, UnifyKey};
 use fxhash::FxHashMap;
 
-#[derive(Clone, PartialEq, Eq, Hash, Copy)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Copy)]
 pub struct TypeVar(pub u32);
 
-impl Debug for TypeVar {
+impl Display for TypeVar {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "t{}", self.0)?;
-        Ok(())
+        write!(f, "T{}", self.0)
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Type {
     Nil,
     Bool,
@@ -95,7 +94,26 @@ impl FnMeta {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+impl Display for FnMeta {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.stdlib {
+            write!(
+                f,
+                "std/{}",
+                self.name.as_ref().expect("stdlib fn must have name")
+            )
+        } else {
+            write!(
+                f,
+                "{}-{}",
+                self.body_node_id,
+                self.name.as_deref().unwrap_or("anon")
+            )
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct FnType {
     pub meta: FnMeta,
     pub generics: Vec<TypeVar>,
@@ -103,7 +121,7 @@ pub struct FnType {
     pub ret: Box<Type>,
 }
 
-impl Debug for FnType {
+impl Display for FnType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "fn")?;
         if self.generics.len() > 0 {
@@ -114,7 +132,7 @@ impl Debug for FnType {
                     write!(f, ", ")?;
                 }
                 first = false;
-                write!(f, "{v:?}")?;
+                write!(f, "{v}")?;
             }
             write!(f, ">")?;
         }
@@ -126,10 +144,10 @@ impl Debug for FnType {
                     write!(f, ", ")?;
                 }
                 first = false;
-                write!(f, "{p:?}")?;
+                write!(f, "{p}")?;
             }
         }
-        write!(f, ") -> {:?}", self.ret.as_ref())?;
+        write!(f, ") -> {}", self.ret.as_ref())?;
         Ok(())
     }
 }
@@ -145,6 +163,22 @@ fn equal_bound_var(bound: &Vec<(TypeVar, TypeVar)>, x: TypeVar, y: TypeVar, i: u
 }
 
 impl FnType {
+    pub fn normalize_var_naming(&mut self) {
+        let mut subst = FxHashMap::default();
+        for (i, g) in self.generics.iter_mut().enumerate() {
+            subst.insert(*g, Type::TypeVar(TypeVar(i as u32)));
+            *g = TypeVar(i as u32);
+        }
+
+        self.substitute_vars(&subst);
+
+        for param in &mut self.params {
+            param.normalize_var_naming();
+        }
+
+        self.ret.normalize_var_naming();
+    }
+
     pub fn is_concrete(&self, bound: &Vec<TypeVar>) -> bool {
         let bound = vec![bound.clone(), self.generics.clone()].concat();
         self.params.iter().all(|p| p.is_concrete(&bound)) && self.ret.is_concrete(&bound)
@@ -222,6 +256,51 @@ impl FnType {
 }
 
 impl Type {
+    pub fn normalize_var_naming(&mut self) {
+        match self {
+            Type::Never => {}
+            Type::Bool
+            | Type::Int
+            | Type::Float
+            | Type::Regex
+            | Type::Str
+            | Type::Nil
+            | Type::Bound(_) => {}
+            Type::TypeVar(_) => {}
+            Type::Fn(def) => {
+                def.normalize_var_naming();
+            }
+            Type::NamedFnOverload { defs, .. } => {
+                for (_, def) in defs {
+                    def.normalize_var_naming();
+                }
+            }
+            Type::List(element_ty) => {
+                element_ty.normalize_var_naming();
+            }
+            Type::Tuple(elements) => {
+                for el in elements {
+                    el.normalize_var_naming();
+                }
+            }
+            Type::Struct { fields } => {
+                for (_, t) in fields {
+                    t.normalize_var_naming();
+                }
+            }
+            Type::Set { key } => {
+                key.normalize_var_naming();
+            }
+            Type::Map { key, val } => {
+                key.normalize_var_naming();
+                val.normalize_var_naming();
+            }
+            Type::Nullable { child } => {
+                child.normalize_var_naming();
+            }
+        }
+    }
+
     pub fn nullable(self) -> Self {
         match self {
             Type::Nullable { child } => Type::Nullable { child },
@@ -232,7 +311,7 @@ impl Type {
     pub fn as_fn_ty(self) -> FnType {
         match self {
             Type::Fn(fn_ty) => fn_ty,
-            ty => panic!("not a fn ty: {:?}", ty),
+            ty => panic!("not a fn ty: {}", ty),
         }
     }
 
@@ -514,7 +593,7 @@ impl Type {
     }
 }
 
-impl Debug for Type {
+impl Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Type::Never => write!(f, "!"),
@@ -524,24 +603,24 @@ impl Debug for Type {
             Type::Int => write!(f, "int"),
             Type::Float => write!(f, "float"),
             Type::Regex => write!(f, "regex"),
-            Type::TypeVar(v) => write!(f, "{v:?}"),
-            Type::Fn(def) => write!(f, "{def:?}"),
+            Type::TypeVar(v) => write!(f, "{v}"),
+            Type::Fn(def) => write!(f, "{def}"),
             Type::NamedFnOverload { defs, .. } => {
                 write!(f, "select<{{ ")?;
-                for def in defs {
-                    write!(f, "{def:?}; ")?;
+                for (i, def) in defs {
+                    write!(f, "({i}, {def}); ")?;
                 }
                 write!(f, "}}>")?;
                 Ok(())
             }
-            Type::List(element_ty) => write!(f, "[{element_ty:?}]"),
+            Type::List(element_ty) => write!(f, "[{element_ty}]"),
             Type::Tuple(elements) => {
                 write!(f, "(")?;
                 for (i, el) in elements.into_iter().enumerate() {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "{el:?}")?;
+                    write!(f, "{el}")?;
                 }
                 if elements.len() == 1 {
                     write!(f, ",")?;
@@ -554,13 +633,13 @@ impl Debug for Type {
                     if i > 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "{name}: {t:?}")?;
+                    write!(f, "{name}: {t}")?;
                 }
                 write!(f, " }}")
             }
-            Type::Set { key } => write!(f, "set[{key:?}]"),
-            Type::Map { key, val } => write!(f, "map[{key:?}, {val:?}]"),
-            Type::Nullable { child } => write!(f, "?{child:?}"),
+            Type::Set { key } => write!(f, "set[{key}]"),
+            Type::Map { key, val } => write!(f, "map[{key}, {val}]"),
+            Type::Nullable { child } => write!(f, "?{child}"),
             Type::Bound(index) => write!(f, "#{index}"),
         }
     }
