@@ -118,6 +118,8 @@ I'm a bit ashamed how much effort this took, given that I literally did my maste
 
 - Google Gemini is actually quite good at prividing help 😅 In research mode, the stuff it says is quite useful and well thought through.
 
+- **Higher order polymorphism is quite a bit trickier.** I just thought I'd monomophize, stamp out implementations for generic functions (parametrically polymorphic functions), and be done with it. But then I found out that it gets substantially harder when dealing with generic arguments, like the argument of the function `fn(fn<T>([T]) -> int)`, because in that case it's not yet clear which implementation to pass. There's various ways out of this, and different languages use different techniques. Rust disallows it and forces you to confront it with a vtable dynamic dispatch, using traits. Haskell etc. just use uniform representation, so polymorphism is trivial anyway. And then you could also do a full flow analysis in the type checking phase and figure out all the possible uses, or you could do something clever by stamping out all implementation, for a fixed number of type widths or something..
+
 ## Issues encountered while creating the Tree-sitter parser
 
 ### `postfix_call_expr` precedence issue
