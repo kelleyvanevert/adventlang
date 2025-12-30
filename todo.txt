@@ -958,3 +958,30 @@ Three solutions:
 
 ..I think I'll go for solution 3 actually, to keep it "fun and doable" for now,
  although it does feel like a bit of a concession...
+
+
+===
+
+What about I do nr 1, but just postpone it a bit?
+It would be a bit sad to just "use Cranelift as an assembler", as Gemini said, by making everything 64 bits, and doing all the extra heap lookups every time :P
+I could:
+- go ahead and create a normal statically compiled language with different type sizes,
+- and then, maybe later, add vtable higher order polymorphism.
+
+
+TYPE                            REPRESENTATION
+---                             ---
+Nil                               8
+Bool                              8
+Str                             ptr
+Int                              64
+Float                            64
+Regex                           ptr
+Fn(FnType)                     (ptr, ptr)
+List(el)                        ptr
+Tuple(els)                     (...types of els...)
+Struct { fields }               ptr
+Map { key, val }                ptr
+Set { key }                     ptr
+Nullable { child }         ??   I64 (NULL or ptr to el)   --- or ---   I128 (null flag + child)
+Never                           INVALID
